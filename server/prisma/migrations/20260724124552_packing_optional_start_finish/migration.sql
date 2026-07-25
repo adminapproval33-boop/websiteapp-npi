@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "packing_logs" ALTER COLUMN "start" DROP NOT NULL,
+ALTER COLUMN "finish" DROP NOT NULL;

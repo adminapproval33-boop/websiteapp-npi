@@ -1,0 +1,474 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../../api/client";
+import DataTable from "../../components/DataTable";
+import Modal from "../../components/Modal";
+import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
+import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
+
+interface ProductionOrderRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  process: string;
+  start: string | null;
+  finish: string | null;
+  remark: string | null;
+  leadTimeProses: number;
+  stages: { name: string; done: boolean }[];
+  progressPercent: number;
+}
+
+interface QcParamDetail {
+  no: number;
+  parameter: string;
+  standard: string | null;
+  result: string | null;
+  start: string | null;
+  finish: string | null;
+}
+
+interface QcCheckDetail {
+  checkId: string;
+  order: string;
+  parameters: QcParamDetail[];
+}
+
+interface StageLeadTime {
+  process: string;
+  start: string | null;
+  finish: string | null;
+  leadTimeHariKerja: number | null;
+}
+
+interface ProcessRemark {
+  process: string;
+  remark: string | null;
+  timestamp: string;
+}
+
+/**
+ * Satu sumber warna dipakai BARENG oleh kolom "Proses" (badge) dan "Proses
+ * Bar" (gradasi) supaya konsisten -- Queue & Done bukan tahap kerja (lihat
+ * STAGE_SEQUENCE), tapi tetap py warna sendiri sbg titik awal/akhir gradasi.
+ */
+const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
+  Queue: { bg: "#C0C0C0", fg: "#000000" },
+  Premix: { bg: "#00FFFF", fg: "#000000" },
+  Milling: { bg: "#008080", fg: "#ffffff" },
+  Aftermix: { bg: "#0000FF", fg: "#ffffff" },
+  "Colour Matching": { bg: "#000080", fg: "#ffffff" },
+  QC: { bg: "#FFFF00", fg: "#000000" },
+  Approval: { bg: "#808000", fg: "#ffffff" },
+  Packing: { bg: "#00FF00", fg: "#000000" },
+  Done: { bg: "#008000", fg: "#ffffff" },
+};
+
+/** Urutan tahap kerja tetap (7 tahap, sama dgn yg dihitung backend utk Proses Bar). */
+const STAGE_SEQUENCE = ["Premix", "Milling", "Aftermix", "Colour Matching", "QC", "Approval", "Packing"] as const;
+
+/** Singkatan chip di kolom Proses Bar -- supaya baris gak melebar ke bawah. Nama
+ * lengkapnya tetap muncul lewat tooltip (title) saat di-hover. */
+const STAGE_ABBR: Record<string, string> = {
+  Queue: "QU",
+  Premix: "PM",
+  Milling: "MI",
+  Aftermix: "AF",
+  "Colour Matching": "CM",
+  QC: "QC",
+  Approval: "AP",
+  Packing: "PC",
+  Done: "DN",
+};
+
+/** Label Proses tahap Approval (lihat approvalProcessLabel di
+ * dashboard.routes.ts) -- beberapa di antaranya DIAWALI "QC" (mis. "QC - AP")
+ * krn tahap paling awal Approval namanya masih menyebut QC, tapi ini BUKAN
+ * hasil Input Check Results -- jadi harus dikecualikan dari deteksi "isQc"
+ * (warna & popup Item Check) di bawah, supaya tidak ketuker sama Proses QC asli. */
+const APPROVAL_STAGE_LABELS = new Set(["QC - AP", "Prep - AP", "AP - Tech", "AP - SubmTech", "AP - Cust", "AP - OK"]);
+
+/** Label Proses tahap granular Packing (lihat packingProcessLabel di
+ * dashboard.routes.ts) -- direvisi 2026-07-24: tahap Start & Finish sekarang
+ * labelnya persis "Packing"/"Done" (cocok langsung ke key STAGE_COLORS yg
+ * sama lewat fallback di bawah, gak perlu dipetakan khusus di sini). Cuma
+ * tahap Form Received ("QU - PC") yg perlu dipetakan manual krn teksnya gak
+ * cocok ke key STAGE_COLORS manapun -- tetap dipetakan ke warna Packing biar
+ * konsisten sama tahap Start/Finish. */
+const PACKING_STAGE_LABELS = new Set(["QU - PC"]);
+
+/** Label Proses di kolom "Proses" formatnya bervariasi (mis. "Oke Colour
+ * Matching", "QC : Visco : Pass") -- dicocokkan ke salah satu warna di
+ * STAGE_COLORS lewat prefix/substring, bukan exact match. */
+function getProcessColor(process: string): { bg: string; fg: string } {
+  if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
+  if (PACKING_STAGE_LABELS.has(process)) return STAGE_COLORS.Packing;
+  if (process.startsWith("QC")) return STAGE_COLORS.QC;
+  if (process.includes("Colour Matching")) return STAGE_COLORS["Colour Matching"];
+  return STAGE_COLORS[process] ?? { bg: "#e2e8f0", fg: "#1e293b" };
+}
+
+function ProcessBadge({ process, onClick }: { process: string; onClick?: () => void }) {
+  const isQc = process.startsWith("QC") && !APPROVAL_STAGE_LABELS.has(process);
+  const colors = getProcessColor(process);
+  return (
+    <span
+      onClick={isQc ? onClick : undefined}
+      title={isQc ? "Klik utk lihat detail Item Check, Start, Finish, Verdict" : undefined}
+      style={{
+        display: "inline-block",
+        padding: "2px 10px",
+        borderRadius: 999,
+        fontSize: "0.75rem",
+        fontWeight: 700,
+        whiteSpace: "nowrap",
+        background: colors.bg,
+        color: colors.fg,
+        cursor: isQc ? "pointer" : "default",
+        textDecoration: isQc ? "underline" : "none",
+      }}
+    >
+      {process}
+    </span>
+  );
+}
+
+/**
+ * Warna isian Proses Bar: gradasi BERURUTAN lewat warna tiap tahap yang
+ * SUDAH dilewati (urutan tetap STAGE_SEQUENCE), mis. kalau baru Premix+Milling
+ * -> "00FFFF, gradasi, lalu 008080". Kalau cuma 1 tahap terlewati, warnanya
+ * solid (gak ada gradasi krn cuma 1 titik). Kalau full 7/7 (100%), warna
+ * "Done" (008000) ditambahkan sbg titik akhir sbg penanda benar-benar selesai.
+ */
+function buildFillBackground(stages: { name: string; done: boolean }[], percent: number): string {
+  const doneColors = STAGE_SEQUENCE.filter((name) => stages.find((s) => s.name === name)?.done).map(
+    (name) => STAGE_COLORS[name].bg
+  );
+  if (percent >= 100) doneColors.push(STAGE_COLORS.Done.bg);
+  if (doneColors.length === 0) return STAGE_COLORS.Queue.bg;
+  if (doneColors.length === 1) return doneColors[0];
+  return `linear-gradient(to right, ${doneColors.join(", ")})`;
+}
+
+/**
+ * Kolom "Proses Bar": baris atas = progress bar gradasi (lihat
+ * buildFillBackground) + persentase (dibuat lebih besar/lebar), baris bawah =
+ * label singkatan (QU/PM/MI/dst). `stages` dari backend SUDAH dibatasi hanya
+ * tahap yg relevan utk Material Number Order ini (lintas Order/Batch manapun
+ * -- lihat computeStages di dashboard.routes.ts), jadi SEMUA entri di sini
+ * ditampilkan labelnya -- yang "done" (pernah diinput Order ini sendiri)
+ * berwarna, yang belum tetap tampil abu-abu (supaya tim MRP tahu keseluruhan
+ * rangkaian proses Material ini, bukan cuma yg sudah dikerjakan Order ybs).
+ * Line-height ke-2 baris ini SENGAJA dipepetkan (lineHeight 1, tanpa padding
+ * vertikal di chip) supaya tinggi selnya tetap sama seperti sebelum dipecah
+ * jadi 2 baris.
+ */
+function ProgressBarCell({ stages, percent }: { stages: { name: string; done: boolean }[]; percent: number }) {
+  const allStages = [{ name: "Queue", done: true }, ...stages];
+
+  return (
+    <div style={{ minWidth: 260, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ position: "relative", width: 80, flexShrink: 0, height: 14, borderRadius: 999, background: STAGE_COLORS.Queue.bg, overflow: "hidden" }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: `${percent}%`,
+              background: buildFillBackground(stages, percent),
+              transition: "width 0.3s ease",
+            }}
+          />
+        </div>
+        <span style={{ fontSize: "0.85rem", fontWeight: 800, minWidth: 36, flexShrink: 0 }}>{percent}%</span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 3, lineHeight: 1 }}>
+        {allStages.map((s) => (
+          <StageChip key={s.name} label={s.name} done={s.done} colors={STAGE_COLORS[s.name] ?? { bg: "#e2e8f0", fg: "#1e293b" }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StageChip({ label, done, colors }: { label: string; done: boolean; colors: { bg: string; fg: string } }) {
+  return (
+    <span
+      title={label}
+      style={{
+        display: "inline-block",
+        flexShrink: 0,
+        padding: "1px 4px",
+        borderRadius: 999,
+        fontSize: "0.55rem",
+        fontWeight: 700,
+        lineHeight: 1,
+        background: done ? colors.bg : "#e2e8f0",
+        color: done ? colors.fg : "#94a3b8",
+      }}
+    >
+      {STAGE_ABBR[label] ?? label}
+    </span>
+  );
+}
+
+export default function ProductionOrderDashboardPage() {
+  const [search, setSearch] = useState("");
+  const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
+  const [leadTimeDetailOrder, setLeadTimeDetailOrder] = useState<string | null>(null);
+  const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
+
+  const rowsQuery = useQuery({
+    queryKey: ["dashboard-production-orders", search],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: ProductionOrderRow[] }>(`/dashboard/production-orders?search=${encodeURIComponent(search)}`)
+        .then((r) => r.data),
+  });
+
+  const qcDetailQuery = useQuery({
+    queryKey: ["dashboard-qc-detail", qcDetailOrder],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: QcCheckDetail | null }>(`/check-results/by-order/${encodeURIComponent(qcDetailOrder!)}`)
+        .then((r) => r.data),
+    enabled: qcDetailOrder != null,
+  });
+
+  const leadTimeDetailQuery = useQuery({
+    queryKey: ["dashboard-lead-time-detail", leadTimeDetailOrder],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: StageLeadTime[] }>(
+          `/dashboard/production-orders/${encodeURIComponent(leadTimeDetailOrder!)}/stage-lead-times`
+        )
+        .then((r) => r.data),
+    enabled: leadTimeDetailOrder != null,
+  });
+
+  const remarkDetailQuery = useQuery({
+    queryKey: ["dashboard-remark-detail", remarkDetailOrder],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: ProcessRemark[] }>(
+          `/dashboard/production-orders/${encodeURIComponent(remarkDetailOrder!)}/remarks`
+        )
+        .then((r) => r.data),
+    enabled: remarkDetailOrder != null,
+  });
+
+  return (
+    <div className="panel">
+      <div className="panel-header">Production Order Monitoring ({rowsQuery.data?.length ?? 0} ditampilkan)</div>
+      <div className="panel-body">
+        <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+          Status Order terkini yang sudah diinput di Premix, Aftermix, Milling, Colour Matching, dan Packing --
+          acuannya nomor Order. Setiap Order hanya ditampilkan 1 baris, yaitu hasil inputan PALING TERAKHIR
+          (proses apa pun) -- bukan seluruh riwayatnya. Material Number, Material Description, dan Batch selalu
+          diambil langsung dari Master Data Cooispi terbaru (bukan snapshot lama), jadi otomatis ikut ter-update
+          kalau data di sana diubah. <strong>Lead Time Proses</strong> = jumlah hari kerja (Sabtu/Minggu tidak
+          dihitung) sejak Order ini pertama kali muncul di sistem (modul manapun) sampai hari ini.{" "}
+          <strong>Proses Bar</strong> = progres Order ini dari rangkaian tahap Material Number-nya (Premix, Milling,
+          Aftermix, Colour Matching, QC, Approval, Packing -- hanya tahap yang PERNAH ada histori Material Number ini
+          di Order manapun yang dicantumkan labelnya, karena tiap Material Number bisa punya rangkaian proses yang
+          berbeda-beda), warnanya sama persis dengan warna badge di kolom Proses. Label singkatan (QU/PM/MI/dst) yang
+          berwarna berarti tahap itu sudah diinput utk Order ini sendiri; yang abu-abu berarti tahap itu ada di
+          riwayat Material Number ini (dari Order lain) tapi belum diinput utk Order ini. Arahkan kursor ke label
+          utk lihat nama lengkapnya.
+        </p>
+        <input
+          placeholder="Cari nomor Order..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+        />
+        <DataTable
+          rowKey={(r: ProductionOrderRow) => `${r.order}-${r.process}-${r.start}`}
+          exportFileName="dashboard-production-orders"
+          storageKey="dashboard-production-orders"
+          rows={rowsQuery.data ?? []}
+          columns={[
+            { key: "order", label: "Order", render: (r) => r.order },
+            { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+            { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+            { key: "batch", label: "Batch", render: (r) => r.batch },
+            { key: "orderQty", label: "Qty/Liter", render: (r) => r.orderQty },
+            {
+              key: "progressBar",
+              label: "Proses Bar",
+              defaultWidth: 260,
+              render: (r) => <ProgressBarCell stages={r.stages} percent={r.progressPercent} />,
+              csvValue: (r) => `${r.progressPercent}% (${r.stages.filter((s) => s.done).map((s) => s.name).join(", ")})`,
+            },
+            {
+              key: "process",
+              label: "Proses",
+              render: (r) => <ProcessBadge process={r.process} onClick={() => setQcDetailOrder(r.order)} />,
+              csvValue: (r) => r.process,
+            },
+            {
+              key: "start",
+              label: "Start Proses",
+              render: (r) => formatDateTime(r.start),
+              csvValue: (r) => toExcelDateTimeString(r.start),
+            },
+            {
+              key: "finish",
+              label: "Finish Proses",
+              render: (r) => formatDateTime(r.finish),
+              csvValue: (r) => toExcelDateTimeString(r.finish),
+            },
+            {
+              key: "remark",
+              label: "Remark",
+              render: (r) => (
+                <span
+                  onClick={() => setRemarkDetailOrder(r.order)}
+                  title="Klik utk lihat Remark tiap proses (Premix/Aftermix/Milling/dst tidak lagi saling mewarisi)"
+                  style={{ cursor: "pointer", textDecoration: "underline" }}
+                >
+                  {r.remark || "-"}
+                </span>
+              ),
+              csvValue: (r) => r.remark,
+            },
+            {
+              key: "leadTimeProses",
+              label: "Lead Time Proses",
+              render: (r) => (
+                <span
+                  onClick={() => setLeadTimeDetailOrder(r.order)}
+                  title="Klik utk lihat lama proses di tiap tahapan"
+                  style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
+                >
+                  {r.leadTimeProses} hari kerja
+                </span>
+              ),
+              csvValue: (r) => r.leadTimeProses,
+            },
+          ]}
+        />
+      </div>
+
+      {qcDetailOrder && (
+        <Modal title={`Detail QC — Order ${qcDetailOrder}`} onClose={() => setQcDetailOrder(null)} width={720}>
+          {qcDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
+          {!qcDetailQuery.isLoading && !qcDetailQuery.data && (
+            <p style={{ color: "var(--text-muted)" }}>Belum ada data Check Results untuk Order ini.</p>
+          )}
+          {qcDetailQuery.data && (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Item Check</th>
+                    <th>Spec</th>
+                    <th>Result</th>
+                    <th>Start</th>
+                    <th>Finish</th>
+                    <th>Verdict</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {qcDetailQuery.data.parameters.map((p) => {
+                    const verdict = evaluateSpec(p.standard, p.result);
+                    return (
+                      <tr key={p.no}>
+                        <td>{p.parameter}</td>
+                        <td>{p.standard || "-"}</td>
+                        <td>{p.result || "-"}</td>
+                        <td>{formatDateTime(p.start)}</td>
+                        <td>{formatDateTime(p.finish)}</td>
+                        <td style={{ background: SPEC_VERDICT_COLOR[verdict] }}>{SPEC_VERDICT_LABEL[verdict]}</td>
+                      </tr>
+                    );
+                  })}
+                  {qcDetailQuery.data.parameters.length === 0 && (
+                    <tr>
+                      <td colSpan={6}>Belum ada Item Check.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {leadTimeDetailOrder && (
+        <Modal title={`Lead Time per Proses — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
+          {leadTimeDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
+          {!leadTimeDetailQuery.isLoading && (leadTimeDetailQuery.data?.length ?? 0) === 0 && (
+            <p style={{ color: "var(--text-muted)" }}>Belum ada tahapan proses yang punya data Start untuk Order ini.</p>
+          )}
+          {leadTimeDetailQuery.data && leadTimeDetailQuery.data.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Proses</th>
+                    <th>Start</th>
+                    <th>Finish</th>
+                    <th>Lead Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leadTimeDetailQuery.data.map((s) => (
+                    <tr key={s.process}>
+                      <td>{s.process}</td>
+                      <td>{formatDateTime(s.start)}</td>
+                      <td>{s.finish ? formatDateTime(s.finish) : "Belum selesai"}</td>
+                      <td>{s.leadTimeHariKerja} hari kerja</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            Lead Time tiap tahapan dihitung hari kerja (Sabtu/Minggu tidak dihitung), sama seperti Lead Time Proses
+            total. Tahapan yang "Belum selesai" dihitung sampai hari ini.
+          </p>
+        </Modal>
+      )}
+
+      {remarkDetailOrder && (
+        <Modal title={`Remark per Proses — Order ${remarkDetailOrder}`} onClose={() => setRemarkDetailOrder(null)} width={640}>
+          {remarkDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
+          {!remarkDetailQuery.isLoading && (remarkDetailQuery.data?.length ?? 0) === 0 && (
+            <p style={{ color: "var(--text-muted)" }}>Belum ada Remark yang diinput di proses manapun untuk Order ini.</p>
+          )}
+          {remarkDetailQuery.data && remarkDetailQuery.data.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Proses</th>
+                    <th>Remark</th>
+                    <th>Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {remarkDetailQuery.data.map((r) => (
+                    <tr key={r.process}>
+                      <td>{r.process}</td>
+                      <td>{r.remark || "-"}</td>
+                      <td>{formatDateTime(r.timestamp)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            Sejak Remark tiap proses dipisah (tidak lagi saling mewarisi antar modul), tiap tahap punya Remark
+            sendiri-sendiri -- popup ini menampilkan Remark dari SEMUA tahap yang pernah diinput utk Order ini
+            sekaligus, bukan cuma Remark dari input paling terakhir (yang tampil di kolom Remark tabel).
+          </p>
+        </Modal>
+      )}
+    </div>
+  );
+}

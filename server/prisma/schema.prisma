@@ -1,0 +1,431 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccessLevel {
+  INPUT
+  VIEW
+  FULL_ACCESS
+}
+
+enum ProductionSection {
+  PREMIX
+  AFTERMIX
+}
+
+/// Pengguna aplikasi. Menggantikan Sheet "USER". Tidak ada lagi akun
+/// developer khusus di luar tabel ini (beda dari versi Apps Script) --
+/// admin awal dibuat lewat seed script dan login lewat jalur yang sama
+/// seperti user lain.
+model User {
+  nik               String   @id
+  name              String
+  department        String
+  passwordHash      String
+  access            AccessLevel @default(INPUT)
+  mustResetPassword Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  sessions          Session[]
+
+  @@map("users")
+}
+
+/// Sesi login, menggantikan CacheService token di versi lama.
+/// Sliding expiration ditegakkan di middleware (bukan di DB).
+model Session {
+  token     String   @id @default(uuid())
+  nik       String
+  user      User     @relation(fields: [nik], references: [nik], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([nik])
+  @@map("sessions")
+}
+
+/// Referensi Order/PO (dulu dibaca dari Spreadsheet eksternal SAP-COOISPI).
+/// Diisi lewat halaman Import CSV/Excel (Full Access).
+model MasterOrder {
+  id                  Int      @id @default(autoincrement())
+  order               String   @unique
+  batch               String?
+  materialNumber      String?
+  materialDescription String?
+  orderQty            String?
+  plant               String?
+  updatedAt           DateTime @updatedAt
+
+  @@map("master_orders")
+}
+
+/// Daftar Code Tanki (dulu dibaca dari Spreadsheet eksternal).
+/// Diisi lewat halaman Import CSV/Excel (Full Access), format: TA/TB,
+/// Tank Capacity, New Number, Code Tanki, Location / Plant, Type Tanki.
+model MasterTank {
+  id            Int      @id @default(autoincrement())
+  code          String   @unique
+  taTb          String?
+  tankCapacity  String?
+  newNumber     String?
+  locationPlant String?
+  typeTanki     String?
+  updatedAt     DateTime @updatedAt
+
+  @@map("master_tanks")
+}
+
+/// Data karyawan (menu Master Data > Employee Data). Diisi lewat import
+/// CSV/Excel (Full Access), format export HR: Employee ID, Full Name,
+/// Organization, Job Position, Departemen.
+model MasterEmployee {
+  id           Int      @id @default(autoincrement())
+  employeeId   String   @unique
+  fullName     String
+  organization String?
+  jobPosition  String?
+  departemen   String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("master_employees")
+}
+
+/// Planning Schedule > Milling.
+model MillingLog {
+  id                  Int      @id @default(autoincrement())
+  timestamp           DateTime @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String
+  orderQty            String?
+  plant               String?
+  iuPlant             String
+  codeTanki1          String?
+  codeTanki2          String?
+  codeMesin           String?
+  formReceived        DateTime?
+  start               DateTime
+  finish              DateTime
+  spvProduksi         String
+  leader              String?
+  /// array nama anggota, mis. ["Budi","Sari"]
+  members             Json?
+  /// 10 slot bacaan tetap, disimpan sbg array (boleh string kosong utk slot yg belum diisi)
+  fineness            Json?
+  visco               Json?
+  suhu                Json?
+  remark              String?
+  inputBy             String
+  attachments         MillingAttachment[]
+
+  @@index([order])
+  @@map("milling_logs")
+}
+
+model MillingAttachment {
+  id         Int         @id @default(autoincrement())
+  order      String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime    @default(now())
+  logId      Int?
+  log        MillingLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([order])
+  @@map("milling_attachments")
+}
+
+/// Planning Schedule > Premix & Aftermix (1 tabel, dibedakan kolom `section`).
+model PremixAftermixLog {
+  id                  Int               @id @default(autoincrement())
+  section             ProductionSection
+  timestamp           DateTime          @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  spvProduksi         String
+  /// array nama anggota, mis. ["Budi","Sari"]
+  members             Json?
+  /// Order Qty dibagi jumlah member (otomatis)
+  qtyPerMan           String?
+  start               DateTime
+  leader              String?
+  finish              DateTime
+  codeTanki           String
+  formReceived        DateTime?
+  remark              String?
+  inputBy             String
+  attachments         PremixAftermixAttachment[]
+
+  @@index([order])
+  @@index([section])
+  @@map("premix_aftermix_logs")
+}
+
+model PremixAftermixAttachment {
+  id         Int                @id @default(autoincrement())
+  section    ProductionSection
+  order      String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime           @default(now())
+  logId      Int?
+  log        PremixAftermixLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([order])
+  @@map("premix_aftermix_attachments")
+}
+
+/// Planning Schedule > Colour Matching.
+model ColourMatchingLog {
+  id                  Int      @id @default(autoincrement())
+  timestamp           DateTime @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  codeTanki           String
+  typesOfProducts     String?
+  baseColor           String?
+  /// 1 No Order (form ini) dibagi jumlah member (otomatis) -- bukan dari Order Qty
+  formPerMan          String?
+  formReceived        DateTime?
+  start               DateTime?
+  finish              DateTime?
+  spvName             String
+  leaderName          String?
+  /// array nama anggota, mis. ["Budi","Sari"] (gaya Premix/Aftermix)
+  members             Json?
+  remark              String?
+  inputBy             String
+  attachments         ColourMatchingAttachment[]
+
+  @@index([order])
+  @@map("colour_matching_logs")
+}
+
+model ColourMatchingAttachment {
+  id         Int                @id @default(autoincrement())
+  order      String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime           @default(now())
+  logId      Int?
+  log        ColourMatchingLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([order])
+  @@map("colour_matching_attachments")
+}
+
+/// Planning Schedule > Packing.
+model PackingLog {
+  id                  Int      @id @default(autoincrement())
+  timestamp           DateTime @default(now())
+  spvNik              String?
+  spvName             String
+  leaderNik           String?
+  leaderName          String?
+  nik                 String?
+  employeeName        String?
+  /// array nama anggota, mis. ["Budi","Sari"]
+  members             Json?
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  /// Order Qty dibagi jumlah member (otomatis)
+  qtyPerMan           String?
+  /// = Order Qty (mirror, bukan dibagi) -- ditampilkan sbg "Volume" di form
+  totalQty            String?
+  codeTanki           String
+  formReceived        DateTime?
+  start               DateTime?
+  finish              DateTime?
+  remark              String?
+  inputBy             String
+  attachments         PackingAttachment[]
+
+  @@index([order])
+  @@map("packing_logs")
+}
+
+model PackingAttachment {
+  id         Int         @id @default(autoincrement())
+  order      String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime    @default(now())
+  logId      Int?
+  log        PackingLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([order])
+  @@map("packing_attachments")
+}
+
+/// Quality Control > Creating Product Spek. specId = group key (dulu "Spec ID").
+model ProductSpec {
+  specId              String                  @id @default(uuid())
+  timestamp           DateTime                @default(now())
+  materialNumber      String
+  materialDescription String
+  information         String?
+  inputBy             String
+  parameters          ProductSpecParameter[]
+
+  @@index([materialNumber])
+  @@map("product_specs")
+}
+
+model ProductSpecParameter {
+  id           Int         @id @default(autoincrement())
+  specId       String
+  spec         ProductSpec @relation(fields: [specId], references: [specId], onDelete: Cascade)
+  no           Int
+  itemCheck    String
+  standardSpec String?
+  unit         String?
+  remark       String?
+
+  @@index([specId])
+  @@map("product_spec_parameters")
+}
+
+/// Quality Control > Input Check Results. checkId = group key (dulu "Check ID").
+model CheckResult {
+  checkId             String                  @id @default(uuid())
+  timestamp           DateTime                @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  customer            String?
+  custSegmen          String?
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  lotCoa              String?
+  codeTanki           String?
+  remark              String?
+  appearanceNotes     String?
+  information         String?
+  checkNotes          String?
+  start               DateTime?
+  finish              DateTime?
+  inputBy             String
+  parameters          CheckResultParameter[]
+  appearanceFiles     IcrAppearanceFile[]
+
+  @@index([order])
+  @@map("check_results")
+}
+
+model CheckResultParameter {
+  id        Int         @id @default(autoincrement())
+  checkId   String
+  check     CheckResult @relation(fields: [checkId], references: [checkId], onDelete: Cascade)
+  no        Int
+  parameter String
+  standard  String?
+  result    String?
+  remark    String?
+  start     DateTime?
+  finish    DateTime?
+  pic       String?
+
+  @@index([checkId])
+  @@map("check_result_parameters")
+}
+
+model IcrAppearanceFile {
+  id         Int         @id @default(autoincrement())
+  checkId    String
+  check      CheckResult @relation(fields: [checkId], references: [checkId], onDelete: Cascade)
+  order      String?
+  batch      String?
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime    @default(now())
+
+  @@index([checkId])
+  @@map("icr_appearance_files")
+}
+
+/// Planning Schedule > Approval. approvalId = group key (dulu "Approval ID").
+model ApprovalSchedule {
+  approvalId             String   @id @default(uuid())
+  timestamp              DateTime @default(now())
+  inputBy                String
+  order                  String
+  materialNumber         String?
+  materialDescription    String?
+  batch                  String?
+  orderQty               String?
+  plant                  String?
+  iuPlant                String?
+  codeTanki              String?
+  mrpPic                 String?
+  salesPic               String?
+  typeLot                String?
+  lotPassed              DateTime?
+  qcToApproval           DateTime?
+  qcPassed               DateTime?
+  prepareProduksi        DateTime?
+  sprayMan               String?
+  wetSample              String?
+  panel                  String?
+  lotCoa                 DateTime?
+  sendToTech             DateTime?
+  technicalDateReceiving DateTime?
+  submitToCustomer       DateTime?
+  customer               String?
+  custSegmen             String?
+  techName               String?
+  finishApp              DateTime?
+  remark                 String?
+  attachments            ApprovalAttachment[]
+
+  @@index([order])
+  @@index([finishApp])
+  @@map("approval_schedules")
+}
+
+model ApprovalAttachment {
+  id         Int              @id @default(autoincrement())
+  approvalId String
+  approval   ApprovalSchedule @relation(fields: [approvalId], references: [approvalId], onDelete: Cascade)
+  fileName   String
+  filePath   String
+  fileType   String?
+  remark     String?
+  uploadedBy String
+  timestamp  DateTime         @default(now())
+
+  @@index([approvalId])
+  @@map("approval_attachments")
+}

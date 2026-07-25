@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+server/data/uploads/*
+!server/data/uploads/.gitkeep
+.claude/
+*.tsbuildinfo

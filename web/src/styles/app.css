@@ -1,0 +1,415 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   Design tokens. Nama variabel dipertahankan sama seperti sebelumnya
+   (dipakai lewat inline style `var(--xxx)` di banyak halaman) -- hanya
+   NILAINYA yang diganti ke palet modern (indigo/slate), supaya seluruh
+   halaman ikut ter-update otomatis tanpa perlu diubah satu per satu.
+   ========================================================================== */
+:root {
+  --navy-dark: #3730a3; /* indigo-800 */
+  --navy: #4f46e5; /* indigo-600 */
+  --navy-light: #6366f1; /* indigo-500 */
+  --toolbar-bg: #f8fafc; /* slate-50 */
+  --app-bg: #f1f5f9; /* slate-100 */
+  --panel-header: #eef2ff; /* indigo-50 */
+  --border: #e2e8f0; /* slate-200 */
+  --sidebar-bg: #ffffff;
+  --text-main: #1e293b; /* slate-800 */
+  --text-muted: #64748b; /* slate-500 */
+  --danger: #dc2626; /* red-600 */
+  --success: #059669; /* emerald-600 */
+  --info: #0284c7; /* sky-600 */
+}
+
+@layer base {
+  body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+    font-family: "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  }
+
+  /* Border/background default utk SEMUA input teks -- termasuk yang berdiri
+     sendiri di dalam sel tabel (bukan cuma yang dibungkus .field), supaya
+     tidak "hilang" jadi putih polos akibat reset bawaan Tailwind. */
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="password"],
+  input[type="file"],
+  input[type="search"],
+  input:not([type]),
+  select,
+  textarea {
+    @apply rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800
+      shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40;
+  }
+
+  input:read-only,
+  input:disabled {
+    @apply bg-slate-50 text-slate-500;
+  }
+}
+
+/* ==========================================================================
+   Komponen bersama (dipakai lewat className di banyak halaman) --
+   direstyle modern lewat Tailwind @apply, TANPA mengubah nama class,
+   supaya semua halaman otomatis ikut ter-modernisasi.
+   ========================================================================== */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border-0 bg-indigo-600 px-4 py-2
+      text-sm font-semibold text-white shadow-sm transition-all duration-150
+      hover:bg-indigo-700 hover:shadow-md active:scale-[0.98]
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 hover:bg-red-700;
+  }
+
+  .btn-success {
+    @apply bg-emerald-600 hover:bg-emerald-700;
+  }
+
+  .btn-info {
+    @apply bg-sky-600 hover:bg-sky-700;
+  }
+
+  .btn-outline {
+    @apply bg-white text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50 hover:text-indigo-700;
+  }
+
+  .panel {
+    @apply overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .panel-header {
+    @apply border-b border-slate-200 bg-indigo-50/70 px-5 py-3 text-[0.95rem] font-bold text-indigo-900;
+  }
+
+  .panel-body {
+    @apply p-5;
+  }
+
+  .field-grid {
+    @apply grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+
+  .field {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .field label {
+    @apply text-[0.72rem] font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .field input,
+  .field select,
+  .field textarea {
+    @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
+      shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40;
+  }
+
+  .field input:read-only,
+  .field input:disabled {
+    @apply bg-slate-50 text-slate-500;
+  }
+
+  /* SENGAJA tanpa `overflow-hidden` di sini (walau div pembungkus di
+     DataTable.tsx sudah py rounded-lg+overflow-auto sendiri utk sudut
+     membulat) -- `overflow` selain `visible` di elemen <table> bikin
+     browser salah anggap <table> itu sendiri sbg "kotak scroll" acuan
+     `position: sticky`, jadi freeze header/kolom (lihat DataTable.tsx)
+     jadi tidak berfungsi sama sekali walau CSS-nya sudah benar. */
+  table.data-table {
+    @apply w-full border-collapse rounded-lg text-sm;
+  }
+
+  table.data-table th {
+    @apply border border-slate-300 bg-slate-100 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600;
+  }
+
+  table.data-table td {
+    @apply border border-slate-200 px-3 py-2 align-top text-slate-700;
+    /* Teks panjang (termasuk tanpa spasi sama sekali) otomatis membungkus ke
+       baris berikutnya DALAM sel yang sama (tinggi baris yang bertambah),
+       bukan mendorong lebar kolom lain -- mirip "Wrap Text" di Excel. */
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  table.data-table tbody tr {
+    @apply transition-colors hover:bg-indigo-50/60;
+  }
+
+  table.data-table tbody tr:nth-child(even) {
+    @apply bg-slate-50;
+  }
+
+  .col-resize-handle:hover,
+  .col-resize-handle:active {
+    @apply bg-indigo-500/70;
+  }
+
+  .error-text {
+    @apply text-sm font-medium text-red-600;
+  }
+
+  .status-text {
+    @apply text-sm font-medium text-emerald-600;
+  }
+
+  .tag-full-access,
+  .tag-input,
+  .tag-view {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+
+  .tag-full-access {
+    @apply bg-red-100 text-red-700;
+  }
+
+  .tag-input {
+    @apply bg-indigo-100 text-indigo-700;
+  }
+
+  .tag-view {
+    @apply bg-slate-200 text-slate-600;
+  }
+}
+
+/* ==========================================================================
+   Layout shell (sidebar, topbar, login) -- lihat layout.css utk versi lama;
+   nama class sama, nilai diganti modern.
+   ========================================================================== */
+@layer components {
+  .app-shell {
+    @apply flex h-screen flex-col overflow-hidden bg-slate-100;
+  }
+
+  .topbar {
+    @apply flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2 shadow-sm sm:px-5 sm:py-3;
+  }
+
+  .topbar-title {
+    @apply bg-gradient-to-r from-indigo-600 to-indigo-800 bg-clip-text text-base font-extrabold tracking-tight text-transparent sm:text-lg;
+  }
+
+  .topbar-right {
+    @apply flex items-center gap-2 text-sm text-slate-600 sm:gap-4;
+  }
+
+  .topbar-user {
+    @apply hidden flex-col items-end leading-tight sm:flex;
+  }
+
+  .topbar-user .access-badge {
+    @apply text-xs text-slate-400;
+  }
+
+  .app-body {
+    @apply relative flex min-h-0 flex-1;
+  }
+
+  /* Default (mobile/tablet, < lg): overlay drawer di atas konten, tersembunyi
+     di luar layar (-translate-x-full) sampai class .open ditambahkan lewat
+     state React (lihat AppLayout.tsx). Mulai `lg:` kembali ke rail statis
+     yang selalu tampil seperti sebelumnya -- perilaku desktop TIDAK berubah. */
+  .sidebar {
+    @apply absolute inset-y-0 left-0 z-40 w-[280px] shrink-0 -translate-x-full overflow-y-auto border-r
+      border-slate-200 bg-white py-3 shadow-xl transition-transform duration-200 ease-in-out
+      lg:static lg:z-auto lg:translate-x-0 lg:shadow-none;
+  }
+
+  .sidebar.open {
+    @apply translate-x-0;
+  }
+
+  .sidebar-backdrop {
+    @apply absolute inset-0 z-30 bg-slate-900/40 lg:hidden;
+  }
+
+  .sidebar-group summary {
+    @apply mx-2 cursor-pointer select-none rounded-lg px-3 py-2 text-[0.83rem] font-bold text-slate-500 transition hover:bg-slate-100;
+    list-style: none;
+  }
+
+  .sidebar-group summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .sidebar-group summary::before {
+    content: "\25B8";
+    @apply mr-2 inline-block text-slate-400 transition-transform duration-150;
+  }
+
+  .sidebar-group[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  .sidebar-link {
+    @apply ml-5 mr-2 my-0.5 block rounded-lg px-3 py-2 text-[0.83rem] font-medium text-slate-600 no-underline transition-colors hover:bg-slate-100;
+  }
+
+  .sidebar-link.active {
+    @apply bg-indigo-600 text-white shadow-sm hover:bg-indigo-600;
+  }
+
+  .workspace {
+    @apply flex-1 overflow-auto bg-slate-100 p-3 sm:p-5;
+  }
+
+  .statusbar {
+    @apply flex shrink-0 justify-between border-t border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-400 sm:px-4;
+  }
+
+  .login-page {
+    @apply flex h-screen items-center justify-center bg-gradient-to-br from-indigo-600 via-indigo-700 to-indigo-900;
+  }
+
+  .login-card {
+    @apply w-[360px] rounded-2xl bg-white p-8 shadow-2xl;
+  }
+
+  .login-card h1 {
+    @apply m-0 mb-1 bg-gradient-to-r from-indigo-600 to-indigo-800 bg-clip-text text-xl font-extrabold text-transparent;
+  }
+
+  .login-card p.subtitle {
+    @apply m-0 mb-5 text-sm text-slate-500;
+  }
+
+  .login-card .field {
+    @apply mb-3.5;
+  }
+
+  .login-card .btn {
+    @apply mt-1.5 w-full py-2.5;
+  }
+
+  .coming-soon {
+    @apply flex flex-col items-center justify-center gap-1 px-5 py-16 text-center text-slate-500;
+  }
+}
+
+/* ==========================================================================
+   "Excel grid" -- form input bergaya sel Excel (label di atas, kotak input
+   di bawah, border penuh, header warna-warni per kelompok kolom). Dipakai
+   di halaman Input Proses Premix/Milling/Aftermix/Colour Matching/Approval/
+   Packing supaya tampilannya mengikuti mockup yang diberikan.
+   ========================================================================== */
+@layer components {
+  .excel-block {
+    @apply relative mb-4 overflow-hidden rounded-lg border border-indigo-900/60 last:mb-0;
+  }
+
+  /* Garis bantu "magnet" saat drag-resize kolom (lihat lib/useResizableColWidths) --
+     muncul begitu tepi/titik-tengah kolom yg di-drag pas sejajar kolom di baris lain,
+     mirip smart guide di Canva/Figma. */
+  .col-align-guide {
+    @apply pointer-events-none absolute inset-y-0 z-20 w-0 border-l-2 border-pink-500;
+  }
+
+  .excel-section-title {
+    @apply bg-indigo-500 px-3 py-1.5 text-[0.78rem] font-bold uppercase tracking-wide text-white;
+  }
+
+  /* Header sub-bagian di dalam 1 excel-block: "QC Input Column" /
+     "Production Input Column" / "Technical Input Column" di Approval --
+     beda dari excel-section-title (judul block-nya sendiri, indigo).
+     Background & tipografi SENGAJA disamakan dgn .excel-cell-label (label
+     field "Order", dst) -- bg-sky-100 seragam. `mt-3` + border atas dipakai
+     sbg Gap pemisah visual antar bagian yang diisi 3 departemen berbeda
+     (QC/Production/Technical). Yang beda cuma warna TEKS-nya, disamakan dgn
+     warna tahap terkait di "Proses Bar" (STAGE_COLORS di
+     ProductionOrderDashboardPage) supaya tetap kebedaan tapi tidak norak. */
+  .excel-subsection-title {
+    @apply mt-3 border-b border-t-2 border-indigo-900/25 bg-sky-100 px-2 py-1 text-[0.7rem] font-bold uppercase leading-tight tracking-wide;
+  }
+
+  .excel-subsection-title.excel-subsection-qc {
+    color: #713f12;
+  }
+
+  .excel-subsection-title.excel-subsection-production {
+    color: #14532d;
+  }
+
+  .excel-subsection-title.excel-subsection-technical {
+    color: #1e3a8a;
+  }
+
+  .excel-row {
+    @apply flex flex-wrap;
+  }
+
+  .excel-cell {
+    @apply flex min-w-[140px] flex-1 flex-col border border-indigo-900/25 bg-white;
+  }
+
+  .excel-cell-label {
+    @apply border-b border-indigo-900/25 bg-sky-100 px-2 py-1 text-[0.66rem] font-bold uppercase leading-tight tracking-wide text-indigo-900;
+  }
+
+  .excel-cell-body {
+    @apply flex flex-1 items-stretch;
+  }
+
+  .excel-cell-body input,
+  .excel-cell-body select,
+  .excel-cell-body textarea {
+    @apply w-full flex-1 rounded-none border-0 bg-transparent px-2 py-1.5 text-sm text-slate-800 shadow-none
+      focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/50;
+  }
+
+  .excel-cell-body input:read-only,
+  .excel-cell-body input:disabled {
+    @apply bg-slate-50 text-slate-500;
+  }
+
+  .excel-cell.excel-orange .excel-cell-label {
+    @apply bg-orange-100 text-orange-800;
+  }
+
+  .excel-cell.excel-green .excel-cell-label {
+    @apply bg-emerald-100 text-emerald-800;
+  }
+
+  .excel-cell.excel-blue .excel-cell-label {
+    @apply bg-blue-100 text-blue-800;
+  }
+
+  .excel-cell.excel-gray .excel-cell-label {
+    @apply bg-slate-200 text-slate-700;
+  }
+
+  .excel-member-cell {
+    @apply flex min-w-[220px] flex-1 flex-col border border-indigo-900/25 bg-white;
+  }
+
+  .excel-member-add-row {
+    @apply flex gap-1 border-b border-indigo-900/10 p-1.5;
+  }
+
+  .excel-member-list {
+    @apply flex flex-1 flex-col gap-1 overflow-y-auto p-1.5;
+    max-height: 120px;
+  }
+
+  .excel-member-chip {
+    @apply flex items-center justify-between gap-2 rounded bg-indigo-50 px-2 py-1 text-xs text-indigo-900;
+  }
+}

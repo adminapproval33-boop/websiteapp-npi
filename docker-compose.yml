@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: npi_user
+      POSTGRES_PASSWORD: npi_password
+      POSTGRES_DB: npi_db
+    volumes:
+      - npi_pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U npi_user -d npi_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://npi_user:npi_password@postgres:5432/npi_db?schema=public"
+      PORT: "4000"
+      CORS_ORIGIN: "http://localhost:8080"
+      SESSION_TTL_MINUTES: "30"
+      LOGIN_MAX_ATTEMPTS: "5"
+      LOGIN_LOCK_MINUTES: "5"
+      UPLOAD_DIR: "/app/data/uploads"
+      MAX_UPLOAD_MB: "20"
+      MAX_IMPORT_MB: "500"
+      SEED_ADMIN_NIK: "000001"
+      SEED_ADMIN_NAME: "Administrator"
+      SEED_ADMIN_DEPARTMENT: "IT"
+      SEED_ADMIN_PASSWORD: "ChangeMe123!"
+    volumes:
+      - npi_uploads:/app/data/uploads
+    ports:
+      - "4000:4000"
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  npi_pgdata:
+  npi_uploads:

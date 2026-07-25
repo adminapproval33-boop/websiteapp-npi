@@ -1,0 +1,72 @@
+const SESSION_KEY = "npi_session";
+
+/** Di dev lokal kosong (pakai proxy Vite "/api"); di production diisi VITE_API_URL menunjuk ke backend Render. */
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+
+export interface StoredSession {
+  token: string;
+  nik: string;
+  name: string;
+  department: string;
+  access: "INPUT" | "VIEW" | "FULL_ACCESS";
+  mustResetPassword: boolean;
+}
+
+export function loadSession(): StoredSession | null {
+  const raw = sessionStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredSession;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(session: StoredSession) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+export function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+/** URL untuk link <a href> ke file lampiran -- menyertakan token lewat query string karena link biasa tidak mengirim header Authorization. */
+export function fileUrl(relativePath: string): string {
+  const session = loadSession();
+  return `${API_BASE}/files/${relativePath}?token=${encodeURIComponent(session?.token ?? "")}`;
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const session = loadSession();
+  const headers = new Headers(options.headers);
+  if (!(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (session?.token) {
+    headers.set("Authorization", `Bearer ${session.token}`);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new ApiError(res.status, data?.message ?? `Permintaan gagal (${res.status}).`);
+  }
+  return data as T;
+}
+
+export const api = {
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body ?? {}) }),
+  put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+};

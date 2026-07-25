@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
-import { createUploader, uploadToR2 } from "../../lib/uploadStorage";
+import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
@@ -127,7 +127,7 @@ packingRouter.post(
         logId: log.id,
         order: log.order,
         fileName: req.file.originalname,
-        filePath: await uploadToR2("packing", req.file),
+        filePath: await uploadToBlob("packing", req.file),
         fileType: req.file.mimetype,
         uploadedBy: req.auth!.nik,
       },

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
-import { createUploader, uploadToR2 } from "../../lib/uploadStorage";
+import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -233,7 +233,7 @@ approvalRouter.post(
         data: {
           approvalId,
           fileName: req.file.originalname,
-          filePath: await uploadToR2("approval", req.file),
+          filePath: await uploadToBlob("approval", req.file),
           fileType: req.file.mimetype,
           remark: remarkNote || null,
           uploadedBy: req.auth!.nik,

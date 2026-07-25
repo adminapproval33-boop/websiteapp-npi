@@ -15,10 +15,7 @@ export const env = {
   sessionTtlMinutes: Number(process.env.SESSION_TTL_MINUTES ?? 30),
   loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS ?? 5),
   loginLockMinutes: Number(process.env.LOGIN_LOCK_MINUTES ?? 5),
-  r2AccountId: required("R2_ACCOUNT_ID"),
-  r2AccessKeyId: required("R2_ACCESS_KEY_ID"),
-  r2SecretAccessKey: required("R2_SECRET_ACCESS_KEY"),
-  r2BucketName: required("R2_BUCKET_NAME"),
+  blobReadWriteToken: required("BLOB_READ_WRITE_TOKEN"),
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 20),
   // Batas terpisah & jauh lebih besar khusus utk import Master Data (Order/Tanki),
   // karena file referensi seperti export SAP-COOISPI bisa berisi jutaan baris --

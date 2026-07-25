@@ -1,9 +1,8 @@
 import path from "path";
 import crypto from "crypto";
 import multer from "multer";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { put } from "@vercel/blob";
 import { env } from "./env";
-import { r2Client } from "./r2Client";
 
 const ALLOWED_MIME_PREFIXES = ["image/", "application/pdf"];
 const ALLOWED_MIME_EXACT = [
@@ -26,7 +25,7 @@ function isAllowedMime(mimeType: string): boolean {
  * Membuat instance multer yang menampung file di memori (buffer), dengan
  * validasi tipe file & ukuran (setara `assertValidUpload_` di versi Apps
  * Script -- hanya gambar, PDF, Word, atau Excel; maksimum sesuai MAX_UPLOAD_MB).
- * File-nya sendiri baru benar-benar diunggah lewat uploadToR2().
+ * File-nya sendiri baru benar-benar diunggah lewat uploadToBlob().
  */
 export function createUploader() {
   return multer({
@@ -42,17 +41,15 @@ export function createUploader() {
   });
 }
 
-/** Unggah buffer file ke Cloudflare R2 di bawah `<subfolder>/`, kembalikan object key (disimpan sebagai filePath di DB). */
-export async function uploadToR2(subfolder: string, file: Express.Multer.File): Promise<string> {
+/** Unggah buffer file ke Vercel Blob (private) di bawah `<subfolder>/`, kembalikan pathname (disimpan sebagai filePath di DB). */
+export async function uploadToBlob(subfolder: string, file: Express.Multer.File): Promise<string> {
   const safeExt = path.extname(file.originalname).slice(0, 10);
-  const key = path.posix.join(subfolder, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
-  await r2Client.send(
-    new PutObjectCommand({
-      Bucket: env.r2BucketName,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype,
-    })
-  );
-  return key;
+  const pathname = path.posix.join(subfolder, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
+  await put(pathname, file.buffer, {
+    access: "private",
+    contentType: file.mimetype,
+    addRandomSuffix: false,
+    token: env.blobReadWriteToken,
+  });
+  return pathname;
 }

@@ -1,6 +1,7 @@
 import { ChangeEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
+import DataTable from "../../components/DataTable";
 
 interface MasterOrderRow {
   order: string;
@@ -9,7 +10,58 @@ interface MasterOrderRow {
   materialDescription: string | null;
   orderQty: string | null;
   plant: string | null;
+  deliveredQtyLiter: string | null;
+  basicStartDate: string | null;
+  basicFinishDate: string | null;
+  systemStatus: string | null;
+  unitOfMeasure: string | null;
+  pctGR: string | null;
+  actStartDate: string | null;
+  actEndDate: string | null;
+  volume: string | null;
+  deliveredQtyPcs: string | null;
+  orderQtyPcs: string | null;
+  abcIndicatorDescription: string | null;
+  todayAtp: string | null;
+  t7Atp: string | null;
+  jenis: string | null;
+  warnaDasar: string | null;
+  documentHeaderText: string | null;
+  abcIndicator: string | null;
 }
+
+const ORDER_COLUMN_DEFS: { key: keyof MasterOrderRow; label: string }[] = [
+  { key: "order", label: "Order" },
+  { key: "materialNumber", label: "Material Number" },
+  { key: "materialDescription", label: "Material description" },
+  { key: "batch", label: "Batch" },
+  { key: "deliveredQtyLiter", label: "Delivered quantity (GMEIN)/LITER" },
+  { key: "orderQty", label: "Order quantity (GMEIN)/LITER" },
+  { key: "plant", label: "Plant" },
+  { key: "basicStartDate", label: "Basic start date" },
+  { key: "basicFinishDate", label: "Basic finish date" },
+  { key: "systemStatus", label: "System Status" },
+  { key: "unitOfMeasure", label: "Unit of measure (=GMEIN)" },
+  { key: "pctGR", label: "% GR" },
+  { key: "actStartDate", label: "ACT START DATE" },
+  { key: "actEndDate", label: "ACT END DATE" },
+  { key: "volume", label: "VOLUME" },
+  { key: "deliveredQtyPcs", label: "Delivered quantity (GMEIN) Pcs" },
+  { key: "orderQtyPcs", label: "Order quantity (GMEIN) Pcs" },
+  { key: "abcIndicatorDescription", label: "ABC Indicator description" },
+  { key: "todayAtp", label: "Today-Atp" },
+  { key: "t7Atp", label: "T+7-Atp" },
+  { key: "jenis", label: "JENIS" },
+  { key: "warnaDasar", label: "WARNA DASAR" },
+  { key: "documentHeaderText", label: "Document Header Text" },
+  { key: "abcIndicator", label: "ABC Indicator" },
+];
+
+const ORDER_COLUMNS = ORDER_COLUMN_DEFS.map((c) => ({
+  key: c.key,
+  label: c.label,
+  render: (r: MasterOrderRow) => r[c.key] ?? "-",
+}));
 
 interface MasterTankRow {
   code: string;
@@ -212,35 +264,14 @@ export default function MasterDataPage() {
                 onChange={(e) => setOrderSearch(e.target.value)}
                 style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
               />
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Batch</th>
-                    <th>Material Number</th>
-                    <th>Material Description</th>
-                    <th>Qty</th>
-                    <th>Plant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(ordersQuery.data ?? []).map((row) => (
-                    <tr key={row.order}>
-                      <td>{row.order}</td>
-                      <td>{row.batch}</td>
-                      <td>{row.materialNumber}</td>
-                      <td>{row.materialDescription}</td>
-                      <td>{row.orderQty}</td>
-                      <td>{row.plant}</td>
-                    </tr>
-                  ))}
-                  {(ordersQuery.data ?? []).length === 0 && (
-                    <tr>
-                      <td colSpan={6}>Belum ada data.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <DataTable
+                rowKey={(r: MasterOrderRow) => r.order}
+                exportFileName="master-order-cooispi"
+                storageKey="master-order-cooispi"
+                rows={ordersQuery.data ?? []}
+                freezeFirstColumn
+                columns={ORDER_COLUMNS}
+              />
             </div>
           </div>
         </>
@@ -266,35 +297,21 @@ export default function MasterDataPage() {
                 onChange={(e) => setTankSearch(e.target.value)}
                 style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
               />
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Code Tanki</th>
-                    <th>TA/TB</th>
-                    <th>Tank Capacity</th>
-                    <th>New Number</th>
-                    <th>Location / Plant</th>
-                    <th>Type Tanki</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(tanksQuery.data ?? []).map((row) => (
-                    <tr key={row.code}>
-                      <td>{row.code}</td>
-                      <td>{row.taTb}</td>
-                      <td>{row.tankCapacity}</td>
-                      <td>{row.newNumber}</td>
-                      <td>{row.locationPlant}</td>
-                      <td>{row.typeTanki}</td>
-                    </tr>
-                  ))}
-                  {(tanksQuery.data ?? []).length === 0 && (
-                    <tr>
-                      <td colSpan={6}>Belum ada data.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <DataTable
+                rowKey={(r: MasterTankRow) => r.code}
+                exportFileName="master-tanki"
+                storageKey="master-tanki"
+                rows={tanksQuery.data ?? []}
+                freezeFirstColumn
+                columns={[
+                  { key: "code", label: "Code Tanki", render: (r) => r.code },
+                  { key: "taTb", label: "TA/TB", render: (r) => r.taTb ?? "-" },
+                  { key: "tankCapacity", label: "Tank Capacity", render: (r) => r.tankCapacity ?? "-" },
+                  { key: "newNumber", label: "New Number", render: (r) => r.newNumber ?? "-" },
+                  { key: "locationPlant", label: "Location / Plant", render: (r) => r.locationPlant ?? "-" },
+                  { key: "typeTanki", label: "Type Tanki", render: (r) => r.typeTanki ?? "-" },
+                ]}
+              />
             </div>
           </div>
         </>
@@ -320,33 +337,20 @@ export default function MasterDataPage() {
                 onChange={(e) => setEmployeeSearch(e.target.value)}
                 style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
               />
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee ID</th>
-                    <th>Full Name</th>
-                    <th>Organization</th>
-                    <th>Job Position</th>
-                    <th>Departemen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(employeesQuery.data ?? []).map((row) => (
-                    <tr key={row.employeeId}>
-                      <td>{row.employeeId}</td>
-                      <td>{row.fullName}</td>
-                      <td>{row.organization}</td>
-                      <td>{row.jobPosition}</td>
-                      <td>{row.departemen}</td>
-                    </tr>
-                  ))}
-                  {(employeesQuery.data ?? []).length === 0 && (
-                    <tr>
-                      <td colSpan={5}>Belum ada data.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <DataTable
+                rowKey={(r: MasterEmployeeRow) => r.employeeId}
+                exportFileName="master-employee"
+                storageKey="master-employee"
+                rows={employeesQuery.data ?? []}
+                freezeFirstColumn
+                columns={[
+                  { key: "employeeId", label: "Employee ID", render: (r) => r.employeeId },
+                  { key: "fullName", label: "Full Name", render: (r) => r.fullName },
+                  { key: "organization", label: "Organization", render: (r) => r.organization ?? "-" },
+                  { key: "jobPosition", label: "Job Position", render: (r) => r.jobPosition ?? "-" },
+                  { key: "departemen", label: "Departemen", render: (r) => r.departemen ?? "-" },
+                ]}
+              />
             </div>
           </div>
         </>

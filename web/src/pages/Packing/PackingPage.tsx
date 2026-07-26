@@ -8,7 +8,7 @@ import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
-import { computeQtyPerMan } from "../../lib/qty";
+import { computeQtyPerManFromPcsVolume } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
 
@@ -28,6 +28,7 @@ const PACKING_COL_DEFAULT_WIDTHS: Record<string, number> = {
   finish: 190,
   spvName: 170,
   leaderName: 170,
+  qtyPcs: 140,
   totalQty: 150,
   qtyPerMan: 150,
   member: 180,
@@ -39,7 +40,7 @@ const PACKING_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription"],
   ["batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki", "formReceived", "start", "finish"],
-  ["spvName", "leaderName", "totalQty", "qtyPerMan"],
+  ["spvName", "leaderName", "qtyPcs", "totalQty", "qtyPerMan"],
   ["member"],
 ];
 
@@ -60,6 +61,7 @@ interface HistoryRow {
   leaderName: string | null;
   qtyPerMan: string | null;
   totalQty: string | null;
+  qtyPcs: string | null;
   finish: string | null;
   codeTanki: string;
   remark: string | null;
@@ -119,6 +121,7 @@ const emptyForm = {
   members: [] as string[],
   qtyPerMan: "",
   totalQty: "",
+  qtyPcs: "",
   formReceived: "",
   start: "",
   leaderName: "",
@@ -199,6 +202,10 @@ export default function PackingPage() {
   async function handleOrderFound(data: OrderRefData) {
     setForm((f) => {
       const orderQty = data.orderQty ?? "";
+      // Volume diambil dari Referensi Order/PO (SAP-COOISPI) kolom Volume,
+      // sesuai instruksi eksplisit user -- fallback ke Order Qty kalau
+      // kolom Volume kosong di Master Data (spt sebelumnya).
+      const totalQty = data.volume || orderQty;
       return {
         ...f,
         materialNumber: data.materialNumber ?? "",
@@ -206,8 +213,10 @@ export default function PackingPage() {
         batch: data.batch ?? "",
         orderQty,
         plant: data.plant ?? "",
-        qtyPerMan: computeQtyPerMan(orderQty, f.members.length),
-        totalQty: orderQty,
+        // Qty/Man (Ltr) = (Qty/Pcs x Volume) ÷ jumlah Member, sesuai instruksi
+        // eksplisit user (2026-07-26).
+        qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, totalQty, f.members.length),
+        totalQty,
       };
     });
     try {
@@ -239,6 +248,8 @@ export default function PackingPage() {
         setEditingId(latest.id);
         setForm((f) => {
           const members = f.members.length > 0 ? f.members : latest.members ?? [];
+          const qtyPcs = f.qtyPcs || latest.qtyPcs || "";
+          const totalQty = f.totalQty || latest.totalQty || "";
           return {
             ...f,
             spvName: f.spvName || latest.spvName || "",
@@ -248,8 +259,9 @@ export default function PackingPage() {
             start: f.start || latest.start || "",
             finish: f.finish || latest.finish || "",
             remark: f.remark || latest.remark || "",
-            qtyPerMan: computeQtyPerMan(f.orderQty, members.length),
-            totalQty: f.orderQty,
+            qtyPcs,
+            totalQty,
+            qtyPerMan: computeQtyPerManFromPcsVolume(qtyPcs, totalQty, members.length),
           };
         });
       } else {
@@ -261,7 +273,9 @@ export default function PackingPage() {
   }
 
   function handleOrderQtyChange(orderQty: string) {
-    setForm((f) => ({ ...f, orderQty, qtyPerMan: computeQtyPerMan(orderQty, f.members.length), totalQty: orderQty }));
+    // Qty/Man (Ltr) SENGAJA tidak lagi dihitung ulang di sini -- rumusnya
+    // sekarang Qty/Pcs x Volume, tidak terkait Order Qty (lihat lib/qty.ts).
+    setForm((f) => ({ ...f, orderQty }));
   }
 
   function addMember() {
@@ -274,7 +288,7 @@ export default function PackingPage() {
     setError("");
     setForm((f) => {
       const members = [...f.members, name];
-      return { ...f, members, qtyPerMan: computeQtyPerMan(f.orderQty, members.length), totalQty: f.orderQty };
+      return { ...f, members, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, f.totalQty, members.length) };
     });
     setMemberNameInput("");
   }
@@ -282,7 +296,7 @@ export default function PackingPage() {
   function removeLastMember() {
     setForm((f) => {
       const members = f.members.slice(0, -1);
-      return { ...f, members, qtyPerMan: computeQtyPerMan(f.orderQty, members.length), totalQty: f.orderQty };
+      return { ...f, members, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, f.totalQty, members.length) };
     });
   }
 
@@ -300,6 +314,7 @@ export default function PackingPage() {
       members: row.members ?? [],
       qtyPerMan: row.qtyPerMan ?? "",
       totalQty: row.totalQty ?? "",
+      qtyPcs: row.qtyPcs ?? "",
       formReceived: row.formReceived ?? "",
       start: row.start ?? "",
       leaderName: row.leaderName ?? "",
@@ -423,18 +438,30 @@ export default function PackingPage() {
                 <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
                   <EmployeeNameSelect bare id="packing-leader" value={form.leaderName} onChange={(v) => setForm({ ...form, leaderName: v })} />
                 </ExcelField>
+                <ExcelField label="Qty/Pcs" color="orange" widthPx={colWidths.qtyPcs} onResizeStart={beginResize("qtyPcs")}>
+                  <input
+                    value={form.qtyPcs}
+                    onChange={(e) => {
+                      const qtyPcs = e.target.value;
+                      setForm((f) => ({ ...f, qtyPcs, qtyPerMan: computeQtyPerManFromPcsVolume(qtyPcs, f.totalQty, f.members.length) }));
+                    }}
+                  />
+                </ExcelField>
                 <ExcelField label="Volume" color="orange" widthPx={colWidths.totalQty} onResizeStart={beginResize("totalQty")}>
                   <input
                     value={form.totalQty}
-                    onChange={(e) => setForm({ ...form, totalQty: e.target.value })}
-                    title="Otomatis: = Order Qty -- bisa diubah manual bila perlu"
+                    onChange={(e) => {
+                      const totalQty = e.target.value;
+                      setForm((f) => ({ ...f, totalQty, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, totalQty, f.members.length) }));
+                    }}
+                    title="Otomatis: Volume dari Referensi Order/PO (SAP-COOISPI), fallback ke Order Qty -- bisa diubah manual bila perlu"
                   />
                 </ExcelField>
                 <ExcelField label="Qty/Man (Ltr)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")}>
                   <input
                     value={form.qtyPerMan}
                     onChange={(e) => setForm({ ...form, qtyPerMan: e.target.value })}
-                    title="Otomatis: Order Qty ÷ jumlah Member -- bisa diubah manual bila perlu"
+                    title="Otomatis: (Qty/Pcs x Volume) ÷ jumlah Member -- bisa diubah manual bila perlu"
                   />
                 </ExcelField>
               </ExcelRow>
@@ -569,6 +596,7 @@ export default function PackingPage() {
                   render: (r) => formatDateTime(r.finish),
                   csvValue: (r) => toExcelDateTimeString(r.finish),
                 },
+                { key: "qtyPcs", label: "Qty/Pcs", render: (r) => r.qtyPcs },
                 { key: "totalQty", label: "Volume", render: (r) => r.totalQty },
                 { key: "qtyPerMan", label: "Qty/Man (Ltr)", render: (r) => r.qtyPerMan },
                 { key: "remark", label: "Remark", render: (r) => r.remark },

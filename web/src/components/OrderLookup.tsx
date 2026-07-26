@@ -8,6 +8,12 @@ export interface OrderRefData {
   materialDescription: string | null;
   orderQty: string | null;
   plant: string | null;
+  /// Kolom "JENIS" di Referensi Order/PO (SAP-COOISPI) -- dipakai utk saran "Types of Products" di Colour Matching.
+  jenis: string | null;
+  /// Kolom "WARNA DASAR" di Referensi Order/PO (SAP-COOISPI) -- dipakai utk saran "Base Color" di Colour Matching.
+  warnaDasar: string | null;
+  /// Kolom "Volume" di Referensi Order/PO (SAP-COOISPI) -- dipakai utk saran "Volume" di Packing.
+  volume: string | null;
 }
 
 export default function OrderLookup({

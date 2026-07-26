@@ -44,6 +44,27 @@ const COLOUR_MATCHING_COL_ROWS: string[][] = [
   ["member"],
 ];
 
+/** Baris antrian "PWO Schedule & Queue" -- sumbernya History Aftermix (bukan
+ * History Colour Matching sendiri), lihat GET /colour-matching/pwo-queue. */
+interface QueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string | null;
+  codeTanki: string;
+  spvProduksi: string;
+  leader: string | null;
+  members: string[] | null;
+  qtyPerMan: string | null;
+  formReceived: string | null;
+  start: string | null;
+  finish: string;
+  remark: string | null;
+}
+
 interface HistoryRow {
   id: number;
   timestamp: string;
@@ -94,13 +115,14 @@ export default function ColourMatchingPage() {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -112,6 +134,11 @@ export default function ColourMatchingPage() {
   const historyQuery = useQuery({
     queryKey: ["colour-matching-history"],
     queryFn: () => api.get<{ success: boolean; data: HistoryRow[] }>("/colour-matching/history").then((r) => r.data),
+  });
+
+  const queueQuery = useQuery({
+    queryKey: ["colour-matching-pwo-queue"],
+    queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/colour-matching/pwo-queue").then((r) => r.data),
   });
 
   const saveMutation = useMutation({
@@ -167,6 +194,12 @@ export default function ColourMatchingPage() {
         batch: data.batch ?? "",
         orderQty,
         plant: data.plant ?? "",
+        // Types of Products & Base Color diambil dari Referensi Order/PO
+        // (SAP-COOISPI) kolom JENIS & WARNA DASAR, sesuai instruksi eksplisit
+        // user -- fallback ke histori Colour Matching sendiri (lihat blok
+        // latest-by-order di bawah) kalau kolom ini kosong di Master Data.
+        typesOfProducts: data.jenis || f.typesOfProducts,
+        baseColor: data.warnaDasar || f.baseColor,
       };
     });
     try {
@@ -274,6 +307,27 @@ export default function ColourMatchingPage() {
     setError("");
   }
 
+  /** Isi Order dari PWO Schedule & Queue ke form Input Colour Matching (lewat
+   * alur handleOrderFound yg sama dgn ketik manual di OrderLookup) -- sama
+   * pola dgn loadIntoInput di MillingPage.tsx/PremixAftermixPage.tsx. */
+  function loadIntoInput(row: QueueRow) {
+    setForm((f) => ({ ...f, order: row.order }));
+    handleOrderFound({
+      order: row.order,
+      batch: row.batch,
+      materialNumber: row.materialNumber,
+      materialDescription: row.materialDescription,
+      orderQty: row.orderQty,
+      plant: row.plant,
+      jenis: null,
+      warnaDasar: null,
+      volume: null,
+    });
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
   function cancelEdit() {
     setEditingId(null);
     setForm(emptyForm);
@@ -317,6 +371,10 @@ export default function ColourMatchingPage() {
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
   );
 
+  const filteredQueue = (queueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
+  );
+
   function findEmployee(name: string | null) {
     const trimmed = (name ?? "").trim().toLowerCase();
     if (!trimmed) return undefined;
@@ -331,6 +389,9 @@ export default function ColourMatchingPage() {
         </button>
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
+        </button>
+        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          PWO Schedule &amp; Queue
         </button>
       </div>
 
@@ -392,7 +453,6 @@ export default function ColourMatchingPage() {
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.formReceived)}
                     onChange={(e) => setForm({ ...form, formReceived: e.target.value })}
-                    required
                   />
                 </ExcelField>
                 <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")}>
@@ -574,6 +634,78 @@ export default function ColourMatchingPage() {
                         </button>
                       )}
                     </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && (
+        <div className="panel">
+          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              PWO yang sudah "Aftermix - DN" dan sedang menunggu dikerjakan Colour Matching -- diurutkan Finish
+              Aftermix paling awal duluan (FIFO). PWO otomatis hilang dari daftar ini begitu sudah ada input Colour
+              Matching utk PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Colour Matching (Approval,
+              Packing).
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: QueueRow) => r.order}
+              exportFileName="colour-matching-pwo-schedule-queue"
+              storageKey="colour-matching-pwo-queue"
+              rows={filteredQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki", label: "Code Tanki (Aftermix)", render: (r) => r.codeTanki },
+                { key: "spvProduksi", label: "SPV Produksi (Aftermix)", render: (r) => r.spvProduksi },
+                { key: "leader", label: "Leader (Aftermix)", render: (r) => r.leader },
+                {
+                  key: "members",
+                  label: "Member (Aftermix)",
+                  render: (r) => (r.members ?? []).join(", "),
+                },
+                { key: "qtyPerMan", label: "Qty/Man (Liter) (Aftermix)", render: (r) => r.qtyPerMan },
+                {
+                  key: "start",
+                  label: "Start Aftermix",
+                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
+                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
+                },
+                {
+                  key: "finish",
+                  label: "Finish Aftermix",
+                  render: (r) => formatDateTime(r.finish),
+                  csvValue: (r) => toExcelDateTimeString(r.finish),
+                },
+                { key: "remark", label: "Remark (Aftermix)", render: (r) => r.remark },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Colour Matching
+                    </button>
                   ),
                   csvValue: () => "",
                 },

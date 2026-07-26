@@ -29,6 +29,7 @@ const saveSchema = z.object({
   leaderName: z.string().optional(),
   qtyPerMan: z.string().optional(),
   totalQty: z.string().optional(),
+  qtyPcs: z.string().optional(),
   finish: optionalDate,
   codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
   remark: z.string().optional(),

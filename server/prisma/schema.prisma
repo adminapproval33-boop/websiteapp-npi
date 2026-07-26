@@ -52,14 +52,34 @@ model Session {
 /// Referensi Order/PO (dulu dibaca dari Spreadsheet eksternal SAP-COOISPI).
 /// Diisi lewat halaman Import CSV/Excel (Full Access).
 model MasterOrder {
-  id                  Int      @id @default(autoincrement())
-  order               String   @unique
-  batch               String?
-  materialNumber      String?
-  materialDescription String?
-  orderQty            String?
-  plant               String?
-  updatedAt           DateTime @updatedAt
+  id                      Int      @id @default(autoincrement())
+  order                   String   @unique
+  batch                   String?
+  materialNumber          String?
+  materialDescription     String?
+  orderQty                String?
+  plant                   String?
+  /// Kolom tambahan dari hasil compile COOISPI (VLOOKUP%) -- semua opsional
+  /// karena file lama/sumber lain mungkin tidak menyediakannya.
+  deliveredQtyLiter       String?
+  basicStartDate          String?
+  basicFinishDate         String?
+  systemStatus            String?
+  unitOfMeasure           String?
+  pctGR                   String?
+  actStartDate            String?
+  actEndDate              String?
+  volume                  String?
+  deliveredQtyPcs         String?
+  orderQtyPcs             String?
+  abcIndicatorDescription String?
+  todayAtp                String?
+  t7Atp                   String?
+  jenis                   String?
+  warnaDasar              String?
+  documentHeaderText      String?
+  abcIndicator            String?
+  updatedAt               DateTime @updatedAt
 
   @@map("master_orders")
 }
@@ -110,10 +130,12 @@ model MillingLog {
   codeTanki2          String?
   codeMesin           String?
   formReceived        DateTime?
-  start               DateTime
-  finish              DateTime
+  start               DateTime?
+  finish              DateTime?
   spvProduksi         String
   leader              String?
+  /// Qty Aktual hasil Milling -- diisi manual, beda dari Order Qty (rencana)
+  qtyAct              String?
   /// array nama anggota, mis. ["Budi","Sari"]
   members             Json?
   /// 10 slot bacaan tetap, disimpan sbg array (boleh string kosong utk slot yg belum diisi)
@@ -160,9 +182,9 @@ model PremixAftermixLog {
   members             Json?
   /// Order Qty dibagi jumlah member (otomatis)
   qtyPerMan           String?
-  start               DateTime
+  start               DateTime?
   leader              String?
-  finish              DateTime
+  finish              DateTime?
   codeTanki           String
   formReceived        DateTime?
   remark              String?
@@ -257,8 +279,12 @@ model PackingLog {
   iuPlant             String?
   /// Order Qty dibagi jumlah member (otomatis)
   qtyPerMan           String?
-  /// = Order Qty (mirror, bukan dibagi) -- ditampilkan sbg "Volume" di form
+  /// Ditampilkan sbg "Volume" di form -- auto-saran dari kolom "Volume" di
+  /// Referensi Order/PO (SAP-COOISPI), fallback ke Order Qty kalau kosong
+  /// (dulu selalu mirror Order Qty, direvisi 2026-07-26)
   totalQty            String?
+  /// Qty dalam satuan Pcs -- diisi manual, terpisah dari Volume (Ltr)
+  qtyPcs              String?
   codeTanki           String
   formReceived        DateTime?
   start               DateTime?

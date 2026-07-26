@@ -235,6 +235,24 @@ masterDataRouter.post(
       materialDescription: findColumn(headers, "material description", "description", "deskripsi material"),
       orderQty: findColumn(headers, "order quantity (gmein)/liter", "order quantity", "qty", "quantity"),
       plant: findColumn(headers, "plant"),
+      deliveredQtyLiter: findColumn(headers, "delivered quantity (gmein)/liter"),
+      basicStartDate: findColumn(headers, "basic start date"),
+      basicFinishDate: findColumn(headers, "basic finish date"),
+      systemStatus: findColumn(headers, "system status"),
+      unitOfMeasure: findColumn(headers, "unit of measure (=gmein)"),
+      pctGR: findColumn(headers, "% gr"),
+      actStartDate: findColumn(headers, "act start date"),
+      actEndDate: findColumn(headers, "act end date"),
+      volume: findColumn(headers, "volume"),
+      deliveredQtyPcs: findColumn(headers, "delivered quantity (gmein) pcs", "delivered quantity (gmein)"),
+      orderQtyPcs: findColumn(headers, "order quantity (gmein) pcs", "order quantity (gmein)"),
+      abcIndicatorDescription: findColumn(headers, "abc indicator description"),
+      todayAtp: findColumn(headers, "today-atp"),
+      t7Atp: findColumn(headers, "t+7-atp"),
+      jenis: findColumn(headers, "jenis"),
+      warnaDasar: findColumn(headers, "warna dasar"),
+      documentHeaderText: findColumn(headers, "document header text"),
+      abcIndicator: findColumn(headers, "abc indicator"),
     };
 
     if (col.order === -1) {
@@ -245,16 +263,35 @@ masterDataRouter.post(
       return;
     }
 
+    const cell = (row: unknown[], idx: number) => (idx !== -1 ? String(row[idx] ?? "").trim() || null : null);
+
     const rawRecords = rows
       .slice(1)
       .map((row) => ({
         order: String(row[col.order] ?? "").trim(),
-        batch: col.batch !== -1 ? String(row[col.batch] ?? "").trim() : null,
-        materialNumber: col.materialNumber !== -1 ? String(row[col.materialNumber] ?? "").trim() : null,
-        materialDescription:
-          col.materialDescription !== -1 ? String(row[col.materialDescription] ?? "").trim() : null,
-        orderQty: col.orderQty !== -1 ? String(row[col.orderQty] ?? "").trim() : null,
-        plant: col.plant !== -1 ? String(row[col.plant] ?? "").trim() : null,
+        batch: cell(row, col.batch),
+        materialNumber: cell(row, col.materialNumber),
+        materialDescription: cell(row, col.materialDescription),
+        orderQty: cell(row, col.orderQty),
+        plant: cell(row, col.plant),
+        deliveredQtyLiter: cell(row, col.deliveredQtyLiter),
+        basicStartDate: cell(row, col.basicStartDate),
+        basicFinishDate: cell(row, col.basicFinishDate),
+        systemStatus: cell(row, col.systemStatus),
+        unitOfMeasure: cell(row, col.unitOfMeasure),
+        pctGR: cell(row, col.pctGR),
+        actStartDate: cell(row, col.actStartDate),
+        actEndDate: cell(row, col.actEndDate),
+        volume: cell(row, col.volume),
+        deliveredQtyPcs: cell(row, col.deliveredQtyPcs),
+        orderQtyPcs: cell(row, col.orderQtyPcs),
+        abcIndicatorDescription: cell(row, col.abcIndicatorDescription),
+        todayAtp: cell(row, col.todayAtp),
+        t7Atp: cell(row, col.t7Atp),
+        jenis: cell(row, col.jenis),
+        warnaDasar: cell(row, col.warnaDasar),
+        documentHeaderText: cell(row, col.documentHeaderText),
+        abcIndicator: cell(row, col.abcIndicator),
       }))
       .filter((r) => r.order.length > 0);
 

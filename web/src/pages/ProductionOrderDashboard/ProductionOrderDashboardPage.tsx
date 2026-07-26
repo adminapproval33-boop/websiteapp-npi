@@ -99,12 +99,36 @@ const APPROVAL_STAGE_LABELS = new Set(["QC - AP", "Prep - AP", "AP - Tech", "AP 
  * konsisten sama tahap Start/Finish. */
 const PACKING_STAGE_LABELS = new Set(["QU - PC"]);
 
+/** Label Proses granular Premix (lihat premixProcessLabel di
+ * dashboard.routes.ts) -- SEMUA tahap (QU - Premix / Premix / Premix - DN)
+ * sengaja dipetakan ke warna Premix yang sama (cyan), sesuai instruksi
+ * eksplisit user (2026-07-26). Tahap Start ("Premix") sebenarnya sudah cocok
+ * langsung lewat fallback ke STAGE_COLORS di bawah, tapi tetap dimasukkan ke
+ * sini juga supaya jelas ketiganya satu warna. */
+const PREMIX_STAGE_LABELS = new Set(["QU - Premix", "Premix", "Premix - DN"]);
+
+/** Label Proses granular Milling (lihat millingProcessLabel di
+ * dashboard.routes.ts) -- SEMUA tahap (QU - Milling / Milling / Milling - DN)
+ * sengaja dipetakan ke warna Milling yang sama (teal), sesuai instruksi
+ * eksplisit user (2026-07-26). Sama pola dgn PREMIX_STAGE_LABELS di atas. */
+const MILLING_STAGE_LABELS = new Set(["QU - Milling", "Milling", "Milling - DN"]);
+
+/** Label Proses granular Aftermix (lihat premixOrAftermixProcessLabel di
+ * dashboard.routes.ts) -- SEMUA tahap (QU - Aftermix / Aftermix / Aftermix -
+ * DN) sengaja dipetakan ke warna Aftermix yang sama (biru), sesuai instruksi
+ * eksplisit user (2026-07-26, direvisi dari label statis "Aftermix" tanpa
+ * tahapan). Sama pola dgn PREMIX_STAGE_LABELS di atas. */
+const AFTERMIX_STAGE_LABELS = new Set(["QU - Aftermix", "Aftermix", "Aftermix - DN"]);
+
 /** Label Proses di kolom "Proses" formatnya bervariasi (mis. "Oke Colour
  * Matching", "QC : Visco : Pass") -- dicocokkan ke salah satu warna di
  * STAGE_COLORS lewat prefix/substring, bukan exact match. */
 function getProcessColor(process: string): { bg: string; fg: string } {
   if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
   if (PACKING_STAGE_LABELS.has(process)) return STAGE_COLORS.Packing;
+  if (PREMIX_STAGE_LABELS.has(process)) return STAGE_COLORS.Premix;
+  if (MILLING_STAGE_LABELS.has(process)) return STAGE_COLORS.Milling;
+  if (AFTERMIX_STAGE_LABELS.has(process)) return STAGE_COLORS.Aftermix;
   if (process.startsWith("QC")) return STAGE_COLORS.QC;
   if (process.includes("Colour Matching")) return STAGE_COLORS["Colour Matching"];
   return STAGE_COLORS[process] ?? { bg: "#e2e8f0", fg: "#1e293b" };

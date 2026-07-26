@@ -17,37 +17,88 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
-const saveSchema = z.object({
-  order: z.string().trim().min(1, "Order wajib diisi."),
-  materialNumber: z.string().optional(),
-  materialDescription: z.string().optional(),
-  batch: z.string().trim().min(1, "Batch wajib diisi."),
-  orderQty: z.string().optional(),
-  plant: z.string().optional(),
-  iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
-  codeTanki1: z.string().optional(),
-  codeTanki2: z.string().optional(),
-  codeMesin: z.string().optional(),
-  formReceived: optionalDate,
-  start: z.coerce.date({ errorMap: () => ({ message: "Start wajib diisi." }) }),
-  finish: z.coerce.date({ errorMap: () => ({ message: "Finish wajib diisi." }) }),
-  spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
-  leader: z.string().optional(),
-  members: z.array(z.string()).optional(),
-  fineness: readings10,
-  visco: readings10,
-  suhu: readings10,
-  remark: z.string().optional(),
-});
+const saveSchema = z
+  .object({
+    order: z.string().trim().min(1, "Order wajib diisi."),
+    materialNumber: z.string().optional(),
+    materialDescription: z.string().optional(),
+    batch: z.string().trim().min(1, "Batch wajib diisi."),
+    orderQty: z.string().optional(),
+    plant: z.string().optional(),
+    iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
+    codeTanki1: z.string().optional(),
+    codeTanki2: z.string().optional(),
+    codeMesin: z.string().optional(),
+    formReceived: optionalDate,
+    start: optionalDate,
+    finish: optionalDate,
+    spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
+    leader: z.string().optional(),
+    qtyAct: z.string().optional(),
+    members: z.array(z.string()).optional(),
+    fineness: readings10,
+    visco: readings10,
+    suhu: readings10,
+    remark: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // 3 tahap granular Milling (Form Received -> Start -> Finish), sesuai
+    // instruksi eksplisit user (2026-07-26) -- pola sama persis dgn
+    // superRefine di premixAftermix.routes.ts:
+    // 1) Form Received terisi -> Leader, Code Tanki 1, & Code Mesin wajib
+    //    (Code Tanki 2 SENGAJA TIDAK diwajibkan di sini -- itu auto-terisi
+    //    dari Code Tanki proses Premix, bukan input manual, lihat
+    //    handleOrderFound/checkMachineRecord di MillingPage.tsx).
+    // 2) Start terisi -> semua di atas + Member, Qty Act, Fineness, Visco, &
+    //    Suhu jadi wajib (KECUALI Finish).
+    // 3) Finish terisi -> Start (dan lewat itu, semua syarat tahap 2) wajib.
+    const hasFormReceived = data.formReceived != null;
+    const hasStart = data.start != null;
+    const hasFinish = data.finish != null;
+    const hasLeader = Boolean(data.leader && data.leader.trim());
+    const hasCodeTanki1 = Boolean(data.codeTanki1 && data.codeTanki1.trim());
+    const hasCodeMesin = Boolean(data.codeMesin && data.codeMesin.trim());
+    const hasMembers = (data.members?.length ?? 0) > 0;
+    const hasQtyAct = Boolean(data.qtyAct && data.qtyAct.trim());
+    const hasReadings = (arr?: string[]) => (arr ?? []).some((v) => v.trim().length > 0);
+    const hasFineness = hasReadings(data.fineness);
+    const hasVisco = hasReadings(data.visco);
+    const hasSuhu = hasReadings(data.suhu);
+
+    if (hasFormReceived) {
+      if (!hasLeader) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Form Received sudah diisi." });
+      if (!hasCodeTanki1) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeTanki1"], message: "Code Tanki 1 (Couple) wajib diisi kalau Form Received sudah diisi." });
+      if (!hasCodeMesin) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeMesin"], message: "Code Mesin wajib diisi kalau Form Received sudah diisi." });
+    }
+    if (hasStart) {
+      if (!hasFormReceived) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["formReceived"], message: "Form Received wajib diisi kalau Start sudah diisi." });
+      if (!hasLeader) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Start sudah diisi." });
+      if (!hasCodeTanki1) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeTanki1"], message: "Code Tanki 1 (Couple) wajib diisi kalau Start sudah diisi." });
+      if (!hasCodeMesin) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeMesin"], message: "Code Mesin wajib diisi kalau Start sudah diisi." });
+      if (!hasMembers) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start sudah diisi." });
+      if (!hasQtyAct) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qtyAct"], message: "Qty Act wajib diisi kalau Start sudah diisi." });
+      if (!hasFineness) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fineness"], message: "Fineness wajib diisi kalau Start sudah diisi." });
+      if (!hasVisco) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["visco"], message: "Visco wajib diisi kalau Start sudah diisi." });
+      if (!hasSuhu) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["suhu"], message: "Suhu wajib diisi kalau Start sudah diisi." });
+    }
+    if (hasFinish && !hasStart) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["finish"], message: "Finish hanya boleh diisi kalau Start sudah diisi." });
+    }
+  });
 
 /// Data terakhir untuk Order ini di Milling -- dipakai supaya begitu Order
 /// yang sama diketik lagi, semua kolom yang sudah pernah diisi langsung muncul.
+/// Kalau query `?codeMesin=` diisi, cocokkan Order + Code Mesin SEKALIGUS --
+/// dipakai utk kasus 1 Order sedang running di 2 mesin berbeda scr bersamaan
+/// (lihat instruksi eksplisit user 2026-07-26), supaya baris utk mesin lain
+/// TIDAK ketimpa saat mesin yg berbeda diketik utk Order yg sama.
 millingRouter.get(
   "/latest-by-order/:order",
   asyncRoute(async (req, res) => {
     const order = String(req.params.order).trim();
+    const codeMesin = typeof req.query.codeMesin === "string" ? req.query.codeMesin.trim() : "";
     const latest = await prisma.millingLog.findFirst({
-      where: { order },
+      where: codeMesin ? { order, codeMesin } : { order },
       orderBy: { timestamp: "desc" },
     });
     res.json({ success: true, data: latest });
@@ -63,6 +114,102 @@ millingRouter.get(
       take: 500,
     });
     res.json({ success: true, data: rows });
+  })
+);
+
+/**
+ * "PWO Schedule & Queue" -- daftar PWO (Order) yang sudah Finish Premix dan
+ * SEDANG MENUNGGU dikerjakan Milling (belum ada input Milling sama sekali
+ * utk Order itu), sesuai instruksi eksplisit user (2026-07-26). Begitu Order
+ * sudah punya input Milling (Start/Finish Milling terisi ATAU baru
+ * form-received sekalipun -- pokoknya ada baris di MillingLog), Order itu
+ * otomatis hilang dari antrian ini (bukan cuma dari daftar, statusnya sudah
+ * "sedang/selesai dikerjakan" jadi bukan lagi antrian).
+ *
+ * Order yang sudah py input di TAHAP SETELAH Milling (Aftermix, Colour
+ * Matching, Approval, Packing) JUGA dikeluarkan dari antrian, walau belum
+ * pernah ada input Milling utk Order itu -- sesuai instruksi eksplisit user
+ * (2026-07-26): secara alur proses, kalau Order sudah masuk tahap setelah
+ * Milling, berarti Premix-nya (dan tahap Milling-nya, entah kenapa tidak
+ * tercatat) sudah pasti selesai, jadi Order itu tidak relevan lagi
+ * ditampilkan sbg "menunggu Milling". QC SENGAJA tidak diikutkan di sini
+ * (bukan bagian dari 4 modul yg disebutkan eksplisit oleh user).
+ *
+ * Status Premix per Order diambil dari baris PALING TERAKHIR (timestamp Save
+ * terbaru) di section PREMIX -- konsisten dgn "status terkini" di
+ * /dashboard/production-orders, BUKAN baris pertama yg pernah py Finish.
+ * Diurutkan Finish Premix PALING AWAL duluan (FIFO -- yg paling lama
+ * menunggu dikerjakan Milling ditampilkan paling atas), sesuai instruksi
+ * eksplisit user.
+ */
+millingRouter.get(
+  "/pwo-queue",
+  asyncRoute(async (_req, res) => {
+    const [premixLogs, millingOrders, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
+      prisma.premixAftermixLog.findMany({
+        where: { section: "PREMIX" },
+        orderBy: { timestamp: "desc" },
+      }),
+      prisma.millingLog.findMany({ select: { order: true } }),
+      prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, select: { order: true } }),
+      prisma.colourMatchingLog.findMany({ select: { order: true } }),
+      prisma.approvalSchedule.findMany({ select: { order: true } }),
+      prisma.packingLog.findMany({ select: { order: true } }),
+    ]);
+
+    const millingOrderSet = new Set(millingOrders.map((r) => r.order));
+    // Order yg sudah masuk tahap manapun setelah Milling -- dianggap sudah
+    // "lewat" Milling, jadi ikut dikeluarkan dari antrian sama seperti
+    // millingOrderSet di atas.
+    const pastMillingOrderSet = new Set([
+      ...aftermixOrders.map((r) => r.order),
+      ...colourMatchingOrders.map((r) => r.order),
+      ...approvalOrders.map((r) => r.order),
+      ...packingOrders.map((r) => r.order),
+    ]);
+
+    // Dedupe ke status PALING TERAKHIR per Order (baris pertama yg ditemui,
+    // krn premixLogs sudah diurutkan timestamp desc).
+    const latestByOrder = new Map<string, (typeof premixLogs)[number]>();
+    for (const r of premixLogs) {
+      if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+    }
+
+    const queueRows = Array.from(latestByOrder.values()).filter(
+      (r) => r.finish != null && !millingOrderSet.has(r.order) && !pastMillingOrderSet.has(r.order)
+    );
+    queueRows.sort((a, b) => a.finish!.getTime() - b.finish!.getTime());
+
+    const uniqueOrders = queueRows.map((r) => r.order);
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: uniqueOrders } },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+    });
+    const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    const data = queueRows.map((r) => {
+      const master = masterByOrder.get(r.order);
+      return {
+        order: r.order,
+        materialNumber: master?.materialNumber ?? r.materialNumber,
+        materialDescription: master?.materialDescription ?? r.materialDescription,
+        batch: master?.batch ?? r.batch,
+        orderQty: master?.orderQty ?? r.orderQty,
+        plant: master?.plant ?? r.plant,
+        iuPlant: r.iuPlant,
+        codeTanki: r.codeTanki,
+        spvProduksi: r.spvProduksi,
+        leader: r.leader,
+        members: r.members,
+        qtyPerMan: r.qtyPerMan,
+        formReceived: r.formReceived,
+        start: r.start,
+        finish: r.finish,
+        remark: r.remark,
+      };
+    });
+
+    res.json({ success: true, data });
   })
 );
 

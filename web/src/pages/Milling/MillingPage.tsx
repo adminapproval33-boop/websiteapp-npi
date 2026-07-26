@@ -26,6 +26,7 @@ const MILLING_COL_DEFAULT_WIDTHS: Record<string, number> = {
   codeMesin: 150,
   spvProduksi: 170,
   leader: 170,
+  qtyAct: 160,
   formReceived: 190,
   start: 190,
   finish: 190,
@@ -33,17 +34,39 @@ const MILLING_COL_DEFAULT_WIDTHS: Record<string, number> = {
 };
 
 /** Urutan kolom per baris visual (utk snap-to-align saat drag-resize -- lihat
- * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah. */
+ * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah.
+ * Layout direvisi 2026-07-26 sesuai mockup eksplisit user (baris Order/Material/
+ * Batch/Qty/Plant digabung jadi 1 baris, Form Received/Start/Finish jadi baris
+ * tersendiri sebelum SPV/Leader/Qty Act). */
 const MILLING_COL_ROWS: string[][] = [
-  ["order", "materialNumber", "materialDescription"],
-  ["batch", "orderQty", "plant"],
+  ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki1", "codeTanki2", "codeMesin"],
-  ["spvProduksi", "leader", "formReceived", "start", "finish"],
+  ["formReceived", "start", "finish"],
+  ["spvProduksi", "leader", "qtyAct"],
   ["member"],
 ];
 
 const READING_SLOTS = 10;
 const emptyReadings = () => Array(READING_SLOTS).fill("");
+
+interface QueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string;
+  codeTanki: string;
+  spvProduksi: string;
+  leader: string | null;
+  members: string[] | null;
+  qtyPerMan: string | null;
+  formReceived: string | null;
+  start: string | null;
+  finish: string;
+  remark: string | null;
+}
 
 interface LogRow {
   id: number;
@@ -59,10 +82,11 @@ interface LogRow {
   codeTanki2: string | null;
   codeMesin: string | null;
   formReceived: string | null;
-  start: string;
-  finish: string;
+  start: string | null;
+  finish: string | null;
   spvProduksi: string;
   leader: string | null;
+  qtyAct: string | null;
   members: string[] | null;
   fineness: string[] | null;
   visco: string[] | null;
@@ -88,6 +112,7 @@ const emptyForm = {
   finish: "",
   spvProduksi: "",
   leader: "",
+  qtyAct: "",
   members: [] as string[],
   fineness: emptyReadings(),
   visco: emptyReadings(),
@@ -134,13 +159,14 @@ export default function MillingPage() {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -152,6 +178,11 @@ export default function MillingPage() {
   const historyQuery = useQuery({
     queryKey: ["milling-history"],
     queryFn: () => api.get<{ success: boolean; data: LogRow[] }>("/milling/history").then((r) => r.data),
+  });
+
+  const queueQuery = useQuery({
+    queryKey: ["milling-pwo-queue"],
+    queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/milling/pwo-queue").then((r) => r.data),
   });
 
   const saveMutation = useMutation({
@@ -211,34 +242,48 @@ export default function MillingPage() {
         `/master-data/order-context/${encodeURIComponent(data.order)}`
       );
       if (res.data) {
-        setForm((f) => ({
-          ...f,
-          iuPlant: res.data!.iuPlant || f.iuPlant,
-          codeTanki1: res.data!.codeTanki || f.codeTanki1,
-        }));
+        setForm((f) => ({ ...f, iuPlant: res.data!.iuPlant || f.iuPlant }));
       }
     } catch {
-      /* saran IU Plant/Code Tanki bersifat opsional -- kalau gagal, biarkan user isi manual */
+      /* saran IU Plant bersifat opsional -- kalau gagal, biarkan user isi manual */
     }
-    // Kolom lain (SPV Produksi, Leader, Member, Code Tanki 2, Code Mesin, Start,
-    // Finish, Fineness/Visco/Suhu, Remark) diambil dari input TERAKHIR untuk
-    // Order ini di Milling (bukan lintas modul).
+    // Code Tanki 2 (Moving) SENGAJA diambil dari Code Tanki proses Premix
+    // (bukan dari histori Milling sendiri) -- Code Tanki 1 (Couple) & Code
+    // Mesin tetap diisi manual oleh SPV area Milling, sesuai instruksi
+    // eksplisit user (2026-07-26).
+    try {
+      const premixRes = await api.get<{ success: boolean; data: { codeTanki: string } | null }>(
+        `/premix-aftermix/latest-by-order/${encodeURIComponent(data.order)}?section=PREMIX`
+      );
+      if (premixRes.data) {
+        setForm((f) => ({ ...f, codeTanki2: premixRes.data!.codeTanki || f.codeTanki2 }));
+      }
+    } catch {
+      /* belum ada data Premix utk Order ini -- biarkan Code Tanki 2 kosong, diisi manual */
+    }
+    // Kolom lain (SPV Produksi, Leader, Member, Code Tanki 1, Code Mesin,
+    // Start, Finish, Fineness/Visco/Suhu, Remark) diambil dari input TERAKHIR
+    // (mesin manapun) untuk Order ini di Milling. Asumsi default: user
+    // melanjutkan/mengedit mesin yg SAMA dgn histori paling akhir -- kalau
+    // user lalu mengganti Code Mesin secara manual, lihat checkMachineRecord
+    // di bawah (dipanggil saat blur) yg akan cek ulang apakah itu mesin yg
+    // sudah pernah diinput (edit) atau mesin BARU (1 Order running di >1
+    // mesin sekaligus -- entri baru, bukan menimpa), sesuai instruksi
+    // eksplisit user (2026-07-26).
     try {
       const latestRes = await api.get<{ success: boolean; data: LogRow | null }>(
         `/milling/latest-by-order/${encodeURIComponent(data.order)}`
       );
       const latest = latestRes.data;
       if (latest) {
-        // Order ini sudah pernah diinput -- masuk mode Edit record yang sama
-        // (bukan bikin baris baru) supaya History tetap 1 baris per Order:
-        // data baru akan menimpa/replace data lama saat Save.
         setEditingId(latest.id);
         setForm((f) => ({
           ...f,
           spvProduksi: f.spvProduksi || latest.spvProduksi || "",
           leader: f.leader || latest.leader || "",
+          qtyAct: f.qtyAct || latest.qtyAct || "",
           members: f.members.length > 0 ? f.members : latest.members ?? [],
-          codeTanki2: f.codeTanki2 || latest.codeTanki2 || "",
+          codeTanki1: f.codeTanki1 || latest.codeTanki1 || "",
           codeMesin: f.codeMesin || latest.codeMesin || "",
           formReceived: f.formReceived || latest.formReceived || "",
           start: f.start || latest.start || "",
@@ -253,6 +298,48 @@ export default function MillingPage() {
       }
     } catch {
       /* belum ada input sebelumnya untuk Order ini -- biarkan kosong */
+    }
+  }
+
+  /** Dipanggil saat user selesai mengetik/mengganti Code Mesin (blur) -- cek
+   * ulang apakah kombinasi Order + Code Mesin ini SUDAH pernah diinput
+   * sebelumnya (berarti sedang mengedit record mesin itu) atau BELUM (berarti
+   * Order ini sedang running di mesin lain scr bersamaan -- harus jadi entri
+   * BARU, bukan menimpa record mesin sebelumnya), sesuai instruksi eksplisit
+   * user (2026-07-26). */
+  async function checkMachineRecord() {
+    const order = form.order.trim();
+    const codeMesin = form.codeMesin.trim();
+    if (!order || !codeMesin) return;
+    try {
+      const res = await api.get<{ success: boolean; data: LogRow | null }>(
+        `/milling/latest-by-order/${encodeURIComponent(order)}?codeMesin=${encodeURIComponent(codeMesin)}`
+      );
+      const match = res.data;
+      if (match) {
+        setEditingId(match.id);
+        setForm((f) => ({
+          ...f,
+          spvProduksi: match.spvProduksi || f.spvProduksi,
+          leader: match.leader ?? f.leader,
+          qtyAct: match.qtyAct ?? f.qtyAct,
+          members: match.members ?? f.members,
+          codeTanki1: match.codeTanki1 ?? f.codeTanki1,
+          formReceived: match.formReceived ?? f.formReceived,
+          start: match.start ?? f.start,
+          finish: match.finish ?? f.finish,
+          fineness: match.fineness ? padReadings(match.fineness) : f.fineness,
+          visco: match.visco ? padReadings(match.visco) : f.visco,
+          suhu: match.suhu ? padReadings(match.suhu) : f.suhu,
+          remark: match.remark ?? f.remark,
+        }));
+      } else {
+        // Kombinasi Order + Code Mesin ini belum pernah ada -- entri BARU
+        // (POST) begitu Save, BUKAN menimpa record mesin lain utk Order yg sama.
+        setEditingId(null);
+      }
+    } catch {
+      /* biarkan state form apa adanya kalau lookup gagal */
     }
   }
 
@@ -295,15 +382,40 @@ export default function MillingPage() {
       codeTanki2: row.codeTanki2 ?? "",
       codeMesin: row.codeMesin ?? "",
       formReceived: row.formReceived ?? "",
-      start: row.start,
-      finish: row.finish,
+      start: row.start ?? "",
+      finish: row.finish ?? "",
       spvProduksi: row.spvProduksi,
       leader: row.leader ?? "",
+      qtyAct: row.qtyAct ?? "",
       members: row.members ?? [],
       fineness: padReadings(row.fineness),
       visco: padReadings(row.visco),
       suhu: padReadings(row.suhu),
       remark: row.remark ?? "",
+    });
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
+  /** Isi Order dari PWO Schedule & Queue ke form Input Milling (lewat alur
+   * handleOrderFound yg sama dgn ketik manual di OrderLookup), supaya Order
+   * qty/Material/Plant/IU Plant/Code Tanki tersaran otomatis begitu tim
+   * Milling mengambil PWO ini dari antrian. */
+  function loadIntoInput(row: QueueRow) {
+    setForm((f) => ({ ...f, order: row.order }));
+    handleOrderFound({
+      order: row.order,
+      batch: row.batch,
+      materialNumber: row.materialNumber,
+      materialDescription: row.materialDescription,
+      orderQty: row.orderQty,
+      plant: row.plant,
+      // Milling tidak punya kolom Types of Products/Base Color/Volume --
+      // 3 field ini cuma dipakai Colour Matching & Packing, jadi null di sini tidak berpengaruh.
+      jenis: null,
+      warnaDasar: null,
+      volume: null,
     });
     setTab("input");
     setMessage("");
@@ -336,6 +448,10 @@ export default function MillingPage() {
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
   );
 
+  const filteredQueue = (queueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
+  );
+
   function findEmployee(name: string | null) {
     const trimmed = (name ?? "").trim().toLowerCase();
     if (!trimmed) return undefined;
@@ -350,6 +466,9 @@ export default function MillingPage() {
         </button>
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
+        </button>
+        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          PWO Schedule &amp; Queue
         </button>
       </div>
 
@@ -373,8 +492,6 @@ export default function MillingPage() {
                 <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
-              </ExcelRow>
-              <ExcelRow>
                 <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
@@ -396,16 +513,10 @@ export default function MillingPage() {
                   <TankSelect bare id="milling-tank-2" value={form.codeTanki2} onChange={(v) => setForm({ ...form, codeTanki2: v })} required={false} />
                 </ExcelField>
                 <ExcelField label="Code Mesin" widthPx={colWidths.codeMesin} onResizeStart={beginResize("codeMesin")}>
-                  <input value={form.codeMesin} onChange={(e) => setForm({ ...form, codeMesin: e.target.value })} />
+                  <input value={form.codeMesin} onChange={(e) => setForm({ ...form, codeMesin: e.target.value })} onBlur={checkMachineRecord} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
-                  <EmployeeNameSelect bare id="milling-spv" value={form.spvProduksi} onChange={(v) => setForm({ ...form, spvProduksi: v })} required />
-                </ExcelField>
-                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
-                  <EmployeeNameSelect bare id="milling-leader" value={form.leader} onChange={(v) => setForm({ ...form, leader: v })} />
-                </ExcelField>
                 <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
                   <input
                     type="datetime-local"
@@ -418,7 +529,6 @@ export default function MillingPage() {
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.start)}
                     onChange={(e) => setForm({ ...form, start: e.target.value })}
-                    required
                   />
                 </ExcelField>
                 <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
@@ -426,8 +536,18 @@ export default function MillingPage() {
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.finish)}
                     onChange={(e) => setForm({ ...form, finish: e.target.value })}
-                    required
                   />
+                </ExcelField>
+              </ExcelRow>
+              <ExcelRow>
+                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
+                  <EmployeeNameSelect bare id="milling-spv" value={form.spvProduksi} onChange={(v) => setForm({ ...form, spvProduksi: v })} required />
+                </ExcelField>
+                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
+                  <EmployeeNameSelect bare id="milling-leader" value={form.leader} onChange={(v) => setForm({ ...form, leader: v })} />
+                </ExcelField>
+                <ExcelField label="Qty Act" color="orange" widthPx={colWidths.qtyAct} onResizeStart={beginResize("qtyAct")}>
+                  <input value={form.qtyAct} onChange={(e) => setForm({ ...form, qtyAct: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -529,6 +649,7 @@ export default function MillingPage() {
                 { key: "leader", label: "Leader", render: (r) => r.leader },
                 { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leader)?.employeeId },
                 { key: "leaderDepartemen", label: "Leader Departemen", render: (r) => findEmployee(r.leader)?.departemen },
+                { key: "qtyAct", label: "Qty Act", render: (r) => r.qtyAct },
                 {
                   key: "members",
                   label: "Member",
@@ -554,14 +675,14 @@ export default function MillingPage() {
                 {
                   key: "start",
                   label: "Start",
-                  render: (r) => formatDateTime(r.start),
-                  csvValue: (r) => toExcelDateTimeString(r.start),
+                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
+                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
                 },
                 {
                   key: "finish",
                   label: "Finish",
-                  render: (r) => formatDateTime(r.finish),
-                  csvValue: (r) => toExcelDateTimeString(r.finish),
+                  render: (r) => (r.finish ? formatDateTime(r.finish) : ""),
+                  csvValue: (r) => (r.finish ? toExcelDateTimeString(r.finish) : ""),
                 },
                 { key: "fineness", label: "Fineness", render: (r) => (r.fineness ?? []).join(", ") },
                 { key: "visco", label: "Visco", render: (r) => (r.visco ?? []).join(", ") },
@@ -592,6 +713,78 @@ export default function MillingPage() {
                         </button>
                       )}
                     </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && (
+        <div className="panel">
+          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              PWO yang sudah Finish Premix dan sedang menunggu dikerjakan Milling -- diurutkan Finish Premix paling
+              awal duluan (FIFO). PWO otomatis hilang dari daftar ini begitu sudah ada input Milling utk PWO
+              tersebut, atau begitu PWO itu sudah masuk tahap setelah Milling (Aftermix, Colour Matching, Approval,
+              Packing) -- yg berarti Premix-nya sudah pasti selesai walau input Milling-nya sendiri tidak tercatat.
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: QueueRow) => r.order}
+              exportFileName="pwo-schedule-queue"
+              storageKey="milling-pwo-queue"
+              rows={filteredQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki", label: "Code Tanki (Premix)", render: (r) => r.codeTanki },
+                { key: "spvProduksi", label: "SPV Produksi (Premix)", render: (r) => r.spvProduksi },
+                { key: "leader", label: "Leader (Premix)", render: (r) => r.leader },
+                {
+                  key: "members",
+                  label: "Member (Premix)",
+                  render: (r) => (r.members ?? []).join(", "),
+                },
+                { key: "qtyPerMan", label: "Qty/Man (Liter)", render: (r) => r.qtyPerMan },
+                {
+                  key: "start",
+                  label: "Start Premix",
+                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
+                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
+                },
+                {
+                  key: "finish",
+                  label: "Finish Premix",
+                  render: (r) => formatDateTime(r.finish),
+                  csvValue: (r) => toExcelDateTimeString(r.finish),
+                },
+                { key: "remark", label: "Remark (Premix)", render: (r) => r.remark },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Milling
+                    </button>
                   ),
                   csvValue: () => "",
                 },

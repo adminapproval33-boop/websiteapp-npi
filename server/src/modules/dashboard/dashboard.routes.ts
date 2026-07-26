@@ -67,19 +67,107 @@ function countBusinessDaysElapsed(from: Date, to: Date): number {
   return count;
 }
 
+interface ColourMatchingStageFields {
+  formReceived: Date | null;
+  start: Date | null;
+  finish: Date | null;
+  iuPlant: string | null;
+  members: unknown;
+  formPerMan: string | null;
+}
+
 /**
- * Label Proses khusus Colour Matching -- karena Start/Finish di modul ini
- * TIDAK wajib diisi (lihat colourMatching.routes.ts), statusnya dipecah jadi
- * 3 tahap: belum mulai sama sekali (Queue Colour Matching), sudah Start tapi
- * belum Finish (Colour Matching), atau sudah Start+Finish (Oke Colour
- * Matching -- field lain seperti Form Received/Types of Products/Base
- * Color/SPV/Leader sudah pasti terisi semua karena wajib diisi sejak awal,
- * jadi cukup cek Start+Finish saja).
+ * Label Proses granular Colour Matching -- direvisi 2026-07-26 sesuai
+ * instruksi eksplisit user (dulu cuma 3 label berbasis Start/Finish: "Queue
+ * Colour Matching"/"Colour Matching"/"Oke Colour Matching", krn Form Received
+ * dulu SELALU wajib). Sekarang Form Received sendiri jadi tahap pertama yg
+ * opsional -- pola SAMA PERSIS dgn premixOrAftermixProcessLabel/
+ * millingProcessLabel: tahapan ditentukan dari kolom PALING LANJUT yg sudah
+ * terisi (Form Received -> Start -> Finish), dgn syarat kolom pendukung tahap
+ * itu (IU Plant, lalu Member & Form/Man begitu Start terisi) juga sudah
+ * terisi -- SAMA PERSIS dgn superRefine di colourMatching.routes.ts. Dicek
+ * dari yg paling lanjut (Finish) turun ke yg paling awal (Form Received).
  */
-function colourMatchingProcessLabel(start: Date | null, finish: Date | null): string {
-  if (start && finish) return "Oke Colour Matching";
-  if (start && !finish) return "Colour Matching";
-  return "Queue Colour Matching";
+function colourMatchingProcessLabel(r: ColourMatchingStageFields): string {
+  const hasIuPlant = Boolean(r.iuPlant && r.iuPlant.trim());
+  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
+  const hasFormPerMan = Boolean(r.formPerMan && r.formPerMan.trim());
+  if (r.finish && r.start && r.formReceived && hasIuPlant && hasMembers && hasFormPerMan) return "Colour Matching - DN";
+  if (r.start && r.formReceived && hasIuPlant && hasMembers && hasFormPerMan) return "Colour Matching";
+  if (r.formReceived && hasIuPlant) return "QU - Colour Matching";
+  return "-";
+}
+
+interface PremixStageFields {
+  formReceived: Date | null;
+  start: Date | null;
+  finish: Date | null;
+  leader: string | null;
+  qtyPerMan: string | null;
+  members: unknown;
+}
+
+/**
+ * Label Proses granular PREMIX & AFTERMIX -- SAMA PERSIS logikanya (cuma beda
+ * nama tahap di labelnya), krn kedua section berbagi 1 model & 1 superRefine
+ * yg identik di premixAftermix.routes.ts (direvisi 2026-07-26 supaya AFTERMIX
+ * ikut dapat tahapan granular yg sama dgn PREMIX, bukan lagi label statis
+ * "Aftermix"). Tahapan ditentukan dari kolom PALING LANJUT yg sudah terisi
+ * (Form Received -> Start -> Finish), dgn syarat kolom pendukung tahap itu
+ * (Leader, lalu Member & Qty/Man (Liter) begitu Start terisi) juga sudah
+ * terisi. Dicek dari yg paling lanjut (Finish) turun ke yg paling awal
+ * (Form Received).
+ */
+function premixOrAftermixProcessLabel(r: PremixStageFields, stageName: "Premix" | "Aftermix"): string {
+  const hasLeader = Boolean(r.leader && r.leader.trim());
+  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
+  const hasQtyPerMan = Boolean(r.qtyPerMan && r.qtyPerMan.trim());
+  if (r.finish && r.start && r.formReceived && hasLeader && hasMembers && hasQtyPerMan) return `${stageName} - DN`;
+  if (r.start && r.formReceived && hasLeader && hasMembers && hasQtyPerMan) return stageName;
+  if (r.formReceived && hasLeader) return `QU - ${stageName}`;
+  return "-";
+}
+
+interface MillingStageFields {
+  formReceived: Date | null;
+  start: Date | null;
+  finish: Date | null;
+  leader: string | null;
+  codeTanki1: string | null;
+  codeMesin: string | null;
+  qtyAct: string | null;
+  members: unknown;
+  fineness: unknown;
+  visco: unknown;
+  suhu: unknown;
+}
+
+/**
+ * Label Proses granular Milling -- tahapan ditentukan dari kolom PALING
+ * LANJUT yg sudah terisi (Form Received -> Start -> Finish), dgn syarat
+ * kolom pendukung tahap itu (Leader, Code Tanki 1, Code Mesin, lalu Member,
+ * Qty Act, Fineness, Visco, & Suhu begitu Start terisi) juga sudah terisi --
+ * SAMA PERSIS dgn superRefine di milling.routes.ts, sesuai instruksi
+ * eksplisit user (2026-07-26). Code Tanki 2 SENGAJA TIDAK dicek di sini --
+ * itu auto-terisi dari Premix, bukan syarat wajib manual. "Ada isi" utk
+ * Fineness/Visco/Suhu cukup salah satu dari 10 slot terisi (bukan semua 10).
+ */
+function millingProcessLabel(r: MillingStageFields): string {
+  const hasLeader = Boolean(r.leader && r.leader.trim());
+  const hasCodeTanki1 = Boolean(r.codeTanki1 && r.codeTanki1.trim());
+  const hasCodeMesin = Boolean(r.codeMesin && r.codeMesin.trim());
+  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
+  const hasQtyAct = Boolean(r.qtyAct && r.qtyAct.trim());
+  const hasReadings = (v: unknown) => Array.isArray(v) && v.some((x) => typeof x === "string" && x.trim().length > 0);
+  const hasFineness = hasReadings(r.fineness);
+  const hasVisco = hasReadings(r.visco);
+  const hasSuhu = hasReadings(r.suhu);
+  const tier1Ok = hasLeader && hasCodeTanki1 && hasCodeMesin;
+  const tier2Ok = tier1Ok && hasMembers && hasQtyAct && hasFineness && hasVisco && hasSuhu;
+  if (r.finish && r.start && r.formReceived && tier2Ok) return "Milling - DN";
+  if (r.start && r.formReceived && tier2Ok) return "Milling";
+  if (r.formReceived && tier1Ok) return "QU - Milling";
+  return "-";
 }
 
 interface PackingStageFields {
@@ -252,17 +340,59 @@ dashboardRouter.get(
     // Filter `search` dipindah ke Array.filter di `result` paling akhir.
     const [premixAftermix, milling, colourMatching, packing, checkResults, approvals] = await Promise.all([
       prisma.premixAftermixLog.findMany({
-        select: { order: true, orderQty: true, section: true, materialNumber: true, start: true, finish: true, remark: true, timestamp: true },
+        select: {
+          order: true,
+          orderQty: true,
+          section: true,
+          materialNumber: true,
+          formReceived: true,
+          start: true,
+          finish: true,
+          leader: true,
+          qtyPerMan: true,
+          members: true,
+          remark: true,
+          timestamp: true,
+        },
         orderBy: { timestamp: "desc" },
         take: 500,
       }),
       prisma.millingLog.findMany({
-        select: { order: true, orderQty: true, materialNumber: true, start: true, finish: true, remark: true, timestamp: true },
+        select: {
+          order: true,
+          orderQty: true,
+          materialNumber: true,
+          formReceived: true,
+          start: true,
+          finish: true,
+          leader: true,
+          codeTanki1: true,
+          codeMesin: true,
+          qtyAct: true,
+          members: true,
+          fineness: true,
+          visco: true,
+          suhu: true,
+          remark: true,
+          timestamp: true,
+        },
         orderBy: { timestamp: "desc" },
         take: 500,
       }),
       prisma.colourMatchingLog.findMany({
-        select: { order: true, orderQty: true, materialNumber: true, start: true, finish: true, remark: true, timestamp: true },
+        select: {
+          order: true,
+          orderQty: true,
+          materialNumber: true,
+          formReceived: true,
+          start: true,
+          finish: true,
+          iuPlant: true,
+          members: true,
+          formPerMan: true,
+          remark: true,
+          timestamp: true,
+        },
         orderBy: { timestamp: "desc" },
         take: 500,
       }),
@@ -380,16 +510,28 @@ dashboardRouter.get(
       ...premixAftermix.map((r) => ({
         order: r.order,
         orderQty: r.orderQty,
-        process: r.section === "PREMIX" ? "Premix" : "Aftermix",
+        process: premixOrAftermixProcessLabel(r, r.section === "PREMIX" ? "Premix" : "Aftermix"),
         start: r.start,
         finish: r.finish,
         remark: r.remark,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
-      ...milling.map((r) => ({ ...r, process: "Milling", timestamp: latestMoment(r.start, r.finish, r.timestamp) })),
+      ...milling.map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: millingProcessLabel(r),
+        start: r.start,
+        finish: r.finish,
+        remark: r.remark,
+        timestamp: latestMoment(r.start, r.finish, r.timestamp),
+      })),
       ...colourMatching.map((r) => ({
-        ...r,
-        process: colourMatchingProcessLabel(r.start, r.finish),
+        order: r.order,
+        orderQty: r.orderQty,
+        process: colourMatchingProcessLabel(r),
+        start: r.start,
+        finish: r.finish,
+        remark: r.remark,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
       ...packing.map((r) => ({ ...r, process: packingProcessLabel(r), timestamp: latestMoment(r.start, r.finish, r.timestamp) })),

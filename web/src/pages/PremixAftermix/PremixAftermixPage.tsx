@@ -44,6 +44,29 @@ const PREMIX_AFTERMIX_COL_ROWS: string[][] = [
 
 type Section = "PREMIX" | "AFTERMIX";
 
+/** Baris antrian "PWO Schedule & Queue" -- khusus AFTERMIX, sumbernya History
+ * Milling (bukan History Aftermix sendiri), lihat GET /premix-aftermix/aftermix-pwo-queue. */
+interface QueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string;
+  codeTanki1: string | null;
+  codeTanki2: string | null;
+  codeMesin: string | null;
+  spvProduksi: string;
+  leader: string | null;
+  members: string[] | null;
+  qtyAct: string | null;
+  formReceived: string | null;
+  start: string | null;
+  finish: string;
+  remark: string | null;
+}
+
 interface LogRow {
   id: number;
   timestamp: string;
@@ -57,9 +80,9 @@ interface LogRow {
   spvProduksi: string;
   members: string[] | null;
   qtyPerMan: string | null;
-  start: string;
+  start: string | null;
   leader: string | null;
-  finish: string;
+  finish: string | null;
   codeTanki: string;
   formReceived: string | null;
   remark: string | null;
@@ -90,13 +113,14 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -109,6 +133,15 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
     queryKey: ["premix-aftermix-history", section],
     queryFn: () =>
       api.get<{ success: boolean; data: LogRow[] }>(`/premix-aftermix/history?section=${section}`).then((r) => r.data),
+  });
+
+  // Antrian "PWO Schedule & Queue" cuma relevan utk AFTERMIX (sumbernya
+  // History Milling) -- sengaja `enabled: section === "AFTERMIX"` supaya
+  // halaman Premix tidak ikut fetch endpoint ini percuma.
+  const queueQuery = useQuery({
+    queryKey: ["aftermix-pwo-queue"],
+    queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/premix-aftermix/aftermix-pwo-queue").then((r) => r.data),
+    enabled: section === "AFTERMIX",
   });
 
   const saveMutation = useMutation({
@@ -258,12 +291,35 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
       spvProduksi: row.spvProduksi,
       members: row.members ?? [],
       qtyPerMan: row.qtyPerMan ?? "",
-      start: row.start,
+      start: row.start ?? "",
       leader: row.leader ?? "",
-      finish: row.finish,
+      finish: row.finish ?? "",
       codeTanki: row.codeTanki,
       formReceived: row.formReceived ?? "",
       remark: row.remark ?? "",
+    });
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
+  /** Isi Order dari PWO Schedule & Queue ke form Input Aftermix (lewat alur
+   * handleOrderFound yg sama dgn ketik manual di OrderLookup) -- sama pola
+   * dgn loadIntoInput di MillingPage.tsx. */
+  function loadIntoInput(row: QueueRow) {
+    setForm((f) => ({ ...f, order: row.order }));
+    handleOrderFound({
+      order: row.order,
+      batch: row.batch,
+      materialNumber: row.materialNumber,
+      materialDescription: row.materialDescription,
+      orderQty: row.orderQty,
+      plant: row.plant,
+      // Premix/Aftermix tidak punya kolom Types of Products/Base Color/Volume
+      // -- 3 field ini cuma dipakai Colour Matching & Packing.
+      jenis: null,
+      warnaDasar: null,
+      volume: null,
     });
     setTab("input");
     setMessage("");
@@ -296,6 +352,10 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
   );
 
+  const filteredQueue = (queueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
+  );
+
   function findEmployee(name: string | null) {
     const trimmed = (name ?? "").trim().toLowerCase();
     if (!trimmed) return undefined;
@@ -311,6 +371,11 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
         </button>
+        {section === "AFTERMIX" && (
+          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+            PWO Schedule &amp; Queue
+          </button>
+        )}
       </div>
 
       {tab === "input" && (
@@ -364,7 +429,6 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.start)}
                     onChange={(e) => setForm({ ...form, start: e.target.value })}
-                    required
                   />
                 </ExcelField>
                 <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
@@ -372,7 +436,6 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.finish)}
                     onChange={(e) => setForm({ ...form, finish: e.target.value })}
-                    required
                   />
                 </ExcelField>
               </ExcelRow>
@@ -510,14 +573,14 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                 {
                   key: "start",
                   label: "Start",
-                  render: (r) => formatDateTime(r.start),
-                  csvValue: (r) => toExcelDateTimeString(r.start),
+                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
+                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
                 },
                 {
                   key: "finish",
                   label: "Finish",
-                  render: (r) => formatDateTime(r.finish),
-                  csvValue: (r) => toExcelDateTimeString(r.finish),
+                  render: (r) => (r.finish ? formatDateTime(r.finish) : ""),
+                  csvValue: (r) => (r.finish ? toExcelDateTimeString(r.finish) : ""),
                 },
                 { key: "remark", label: "Remark", render: (r) => r.remark },
                 { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
@@ -545,6 +608,80 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                         </button>
                       )}
                     </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && section === "AFTERMIX" && (
+        <div className="panel">
+          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              PWO yang sudah "Milling - DN" dan sedang menunggu dikerjakan Aftermix -- diurutkan Finish Milling
+              paling awal duluan (FIFO). PWO otomatis hilang dari daftar ini begitu sudah ada input Aftermix utk
+              PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Aftermix (Colour Matching, Approval,
+              Packing).
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: QueueRow) => r.order}
+              exportFileName="aftermix-pwo-schedule-queue"
+              storageKey="aftermix-pwo-queue"
+              rows={filteredQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki1", label: "Code Tanki 1 (Couple)", render: (r) => r.codeTanki1 },
+                { key: "codeTanki2", label: "Code Tanki 2 (Moving)", render: (r) => r.codeTanki2 },
+                { key: "codeMesin", label: "Code Mesin", render: (r) => r.codeMesin },
+                { key: "spvProduksi", label: "SPV Produksi (Milling)", render: (r) => r.spvProduksi },
+                { key: "leader", label: "Leader (Milling)", render: (r) => r.leader },
+                {
+                  key: "members",
+                  label: "Member (Milling)",
+                  render: (r) => (r.members ?? []).join(", "),
+                },
+                { key: "qtyAct", label: "Qty Act (Milling)", render: (r) => r.qtyAct },
+                {
+                  key: "start",
+                  label: "Start Milling",
+                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
+                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
+                },
+                {
+                  key: "finish",
+                  label: "Finish Milling",
+                  render: (r) => formatDateTime(r.finish),
+                  csvValue: (r) => toExcelDateTimeString(r.finish),
+                },
+                { key: "remark", label: "Remark (Milling)", render: (r) => r.remark },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Aftermix
+                    </button>
                   ),
                   csvValue: () => "",
                 },

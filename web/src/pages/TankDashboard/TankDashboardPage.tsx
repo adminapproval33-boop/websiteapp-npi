@@ -18,6 +18,9 @@ interface TankOccupant {
   start: string | null;
   finish: string | null;
   since: string;
+  /** Label Proses Packing, TERPISAH dari `process` -- sesuai instruksi
+   * eksplisit user (2026-07-28). */
+  productionActions: string | null;
 }
 
 interface TankRow {
@@ -213,14 +216,42 @@ export default function TankDashboardPage() {
                 csvValue: (r) => r.occupant?.process ?? "-",
               },
               {
+                key: "productionActions",
+                label: "Production Actions",
+                render: (r) => (r.occupant?.productionActions ? <ProcessBadge process={r.occupant.productionActions} /> : "-"),
+                csvValue: (r) => r.occupant?.productionActions ?? "-",
+              },
+              {
                 key: "start",
                 label: "Start",
-                render: (r) => (r.occupant?.start ? formatDateTime(r.occupant.start) : "-"),
+                render: (r) =>
+                  r.occupant ? (
+                    <span
+                      onClick={() => setLeadTimeDetailOrder(r.occupant!.order)}
+                      title="Klik utk lihat rangkuman Start & Finish di semua tahap"
+                      style={{ cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      {r.occupant.start ? formatDateTime(r.occupant.start) : "-"}
+                    </span>
+                  ) : (
+                    "-"
+                  ),
               },
               {
                 key: "finish",
                 label: "Finish",
-                render: (r) => (r.occupant?.finish ? formatDateTime(r.occupant.finish) : "-"),
+                render: (r) =>
+                  r.occupant ? (
+                    <span
+                      onClick={() => setLeadTimeDetailOrder(r.occupant!.order)}
+                      title="Klik utk lihat rangkuman Start & Finish di semua tahap"
+                      style={{ cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      {r.occupant.finish ? formatDateTime(r.occupant.finish) : "-"}
+                    </span>
+                  ) : (
+                    "-"
+                  ),
               },
               {
                 key: "remark",
@@ -307,7 +338,7 @@ export default function TankDashboardPage() {
       )}
 
       {leadTimeDetailOrder && (
-        <Modal title={`Lead Time per Proses — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
+        <Modal title={`Start & Finish per Tahap — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
           {leadTimeDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
           {!leadTimeDetailQuery.isLoading && (leadTimeDetailQuery.data?.length ?? 0) === 0 && (
             <p style={{ color: "var(--text-muted)" }}>Belum ada tahapan proses yang punya data Start untuk Order ini.</p>

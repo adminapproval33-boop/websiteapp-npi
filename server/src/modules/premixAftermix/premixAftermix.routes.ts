@@ -18,53 +18,48 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
+/** SAMA seperti optionalDate, tapi wajib terisi (bukan boleh dikosongkan) --
+ * dipakai utk Form Received, yg direvisi 2026-07-28 sesuai penegasan
+ * eksplisit user: "kolom lain KECUALI Start/Finish/Member/Qty-Man wajib
+ * terisi" dibaca sbg wajib BASELINE (berlaku di setiap Save), BUKAN cuma
+ * trigger tahap begitu Form Received itu sendiri diisi. */
+const requiredDate = z
+  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .transform((v) => (v ? v : null))
+  .refine((v): v is Date => v !== null, { message: "Form Received wajib diisi." });
+
 const saveSchema = z
   .object({
     section: sectionEnum,
     order: z.string().trim().min(1, "Order wajib diisi."),
-    materialNumber: z.string().optional(),
-    materialDescription: z.string().optional(),
+    materialNumber: z.string().trim().min(1, "Material Number wajib diisi."),
+    materialDescription: z.string().trim().min(1, "Material Description wajib diisi."),
     batch: z.string().trim().min(1, "Batch wajib diisi."),
-    orderQty: z.string().optional(),
-    plant: z.string().optional(),
+    orderQty: z.string().trim().min(1, "Order Qty wajib diisi."),
+    plant: z.string().trim().min(1, "Plant wajib diisi."),
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     spvProduksi: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
     members: z.array(z.string()).optional(),
     qtyPerMan: z.string().optional(),
     start: optionalDate,
-    leader: z.string().optional(),
+    leader: z.string().trim().min(1, "Leader wajib diisi."),
     finish: optionalDate,
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
-    formReceived: optionalDate,
+    formReceived: requiredDate,
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // PREMIX & AFTERMIX -- SAMA PERSIS, 3 tahap granular (Form Received ->
-    // Start -> Finish), tiap tahap mewajibkan kolom tahap sebelumnya + kolom
-    // pendukungnya sendiri sudah terisi. Awalnya AFTERMIX pakai aturan lama
-    // (Start & Finish selalu wajib), tapi direvisi 2026-07-26 sesuai instruksi
-    // eksplisit user supaya AFTERMIX ikut dapat tahapan granular yg SAMA
-    // PERSIS dgn PREMIX (field & aturannya memang identik di 1 model ini,
-    // jadi tidak perlu dibedakan per section lagi):
-    // 1) Form Received terisi -> Leader jadi wajib (kolom lain di luar
-    //    Start/Finish/Member/Qty-Man sudah wajib dari Zod di atas).
-    // 2) Start terisi -> Form Received, Leader, Member, & Qty/Man (Liter)
-    //    jadi wajib (semua KECUALI Finish).
-    // 3) Finish terisi -> Start (dan lewat itu, semua syarat tahap 2) jadi
-    //    wajib -- gak logis selesai sebelum mulai.
-    const hasFormReceived = data.formReceived != null;
+    // PREMIX & AFTERMIX -- SAMA PERSIS. Form Received/Leader/Material Number/
+    // dst sudah wajib TANPA SYARAT lewat skema di atas (direvisi 2026-07-28,
+    // lihat requiredDate). Sisa tahap granular cuma 1: Start terisi -> Member
+    // & Qty/Man (Liter) jadi wajib (KECUALI Finish); Finish terisi -> Start
+    // jadi wajib -- gak logis selesai sebelum mulai.
     const hasStart = data.start != null;
     const hasFinish = data.finish != null;
-    const hasLeader = Boolean(data.leader && data.leader.trim());
     const hasMembers = (data.members?.length ?? 0) > 0;
     const hasQtyPerMan = Boolean(data.qtyPerMan && data.qtyPerMan.trim());
 
-    if (hasFormReceived && !hasLeader) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Form Received sudah diisi." });
-    }
     if (hasStart) {
-      if (!hasFormReceived) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["formReceived"], message: "Form Received wajib diisi kalau Start sudah diisi." });
-      if (!hasLeader) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Start sudah diisi." });
       if (!hasMembers) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start sudah diisi." });
       if (!hasQtyPerMan) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qtyPerMan"], message: "Qty/Man (Liter) wajib diisi kalau Start sudah diisi." });
     }

@@ -403,6 +403,9 @@ model IcrAppearanceFile {
 }
 
 /// Planning Schedule > Approval. approvalId = group key (dulu "Approval ID").
+/// Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed DIPINDAH
+/// ke model AdminQc terpisah (2026-07-28, lihat komentar di sana) -- kalau
+/// perlu nilai QC to App/QC Passed di sini, lookup AdminQc by `order`.
 model ApprovalSchedule {
   approvalId             String   @id @default(uuid())
   timestamp              DateTime @default(now())
@@ -415,12 +418,6 @@ model ApprovalSchedule {
   plant                  String?
   iuPlant                String?
   codeTanki              String?
-  mrpPic                 String?
-  salesPic               String?
-  typeLot                String?
-  lotPassed              DateTime?
-  qcToApproval           DateTime?
-  qcPassed               DateTime?
   prepareProduksi        DateTime?
   sprayMan               String?
   wetSample              String?
@@ -454,4 +451,54 @@ model ApprovalAttachment {
 
   @@index([approvalId])
   @@map("approval_attachments")
+}
+
+/// Portal Quality Control > Input Admin QC (2026-07-28). Header administratif
+/// tahap QC (Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed)
+/// -- SENGAJA DIPISAH dari ApprovalSchedule (Production & MRP Schedule >
+/// Approval) jadi tabel independen sendiri, terhubung ke Approval & ke modul
+/// lain HANYA lewat nomor Order (bukan foreign key), sesuai instruksi
+/// eksplisit user: pilihan "2 tabel terpisah" (bukan 1 record yg sama spt
+/// Premix/Aftermix). Spec Parameters (Item Check) di halaman ini TIDAK
+/// disimpan di sini -- itu tetap CheckResult/CheckResultParameter yg SAMA
+/// dgn menu "Input Check Results" (1 sumber data QC, dieditnya bisa dari
+/// 2 halaman).
+model AdminQc {
+  adminQcId           String    @id @default(uuid())
+  timestamp           DateTime  @default(now())
+  inputBy             String
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  codeTanki           String?
+  typeLot             String?
+  mrpPic              String?
+  salesPic            String?
+  lotPassed           DateTime?
+  qcToApproval        DateTime?
+  qcPassed            DateTime?
+  remark              String?
+  attachments         AdminQcAttachment[]
+
+  @@index([order])
+  @@map("admin_qc")
+}
+
+model AdminQcAttachment {
+  id         Int      @id @default(autoincrement())
+  adminQcId  String
+  adminQc    AdminQc  @relation(fields: [adminQcId], references: [adminQcId], onDelete: Cascade)
+  fileName   String
+  filePath   String
+  fileType   String?
+  remark     String?
+  uploadedBy String
+  timestamp  DateTime @default(now())
+
+  @@index([adminQcId])
+  @@map("admin_qc_attachments")
 }

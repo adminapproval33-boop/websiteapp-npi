@@ -12,6 +12,7 @@ import { packingRouter } from "./modules/packing/packing.routes";
 import { productSpecRouter } from "./modules/productSpec/productSpec.routes";
 import { checkResultsRouter } from "./modules/checkResults/checkResults.routes";
 import { approvalRouter } from "./modules/approval/approval.routes";
+import { adminQcRouter } from "./modules/adminQc/adminQc.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -36,6 +37,7 @@ export function createApp() {
   app.use("/api/product-specs", productSpecRouter);
   app.use("/api/check-results", checkResultsRouter);
   app.use("/api/approvals", approvalRouter);
+  app.use("/api/admin-qc", adminQcRouter);
   app.use("/api/dashboard", dashboardRouter);
 
   app.use(errorHandler);

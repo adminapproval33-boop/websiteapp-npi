@@ -16,6 +16,22 @@ export interface OrderRefData {
   volume: string | null;
 }
 
+/** Sel kosong di source SAP-COOISPI (setelah diproses macro Excel/VBA) sering
+ * kesimpan sbg literal "-", BUKAN benar-benar kosong -- kalau dibiarkan, "-"
+ * ini truthy di JS, jadi logika fallback di halaman consumer (mis. "data.jenis
+ * || nilaiHistoriLama") keliru menganggap Master Data "sudah ada isinya"
+ * padahal cuma placeholder kosong, dan nilai histori yang benar tidak pernah
+ * kepakai. Dibersihkan di SINI (bukan di tiap halaman consumer satu-satu)
+ * supaya SEMUA konsumen OrderRefData otomatis aman, termasuk yang belum
+ * ditulis. Ditemukan dari laporan user (2026-07-28): Types of Products/Base
+ * Color di Colour Matching tidak auto-fill dari histori padahal Order-nya
+ * sudah pernah diinput -- root cause: kolom JENIS/WARNA DASAR di Master Data
+ * Order itu isinya literal "-". */
+function cleanPlaceholder(v: string | null): string | null {
+  const trimmed = (v ?? "").trim();
+  return trimmed === "" || trimmed === "-" ? null : v;
+}
+
 export default function OrderLookup({
   value,
   onChange,
@@ -38,7 +54,12 @@ export default function OrderLookup({
     setError("");
     try {
       const res = await api.get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(order)}`);
-      onFound(res.data);
+      onFound({
+        ...res.data,
+        jenis: cleanPlaceholder(res.data.jenis),
+        warnaDasar: cleanPlaceholder(res.data.warnaDasar),
+        volume: cleanPlaceholder(res.data.volume),
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Order tidak ditemukan.");
     } finally {

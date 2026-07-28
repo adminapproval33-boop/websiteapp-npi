@@ -16,20 +16,27 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
+/** SAMA seperti optionalDate, tapi wajib terisi -- lihat requiredDate di
+ * premixAftermix.routes.ts utk alasan lengkapnya (revisi 2026-07-28). */
+const requiredDate = z
+  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .transform((v) => (v ? v : null))
+  .refine((v): v is Date => v !== null, { message: "Form Received wajib diisi." });
+
 const saveSchema = z
   .object({
     order: z.string().trim().min(1, "Order wajib diisi."),
-    materialNumber: z.string().optional(),
-    materialDescription: z.string().optional(),
+    materialNumber: z.string().trim().min(1, "Material Number wajib diisi."),
+    materialDescription: z.string().trim().min(1, "Material Description wajib diisi."),
     batch: z.string().trim().min(1, "Batch wajib diisi."),
-    orderQty: z.string().optional(),
-    plant: z.string().optional(),
-    iuPlant: z.string().optional(),
+    orderQty: z.string().trim().min(1, "Order Qty wajib diisi."),
+    plant: z.string().trim().min(1, "Plant wajib diisi."),
+    iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     typesOfProducts: z.string().trim().min(1, "Types of Products wajib diisi."),
     baseColor: z.string().trim().min(1, "Base Color wajib diisi."),
     formPerMan: z.string().optional(),
-    formReceived: optionalDate,
+    formReceived: requiredDate,
     start: optionalDate,
     finish: optionalDate,
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
@@ -38,31 +45,16 @@ const saveSchema = z
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // 3 tahap granular (Form Received -> Start -> Finish), sesuai instruksi
-    // eksplisit user (2026-07-26) -- pola sama persis dgn superRefine di
-    // premixAftermix.routes.ts/milling.routes.ts. Form Received DULU selalu
-    // wajib (skema lama); sekarang jadi tahap pertama yg opsional, dgn IU
-    // Plant sbg syarat pendukungnya (kolom lain spt Types of Products/Base
-    // Color/SPV/Leader/Code Tanki sudah wajib dari Zod di atas, tidak
-    // tergantung tahap):
-    // 1) Form Received terisi -> IU Plant jadi wajib.
-    // 2) Start terisi -> Form Received, IU Plant, Member, & Form/Man jadi
-    //    wajib (semua KECUALI Finish).
-    // 3) Finish terisi -> Start (dan lewat itu, semua syarat tahap 2) jadi
-    //    wajib -- gak logis selesai sebelum mulai.
-    const hasFormReceived = data.formReceived != null;
+    // Form Received/IU Plant/Material Number/dst sudah wajib TANPA SYARAT
+    // lewat skema di atas (direvisi 2026-07-28, lihat requiredDate). Sisa
+    // tahap granular cuma 1: Start terisi -> Member & Form/Man jadi wajib
+    // (KECUALI Finish); Finish terisi -> Start jadi wajib.
     const hasStart = data.start != null;
     const hasFinish = data.finish != null;
-    const hasIuPlant = Boolean(data.iuPlant && data.iuPlant.trim());
     const hasMembers = (data.members?.length ?? 0) > 0;
     const hasFormPerMan = Boolean(data.formPerMan && data.formPerMan.trim());
 
-    if (hasFormReceived && !hasIuPlant) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["iuPlant"], message: "IU Plant wajib diisi kalau Form Received sudah diisi." });
-    }
     if (hasStart) {
-      if (!hasFormReceived) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["formReceived"], message: "Form Received wajib diisi kalau Start sudah diisi." });
-      if (!hasIuPlant) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["iuPlant"], message: "IU Plant wajib diisi kalau Start sudah diisi." });
       if (!hasMembers) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start sudah diisi." });
       if (!hasFormPerMan) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["formPerMan"], message: "Form/Man wajib diisi kalau Start sudah diisi." });
     }

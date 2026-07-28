@@ -23,12 +23,6 @@ interface ApprovalRow {
   plant: string | null;
   iuPlant: string | null;
   codeTanki: string | null;
-  mrpPic: string | null;
-  salesPic: string | null;
-  typeLot: string | null;
-  lotPassed: string | null;
-  qcToApproval: string | null;
-  qcPassed: string | null;
   prepareProduksi: string | null;
   sprayMan: string | null;
   wetSample: string | null;
@@ -68,8 +62,6 @@ const FILTER_COLUMNS = [
   { value: "plant", label: "Plant" },
   { value: "iuPlant", label: "IU Plant" },
   { value: "codeTanki", label: "Code Tanki" },
-  { value: "mrpPic", label: "MRP PIC" },
-  { value: "salesPic", label: "Sales PIC" },
   { value: "sprayMan", label: "Spray Man" },
   { value: "customer", label: "Customer" },
   { value: "techName", label: "Tech Name" },
@@ -84,12 +76,6 @@ const emptyForm = {
   plant: "",
   iuPlant: "",
   codeTanki: "",
-  mrpPic: "",
-  salesPic: "",
-  typeLot: "",
-  lotPassed: "",
-  qcToApproval: "",
-  qcPassed: "",
   prepareProduksi: "",
   sprayMan: "",
   wetSample: "",
@@ -106,8 +92,9 @@ const emptyForm = {
 };
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
- * user pernah drag-resize (lihat lib/useResizableColWidths). Key "codeTankiRow2" &
- * "codeTankiQc" = 2 sel Code Tanki yg berbeda posisi tapi terhubung ke field yg sama. */
+ * user pernah drag-resize (lihat lib/useResizableColWidths). Admin QC Stage/Mrp
+ * Pic/Sales Pic/Lot Passed/QC to App/QC Passed DIPINDAH ke menu "Input Admin QC"
+ * terpisah (2026-07-28, sesuai instruksi eksplisit user) -- tidak ada lagi di sini. */
 const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
   order: 140,
   materialNumber: 140,
@@ -117,12 +104,6 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
   plant: 100,
   iuPlant: 150,
   codeTankiRow2: 150,
-  mrpPic: 160,
-  salesPic: 160,
-  typeLot: 170,
-  lotPassed: 170,
-  qcToApproval: 170,
-  qcPassed: 170,
   prepareDate: 170,
   sprayMan: 140,
   wetSample: 130,
@@ -142,7 +123,6 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
 const APPROVAL_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTankiRow2"],
-  ["mrpPic", "salesPic", "typeLot", "lotPassed", "qcToApproval", "qcPassed"],
   ["prepareDate", "sprayMan", "wetSample", "panel", "lotCoa", "sendToTech"],
   ["submitTech", "submitCust", "customer", "custSegmen", "techName", "finishApp"],
 ];
@@ -249,9 +229,6 @@ export default function ApprovalPage() {
         const latest = res.data;
         setForm((f) => ({
           ...f,
-          mrpPic: f.mrpPic || latest.mrpPic || "",
-          salesPic: f.salesPic || latest.salesPic || "",
-          typeLot: f.typeLot || latest.typeLot || "",
           customer: f.customer || latest.customer || "",
           techName: f.techName || latest.techName || "",
           panel: f.panel || latest.panel || "",
@@ -259,9 +236,6 @@ export default function ApprovalPage() {
           iuPlant: f.iuPlant || latest.iuPlant || "",
           codeTanki: f.codeTanki || latest.codeTanki || "",
           remark: f.remark || latest.remark || "",
-          lotPassed: f.lotPassed || latest.lotPassed || "",
-          qcToApproval: f.qcToApproval || latest.qcToApproval || "",
-          qcPassed: f.qcPassed || latest.qcPassed || "",
           prepareProduksi: f.prepareProduksi || latest.prepareProduksi || "",
           sprayMan: f.sprayMan || latest.sprayMan || "",
           lotCoa: f.lotCoa || latest.lotCoa || "",
@@ -303,12 +277,6 @@ export default function ApprovalPage() {
       plant: row.plant ?? "",
       iuPlant: row.iuPlant ?? "",
       codeTanki: row.codeTanki ?? "",
-      mrpPic: row.mrpPic ?? "",
-      salesPic: row.salesPic ?? "",
-      typeLot: row.typeLot ?? "",
-      lotPassed: row.lotPassed ?? "",
-      qcToApproval: row.qcToApproval ?? "",
-      qcPassed: row.qcPassed ?? "",
       prepareProduksi: row.prepareProduksi ?? "",
       sprayMan: row.sprayMan ?? "",
       wetSample: row.wetSample ?? "",
@@ -339,14 +307,6 @@ export default function ApprovalPage() {
     e.preventDefault();
     setMessage("");
     setError("");
-    if (!isKnownEmployeeName(employees, form.mrpPic)) {
-      setError("Mrp Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
-      return;
-    }
-    if (!isKnownEmployeeName(employees, form.salesPic)) {
-      setError("Sales Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
-      return;
-    }
     if (!isKnownEmployeeName(employees, form.techName)) {
       setError("Tech Name tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
@@ -401,44 +361,6 @@ export default function ApprovalPage() {
                 </ExcelField>
                 <ExcelField label="Code Tanki" widthPx={colWidths.codeTankiRow2} onResizeStart={beginResize("codeTankiRow2")}>
                   <TankSelect bare id="approval-tank-1" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
-                </ExcelField>
-              </ExcelRow>
-              <ExcelSubHeader label="QC Input Column" color="qc" />
-              <ExcelRow>
-                <ExcelField label="Mrp Pic" widthPx={colWidths.mrpPic} onResizeStart={beginResize("mrpPic")}>
-                  <EmployeeNameSelect bare id="approval-mrp-pic" value={form.mrpPic} onChange={(v) => setForm({ ...form, mrpPic: v })} />
-                </ExcelField>
-                <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")}>
-                  <EmployeeNameSelect bare id="approval-sales-pic" value={form.salesPic} onChange={(v) => setForm({ ...form, salesPic: v })} />
-                </ExcelField>
-                <ExcelField label="Type Lot" widthPx={colWidths.typeLot} onResizeStart={beginResize("typeLot")}>
-                  <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })}>
-                    <option value="">-- Pilih --</option>
-                    <option value="Join Lot">Join Lot</option>
-                    <option value="Lot Packing">Lot Packing</option>
-                    <option value="Approval">Approval</option>
-                  </select>
-                </ExcelField>
-                <ExcelField label="Lot Passed" widthPx={colWidths.lotPassed} onResizeStart={beginResize("lotPassed")}>
-                  <input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(form.lotPassed)}
-                    onChange={(e) => setForm({ ...form, lotPassed: e.target.value })}
-                  />
-                </ExcelField>
-                <ExcelField label="QC to APP" widthPx={colWidths.qcToApproval} onResizeStart={beginResize("qcToApproval")}>
-                  <input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(form.qcToApproval)}
-                    onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })}
-                  />
-                </ExcelField>
-                <ExcelField label="QC Passed" widthPx={colWidths.qcPassed} onResizeStart={beginResize("qcPassed")}>
-                  <input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(form.qcPassed)}
-                    onChange={(e) => setForm({ ...form, qcPassed: e.target.value })}
-                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelSubHeader label="Production Input Column" color="production" />
@@ -577,27 +499,6 @@ export default function ApprovalPage() {
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
-                { key: "mrpPic", label: "Mrp Pic", render: (r) => r.mrpPic },
-                { key: "salesPic", label: "Sales Pic", render: (r) => r.salesPic },
-                { key: "typeLot", label: "Type Lot", render: (r) => r.typeLot },
-                {
-                  key: "lotPassed",
-                  label: "Lot Passed",
-                  render: (r) => formatDateTime(r.lotPassed),
-                  csvValue: (r) => toExcelDateTimeString(r.lotPassed),
-                },
-                {
-                  key: "qcToApproval",
-                  label: "QC to Approval",
-                  render: (r) => formatDateTime(r.qcToApproval),
-                  csvValue: (r) => toExcelDateTimeString(r.qcToApproval),
-                },
-                {
-                  key: "qcPassed",
-                  label: "QC Passed",
-                  render: (r) => formatDateTime(r.qcPassed),
-                  csvValue: (r) => toExcelDateTimeString(r.qcPassed),
-                },
                 {
                   key: "prepareProduksi",
                   label: "Prepare Date",

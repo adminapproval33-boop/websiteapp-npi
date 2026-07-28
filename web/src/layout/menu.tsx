@@ -9,6 +9,7 @@ import ColourMatchingPage from "../pages/ColourMatching/ColourMatchingPage";
 import PackingPage from "../pages/Packing/PackingPage";
 import ProductSpekPage from "../pages/ProductSpec/ProductSpekPage";
 import CheckResultsPage from "../pages/CheckResults/CheckResultsPage";
+import AdminQcPage from "../pages/AdminQc/AdminQcPage";
 import ApprovalPage from "../pages/Approval/ApprovalPage";
 import ApprovalDashboardPage from "../pages/ApprovalDashboard/ApprovalDashboardPage";
 import ProductionOrderDashboardPage from "../pages/ProductionOrderDashboard/ProductionOrderDashboardPage";
@@ -60,6 +61,7 @@ export const menuTree: MenuNode[] = [
   group("Portal Quality Control", [
     leaf("Creating Product Spek", "/qc/product-spec", <ProductSpekPage />),
     leaf("Input Check Results", "/qc/check-results", <CheckResultsPage />),
+    leaf("Input Admin QC", "/qc/admin-qc", <AdminQcPage />),
   ]),
   group("Production Label", [
     leaf("Production Label Entry", "/production-label/entry", undefined, OUT_OF_SCOPE),

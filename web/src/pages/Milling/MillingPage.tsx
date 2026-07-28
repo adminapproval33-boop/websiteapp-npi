@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from "react";
+import { CSSProperties, Fragment, FormEvent, MouseEvent as ReactMouseEvent, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -10,6 +10,13 @@ import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+
+/** Lebar kolom label "Pass N" di tabel Fineness/Visco/Suhu -- TIDAK resizable
+ * oleh user (tetap konstan), tapi didaftarkan sbg entry biasa di
+ * MILLING_COL_DEFAULT_WIDTHS/MILLING_COL_ROWS supaya math leftEdge/snap-guide
+ * di lib/useResizableColWidths tetap benar utk kolom Fineness/Visco/Suhu yg
+ * ada DI SEBELAH KANANnya. */
+const PASS_LABEL_COL_WIDTH = 70;
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
  * user pernah drag-resize (lihat lib/useResizableColWidths). */
@@ -31,23 +38,32 @@ const MILLING_COL_DEFAULT_WIDTHS: Record<string, number> = {
   start: 190,
   finish: 190,
   member: 180,
+  passLabel: PASS_LABEL_COL_WIDTH,
+  fineness: 140,
+  visco: 140,
+  suhu: 140,
 };
 
 /** Urutan kolom per baris visual (utk snap-to-align saat drag-resize -- lihat
  * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah.
  * Layout direvisi 2026-07-26 sesuai mockup eksplisit user (baris Order/Material/
  * Batch/Qty/Plant digabung jadi 1 baris, Form Received/Start/Finish jadi baris
- * tersendiri sebelum SPV/Leader/Qty Act). */
+ * tersendiri sebelum SPV/Leader/Qty Act). Baris "passLabel/fineness/visco/suhu"
+ * ditambahkan 2026-07-28 supaya tabel Pass (Fineness/Visco/Suhu) di bawahnya
+ * ikut kena smart-guide snap-align dgn kolom2 lain di form ini, sesuai
+ * permintaan eksplisit user. */
 const MILLING_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki1", "codeTanki2", "codeMesin"],
   ["formReceived", "start", "finish"],
   ["spvProduksi", "leader", "qtyAct"],
   ["member"],
+  ["passLabel", "fineness", "visco", "suhu"],
 ];
 
-const READING_SLOTS = 10;
-const emptyReadings = () => Array(READING_SLOTS).fill("");
+/** Max "Pass" (baris Fineness/Visco/Suhu) yg boleh ditambah via +Add -- harus
+ * cocok dgn batas backend (z.array().max(10) di milling.routes.ts). */
+const MAX_PASSES = 10;
 
 interface QueueRow {
   order: string;
@@ -96,6 +112,47 @@ interface LogRow {
   attachments: { id: number; fileName: string; filePath: string }[];
 }
 
+/** 1 baris History = 1 Pass (bukan 1 baris = 1 record Milling) -- "unpivot"
+ * supaya tabel History-nya tidy/flat, gampang di-export ke Excel & langsung
+ * bisa dibuat PivotTable (tiap kombinasi Order+Pass jadi barisnya sendiri,
+ * kolom lain yg sifatnya per-record diulang di tiap barisnya), sesuai
+ * permintaan eksplisit user (2026-07-28). Kalau record itu belum ada
+ * bacaan Fineness/Visco/Suhu sama sekali, tetap tampil 1 baris (Pass kosong)
+ * supaya record-nya tidak hilang dari History. */
+interface FlatHistoryRow {
+  key: string;
+  log: LogRow;
+  passLabel: string;
+  fineness: string;
+  visco: string;
+  suhu: string;
+}
+
+function flattenHistory(rows: LogRow[]): FlatHistoryRow[] {
+  const out: FlatHistoryRow[] = [];
+  for (const log of rows) {
+    const finenessArr = log.fineness ?? [];
+    const viscoArr = log.visco ?? [];
+    const suhuArr = log.suhu ?? [];
+    const passCount = Math.max(finenessArr.length, viscoArr.length, suhuArr.length);
+    if (passCount === 0) {
+      out.push({ key: `${log.id}-0`, log, passLabel: "", fineness: "", visco: "", suhu: "" });
+      continue;
+    }
+    for (let i = 0; i < passCount; i++) {
+      out.push({
+        key: `${log.id}-${i}`,
+        log,
+        passLabel: `Pass ${i + 1}`,
+        fineness: finenessArr[i] ?? "",
+        visco: viscoArr[i] ?? "",
+        suhu: suhuArr[i] ?? "",
+      });
+    }
+  }
+  return out;
+}
+
 const emptyForm = {
   order: "",
   materialNumber: "",
@@ -114,42 +171,124 @@ const emptyForm = {
   leader: "",
   qtyAct: "",
   members: [] as string[],
-  fineness: emptyReadings(),
-  visco: emptyReadings(),
-  suhu: emptyReadings(),
+  fineness: [""],
+  visco: [""],
+  suhu: [""],
   remark: "",
 };
 
 const GRID_BORDER = "1px solid #cbd5e1";
 
-function ReadingGrid({
-  label,
-  values,
+/** Tabel "Pass N" (Fineness/Visco/Suhu sejajar per baris), sesuai revisi
+ * mockup eksplisit user (2026-07-28) -- menggantikan 3 grid terpisah 10-slot
+ * dgn 1 tabel ringkas yg barisnya ("Pass 1", "Pass 2", dst) ditambah/dikurangi
+ * lewat tombol +/-. Lebar kolom Fineness/Visco/Suhu bisa di-drag oleh user
+ * (persis pola drag-resize ExcelField, lihat lib/useResizableColWidths) --
+ * hanya header yg punya resize-handle, tapi lebarnya berlaku ke semua baris
+ * Pass di bawahnya. Tombol +/- SENGAJA dibuat kotak kecil ber-ikon saja (bukan
+ * tombol lebar "+ Add"/"− Reduce") supaya tidak oversize, sesuai instruksi
+ * eksplisit user (2026-07-28) -- mirip tombol group/outline show-hide Excel. */
+function PassReadingsTable({
+  fineness,
+  visco,
+  suhu,
   onChange,
+  onAdd,
+  onRemove,
+  colWidths,
+  beginResize,
+  guideX,
 }: {
-  label: string;
-  values: string[];
-  onChange: (idx: number, value: string) => void;
+  fineness: string[];
+  visco: string[];
+  suhu: string[];
+  onChange: (field: "fineness" | "visco" | "suhu", idx: number, value: string) => void;
+  onAdd: () => void;
+  onRemove: () => void;
+  colWidths: Record<string, number>;
+  beginResize: (colKey: string) => (e: ReactMouseEvent) => void;
+  /** Posisi garis bantu "smart guide" (magnet snap) saat drag -- state yg SAMA
+   * dipakai ExcelBlock utama di atas (lihat lib/useResizableColWidths), supaya
+   * kolom Fineness/Visco/Suhu ikut nempel/snap ke tepi kolom lain di form ini
+   * persis seperti kolom2 lain, sesuai permintaan eksplisit user (2026-07-28). */
+  guideX: number | null;
 }) {
+  const rows = fineness.length;
+  const labelW = colWidths.passLabel ?? PASS_LABEL_COL_WIDTH;
+  const fW = colWidths.fineness ?? 140;
+  const vW = colWidths.visco ?? 140;
+  const sW = colWidths.suhu ?? 140;
+  const gridTemplateColumns = `${labelW}px ${fW}px ${vW}px ${sW}px`;
+  // Posisi X tepi-kanan tiap kolom yg bisa di-resize -- handle drag utk kolom
+  // "fineness" diletakkan di tepi kanan kolom Fineness itu sendiri, dst
+  // (persis semantik beginResize: geser menambah/mengurangi lebar colKey itu).
+  const xFineness = labelW + fW;
+  const xVisco = xFineness + vW;
+  const xSuhu = xVisco + sW;
+
+  const headerCellStyle: CSSProperties = { textAlign: "center" };
+  const dataCellStyle: CSSProperties = { textAlign: "center", border: GRID_BORDER, padding: "6px 4px", width: "100%", boxSizing: "border-box" };
+  const passLabelStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "0.8rem",
+    fontWeight: 600,
+    color: "var(--muted)",
+  };
+  function resizeHandleStyle(x: number): CSSProperties {
+    return { position: "absolute", top: 0, bottom: 0, left: x - 3, width: 6, cursor: "col-resize", touchAction: "none" };
+  }
+
   return (
     <div className="excel-block" style={{ marginTop: 8, border: GRID_BORDER }}>
-      <div className="excel-section-title">{label}</div>
-      <div className="excel-row">
-        {values.map((v, idx) => (
-          <input
-            key={idx}
-            value={v}
-            onChange={(e) => onChange(idx, e.target.value)}
-            style={{
-              flex: 1,
-              minWidth: 40,
-              textAlign: "center",
-              border: GRID_BORDER,
-              borderTop: "none",
-              padding: "6px 4px",
-            }}
-          />
-        ))}
+      {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
+      {/* Wrapper relative terpisah dari grid supaya handle drag bisa membentang
+         FULL TINGGI tabel (header + semua baris Pass), bukan cuma setipis baris
+         header -- target drag jadi jauh lebih mudah diklik, sesuai keluhan user
+         (2026-07-28) bahwa kolom "belum bisa di-resize" (target lama kekecilan). */}
+      <div style={{ position: "relative" }}>
+        <div style={{ display: "grid", gridTemplateColumns }}>
+          <div />
+          <div className="excel-cell-label" style={headerCellStyle}>Fineness</div>
+          <div className="excel-cell-label" style={headerCellStyle}>Visco</div>
+          <div className="excel-cell-label" style={headerCellStyle}>Suhu</div>
+          {Array.from({ length: rows }).map((_, idx) => (
+            <Fragment key={idx}>
+              <div style={passLabelStyle}>Pass {idx + 1}</div>
+              <input value={fineness[idx] ?? ""} onChange={(e) => onChange("fineness", idx, e.target.value)} style={dataCellStyle} />
+              <input value={visco[idx] ?? ""} onChange={(e) => onChange("visco", idx, e.target.value)} style={dataCellStyle} />
+              <input value={suhu[idx] ?? ""} onChange={(e) => onChange("suhu", idx, e.target.value)} style={dataCellStyle} />
+            </Fragment>
+          ))}
+        </div>
+        <div className="col-resize-handle" onMouseDown={beginResize("fineness")} title="Drag utk ubah lebar kolom Fineness" style={resizeHandleStyle(xFineness)} />
+        <div className="col-resize-handle" onMouseDown={beginResize("visco")} title="Drag utk ubah lebar kolom Visco" style={resizeHandleStyle(xVisco)} />
+        <div className="col-resize-handle" onMouseDown={beginResize("suhu")} title="Drag utk ubah lebar kolom Suhu" style={resizeHandleStyle(xSuhu)} />
+      </div>
+      <div style={{ display: "flex", gap: 4, padding: 4 }}>
+        <button
+          type="button"
+          className="btn btn-info"
+          title="Tambah Pass"
+          aria-label="Tambah Pass"
+          style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+          onClick={onAdd}
+          disabled={rows >= MAX_PASSES}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className="btn btn-danger"
+          title="Kurangi Pass"
+          aria-label="Kurangi Pass"
+          style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+          onClick={onRemove}
+          disabled={rows <= 1}
+        >
+          −
+        </button>
       </div>
     </div>
   );
@@ -288,9 +427,9 @@ export default function MillingPage() {
           formReceived: f.formReceived || latest.formReceived || "",
           start: f.start || latest.start || "",
           finish: f.finish || latest.finish || "",
-          fineness: f.fineness.some(Boolean) ? f.fineness : padReadings(latest.fineness),
-          visco: f.visco.some(Boolean) ? f.visco : padReadings(latest.visco),
-          suhu: f.suhu.some(Boolean) ? f.suhu : padReadings(latest.suhu),
+          fineness: f.fineness.some(Boolean) ? f.fineness : normalizeReadings(latest.fineness),
+          visco: f.visco.some(Boolean) ? f.visco : normalizeReadings(latest.visco),
+          suhu: f.suhu.some(Boolean) ? f.suhu : normalizeReadings(latest.suhu),
           remark: f.remark || latest.remark || "",
         }));
       } else {
@@ -328,9 +467,9 @@ export default function MillingPage() {
           formReceived: match.formReceived ?? f.formReceived,
           start: match.start ?? f.start,
           finish: match.finish ?? f.finish,
-          fineness: match.fineness ? padReadings(match.fineness) : f.fineness,
-          visco: match.visco ? padReadings(match.visco) : f.visco,
-          suhu: match.suhu ? padReadings(match.suhu) : f.suhu,
+          fineness: match.fineness ? normalizeReadings(match.fineness) : f.fineness,
+          visco: match.visco ? normalizeReadings(match.visco) : f.visco,
+          suhu: match.suhu ? normalizeReadings(match.suhu) : f.suhu,
           remark: match.remark ?? f.remark,
         }));
       } else {
@@ -363,9 +502,29 @@ export default function MillingPage() {
     setForm((f) => ({ ...f, [field]: f[field].map((v, i) => (i === idx ? value : v)) }));
   }
 
-  function padReadings(values: string[] | null): string[] {
+  /** Bungkus array bacaan dari backend jadi minimal 1 baris "Pass" -- BEDA
+   * dari padReadings lama yg selalu memaksa 10 slot; di sini panjang array
+   * asli (jumlah Pass yg sudah pernah diisi) dipertahankan apa adanya. */
+  function normalizeReadings(values: string[] | null): string[] {
     const arr = values ?? [];
-    return Array.from({ length: READING_SLOTS }, (_, i) => arr[i] ?? "");
+    return arr.length > 0 ? [...arr] : [""];
+  }
+
+  function addPass() {
+    setForm((f) => ({
+      ...f,
+      fineness: [...f.fineness, ""],
+      visco: [...f.visco, ""],
+      suhu: [...f.suhu, ""],
+    }));
+  }
+
+  function removePass() {
+    setForm((f) =>
+      f.fineness.length <= 1
+        ? f
+        : { ...f, fineness: f.fineness.slice(0, -1), visco: f.visco.slice(0, -1), suhu: f.suhu.slice(0, -1) }
+    );
   }
 
   function startEdit(row: LogRow) {
@@ -388,9 +547,9 @@ export default function MillingPage() {
       leader: row.leader ?? "",
       qtyAct: row.qtyAct ?? "",
       members: row.members ?? [],
-      fineness: padReadings(row.fineness),
-      visco: padReadings(row.visco),
-      suhu: padReadings(row.suhu),
+      fineness: normalizeReadings(row.fineness),
+      visco: normalizeReadings(row.visco),
+      suhu: normalizeReadings(row.suhu),
       remark: row.remark ?? "",
     });
     setTab("input");
@@ -447,6 +606,7 @@ export default function MillingPage() {
   const filteredHistory = (historyQuery.data ?? []).filter((row) =>
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
   );
+  const flatHistory = flattenHistory(filteredHistory);
 
   const filteredQueue = (queueQuery.data ?? []).filter((row) =>
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
@@ -580,9 +740,17 @@ export default function MillingPage() {
               )}
             </ExcelBlock>
 
-            <ReadingGrid label="Fineness" values={form.fineness} onChange={(idx, v) => updateReading("fineness", idx, v)} />
-            <ReadingGrid label="Visco" values={form.visco} onChange={(idx, v) => updateReading("visco", idx, v)} />
-            <ReadingGrid label="Suhu" values={form.suhu} onChange={(idx, v) => updateReading("suhu", idx, v)} />
+            <PassReadingsTable
+              fineness={form.fineness}
+              visco={form.visco}
+              suhu={form.suhu}
+              onChange={updateReading}
+              onAdd={addPass}
+              onRemove={removePass}
+              colWidths={colWidths}
+              beginResize={beginResize}
+              guideX={guideX}
+            />
 
             <div className="field" style={{ marginTop: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
@@ -629,32 +797,32 @@ export default function MillingPage() {
               style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
             />
             <DataTable
-              rowKey={(r: LogRow) => r.id}
+              rowKey={(r: FlatHistoryRow) => r.key}
               exportFileName="history-milling"
               storageKey="milling-history"
-              rows={filteredHistory}
+              rows={flatHistory}
               columns={[
                 {
                   key: "timestamp",
                   label: "Timestamp",
-                  render: (r) => formatDateTime(r.timestamp),
-                  csvValue: (r) => toExcelDateTimeString(r.timestamp),
+                  render: (r) => formatDateTime(r.log.timestamp),
+                  csvValue: (r) => toExcelDateTimeString(r.log.timestamp),
                 },
-                { key: "order", label: "Order", render: (r) => r.order },
-                { key: "batch", label: "Batch", render: (r) => r.batch },
-                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
-                { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.spvProduksi },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvProduksi)?.employeeId },
-                { key: "spvDepartemen", label: "SPV Departemen", render: (r) => findEmployee(r.spvProduksi)?.departemen },
-                { key: "leader", label: "Leader", render: (r) => r.leader },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leader)?.employeeId },
-                { key: "leaderDepartemen", label: "Leader Departemen", render: (r) => findEmployee(r.leader)?.departemen },
-                { key: "qtyAct", label: "Qty Act", render: (r) => r.qtyAct },
+                { key: "order", label: "Order", render: (r) => r.log.order },
+                { key: "batch", label: "Batch", render: (r) => r.log.batch },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.log.materialDescription },
+                { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.log.spvProduksi },
+                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.log.spvProduksi)?.employeeId },
+                { key: "spvDepartemen", label: "SPV Departemen", render: (r) => findEmployee(r.log.spvProduksi)?.departemen },
+                { key: "leader", label: "Leader", render: (r) => r.log.leader },
+                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.log.leader)?.employeeId },
+                { key: "leaderDepartemen", label: "Leader Departemen", render: (r) => findEmployee(r.log.leader)?.departemen },
+                { key: "qtyAct", label: "Qty Act", render: (r) => r.log.qtyAct },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.members ?? [];
+                    const members = r.log.members ?? [];
                     const list = members.map((m) => {
                       const emp = findEmployee(m);
                       return emp ? `${m} (${emp.employeeId} · ${emp.departemen ?? "-"})` : m;
@@ -662,40 +830,41 @@ export default function MillingPage() {
                     return [String(members.length), ...list].join(" | ");
                   },
                 },
-                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
-                { key: "codeMesin", label: "Code Mesin", render: (r) => r.codeMesin },
-                { key: "codeTanki1", label: "Code Tanki 1 (Couple)", render: (r) => r.codeTanki1 },
-                { key: "codeTanki2", label: "Code Tanki 2 (Moving)", render: (r) => r.codeTanki2 },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.log.iuPlant },
+                { key: "codeMesin", label: "Code Mesin", render: (r) => r.log.codeMesin },
+                { key: "codeTanki1", label: "Code Tanki 1 (Couple)", render: (r) => r.log.codeTanki1 },
+                { key: "codeTanki2", label: "Code Tanki 2 (Moving)", render: (r) => r.log.codeTanki2 },
                 {
                   key: "formReceived",
                   label: "Form Received",
-                  render: (r) => (r.formReceived ? formatDateTime(r.formReceived) : ""),
-                  csvValue: (r) => (r.formReceived ? toExcelDateTimeString(r.formReceived) : ""),
+                  render: (r) => (r.log.formReceived ? formatDateTime(r.log.formReceived) : ""),
+                  csvValue: (r) => (r.log.formReceived ? toExcelDateTimeString(r.log.formReceived) : ""),
                 },
                 {
                   key: "start",
                   label: "Start",
-                  render: (r) => (r.start ? formatDateTime(r.start) : ""),
-                  csvValue: (r) => (r.start ? toExcelDateTimeString(r.start) : ""),
+                  render: (r) => (r.log.start ? formatDateTime(r.log.start) : ""),
+                  csvValue: (r) => (r.log.start ? toExcelDateTimeString(r.log.start) : ""),
                 },
                 {
                   key: "finish",
                   label: "Finish",
-                  render: (r) => (r.finish ? formatDateTime(r.finish) : ""),
-                  csvValue: (r) => (r.finish ? toExcelDateTimeString(r.finish) : ""),
+                  render: (r) => (r.log.finish ? formatDateTime(r.log.finish) : ""),
+                  csvValue: (r) => (r.log.finish ? toExcelDateTimeString(r.log.finish) : ""),
                 },
-                { key: "fineness", label: "Fineness", render: (r) => (r.fineness ?? []).join(", ") },
-                { key: "visco", label: "Visco", render: (r) => (r.visco ?? []).join(", ") },
-                { key: "suhu", label: "Suhu", render: (r) => (r.suhu ?? []).join(", ") },
-                { key: "remark", label: "Remark", render: (r) => r.remark },
-                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
-                { key: "attachments", label: "Lampiran", render: (r) => (r.attachments.length ? `${r.attachments.length} file` : "-") },
+                { key: "pass", label: "Pass", render: (r) => r.passLabel },
+                { key: "fineness", label: "Fineness", render: (r) => r.fineness },
+                { key: "visco", label: "Visco", render: (r) => r.visco },
+                { key: "suhu", label: "Suhu", render: (r) => r.suhu },
+                { key: "remark", label: "Remark", render: (r) => r.log.remark },
+                { key: "inputBy", label: "Input By", render: (r) => r.log.inputBy },
+                { key: "attachments", label: "Lampiran", render: (r) => (r.log.attachments.length ? `${r.log.attachments.length} file` : "-") },
                 {
                   key: "actions",
                   label: "Aksi",
                   render: (r) => (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
+                      <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r.log)}>
                         ✏️
                       </button>
                       {user?.access === "FULL_ACCESS" && (
@@ -706,7 +875,7 @@ export default function MillingPage() {
                           aria-label="Hapus"
                           style={{ padding: "6px 10px" }}
                           onClick={() => {
-                            if (confirm(`Hapus data Milling untuk Order ${r.order}?`)) deleteMutation.mutate(r.id);
+                            if (confirm(`Hapus data Milling untuk Order ${r.log.order}?`)) deleteMutation.mutate(r.log.id);
                           }}
                         >
                           🗑️

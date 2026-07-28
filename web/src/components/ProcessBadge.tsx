@@ -16,10 +16,23 @@ export const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
   Done: { bg: "#008000", fg: "#ffffff" },
 };
 
+/** Label Proses granular Approval (lihat approvalProcessLabel di
+ * dashboard.routes.ts, direvisi 2026-07-28) -- BUKAN hasil Input Check
+ * Results meski 2 di antaranya diawali "QC", jadi dikecualikan dari deteksi
+ * isQc di bawah supaya tidak ketuker sama Proses QC asli. */
+const APPROVAL_STAGE_LABELS = new Set(["Improve", "QC - Joint Lot", "QC - DN", "QU - Approval", "Approval", "Approval - DN"]);
+
+/** "Joint Lot"/"Lot Packing" SENGAJA diberi warna QC (kuning) bukan Approval
+ * (olive) -- masih bagian alur pengecekan QC secara bisnis, sesuai instruksi
+ * eksplisit user (2026-07-28). */
+const APPROVAL_QC_COLOR_LABELS = new Set(["QC - Joint Lot", "QC - DN"]);
+
 /** Label Proses formatnya bervariasi (mis. "QC : Visco : Pass", "Milling
  * (Couple)") -- dicocokkan ke salah satu warna di STAGE_COLORS lewat
  * prefix/substring, bukan exact match. */
 export function getProcessColor(process: string): { bg: string; fg: string } {
+  if (APPROVAL_QC_COLOR_LABELS.has(process)) return STAGE_COLORS.QC;
+  if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
   if (process.startsWith("QC")) return STAGE_COLORS.QC;
   if (process.includes("Colour Matching")) return STAGE_COLORS["Colour Matching"];
   if (process.startsWith("Milling")) return STAGE_COLORS.Milling;
@@ -27,7 +40,7 @@ export function getProcessColor(process: string): { bg: string; fg: string } {
 }
 
 export default function ProcessBadge({ process, onClick }: { process: string; onClick?: () => void }) {
-  const isQc = process.startsWith("QC");
+  const isQc = process.startsWith("QC") && !APPROVAL_STAGE_LABELS.has(process);
   const colors = getProcessColor(process);
   return (
     <span

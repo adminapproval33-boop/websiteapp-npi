@@ -17,23 +17,33 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
+/** SAMA seperti optionalDate, tapi wajib terisi -- lihat requiredDate di
+ * premixAftermix.routes.ts utk alasan lengkapnya (revisi 2026-07-28). */
+const requiredDate = z
+  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .transform((v) => (v ? v : null))
+  .refine((v): v is Date => v !== null, { message: "Form Received wajib diisi." });
+
 const saveSchema = z
   .object({
     order: z.string().trim().min(1, "Order wajib diisi."),
-    materialNumber: z.string().optional(),
-    materialDescription: z.string().optional(),
+    materialNumber: z.string().trim().min(1, "Material Number wajib diisi."),
+    materialDescription: z.string().trim().min(1, "Material Description wajib diisi."),
     batch: z.string().trim().min(1, "Batch wajib diisi."),
-    orderQty: z.string().optional(),
-    plant: z.string().optional(),
+    orderQty: z.string().trim().min(1, "Order Qty wajib diisi."),
+    plant: z.string().trim().min(1, "Plant wajib diisi."),
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
-    codeTanki1: z.string().optional(),
+    codeTanki1: z.string().trim().min(1, "Code Tanki 1 (Couple) wajib diisi."),
+    // Code Tanki 2 (Moving) TETAP opsional -- auto-terisi dari Code Tanki
+    // proses Premix (bukan input manual), pengecualian eksplisit user
+    // (2026-07-26), lihat handleOrderFound/checkMachineRecord di MillingPage.tsx.
     codeTanki2: z.string().optional(),
-    codeMesin: z.string().optional(),
-    formReceived: optionalDate,
+    codeMesin: z.string().trim().min(1, "Code Mesin wajib diisi."),
+    formReceived: requiredDate,
     start: optionalDate,
     finish: optionalDate,
     spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
-    leader: z.string().optional(),
+    leader: z.string().trim().min(1, "Leader wajib diisi."),
     qtyAct: z.string().optional(),
     members: z.array(z.string()).optional(),
     fineness: readings10,
@@ -42,22 +52,13 @@ const saveSchema = z
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // 3 tahap granular Milling (Form Received -> Start -> Finish), sesuai
-    // instruksi eksplisit user (2026-07-26) -- pola sama persis dgn
-    // superRefine di premixAftermix.routes.ts:
-    // 1) Form Received terisi -> Leader, Code Tanki 1, & Code Mesin wajib
-    //    (Code Tanki 2 SENGAJA TIDAK diwajibkan di sini -- itu auto-terisi
-    //    dari Code Tanki proses Premix, bukan input manual, lihat
-    //    handleOrderFound/checkMachineRecord di MillingPage.tsx).
-    // 2) Start terisi -> semua di atas + Member, Qty Act, Fineness, Visco, &
-    //    Suhu jadi wajib (KECUALI Finish).
-    // 3) Finish terisi -> Start (dan lewat itu, semua syarat tahap 2) wajib.
-    const hasFormReceived = data.formReceived != null;
+    // Form Received/Leader/Code Tanki 1/Code Mesin/Material Number/dst sudah
+    // wajib TANPA SYARAT lewat skema di atas (direvisi 2026-07-28, lihat
+    // requiredDate). Sisa tahap granular cuma 1: Start terisi -> Member, Qty
+    // Act, Fineness, Visco, & Suhu jadi wajib (KECUALI Finish); Finish terisi
+    // -> Start jadi wajib.
     const hasStart = data.start != null;
     const hasFinish = data.finish != null;
-    const hasLeader = Boolean(data.leader && data.leader.trim());
-    const hasCodeTanki1 = Boolean(data.codeTanki1 && data.codeTanki1.trim());
-    const hasCodeMesin = Boolean(data.codeMesin && data.codeMesin.trim());
     const hasMembers = (data.members?.length ?? 0) > 0;
     const hasQtyAct = Boolean(data.qtyAct && data.qtyAct.trim());
     const hasReadings = (arr?: string[]) => (arr ?? []).some((v) => v.trim().length > 0);
@@ -65,16 +66,7 @@ const saveSchema = z
     const hasVisco = hasReadings(data.visco);
     const hasSuhu = hasReadings(data.suhu);
 
-    if (hasFormReceived) {
-      if (!hasLeader) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Form Received sudah diisi." });
-      if (!hasCodeTanki1) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeTanki1"], message: "Code Tanki 1 (Couple) wajib diisi kalau Form Received sudah diisi." });
-      if (!hasCodeMesin) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeMesin"], message: "Code Mesin wajib diisi kalau Form Received sudah diisi." });
-    }
     if (hasStart) {
-      if (!hasFormReceived) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["formReceived"], message: "Form Received wajib diisi kalau Start sudah diisi." });
-      if (!hasLeader) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["leader"], message: "Leader wajib diisi kalau Start sudah diisi." });
-      if (!hasCodeTanki1) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeTanki1"], message: "Code Tanki 1 (Couple) wajib diisi kalau Start sudah diisi." });
-      if (!hasCodeMesin) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["codeMesin"], message: "Code Mesin wajib diisi kalau Start sudah diisi." });
       if (!hasMembers) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start sudah diisi." });
       if (!hasQtyAct) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qtyAct"], message: "Qty Act wajib diisi kalau Start sudah diisi." });
       if (!hasFineness) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fineness"], message: "Fineness wajib diisi kalau Start sudah diisi." });

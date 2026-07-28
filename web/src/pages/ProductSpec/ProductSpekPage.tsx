@@ -443,22 +443,39 @@ export default function ProductSpekPage() {
                   key: "actions",
                   label: "Aksi",
                   render: (r) => (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-info" type="button" onClick={() => setDetailSpec(findSpec(r.specId))}>
-                        Detail
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="btn btn-info"
+                        type="button"
+                        title="Detail"
+                        aria-label="Detail"
+                        style={{ padding: "6px 10px" }}
+                        onClick={() => setDetailSpec(findSpec(r.specId))}
+                      >
+                        🔍
                       </button>
-                      <button className="btn btn-outline" type="button" onClick={() => startEdit(findSpec(r.specId))}>
-                        Edit
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        title="Edit"
+                        aria-label="Edit"
+                        style={{ padding: "6px 10px" }}
+                        onClick={() => startEdit(findSpec(r.specId))}
+                      >
+                        ✏️
                       </button>
                       {user?.access === "FULL_ACCESS" && (
                         <button
                           className="btn btn-danger"
                           type="button"
+                          title="Hapus"
+                          aria-label="Hapus"
+                          style={{ padding: "6px 10px" }}
                           onClick={() => {
                             if (confirm(`Hapus Spec untuk ${r.materialDescription}?`)) deleteMutation.mutate(r.specId);
                           }}
                         >
-                          Hapus
+                          🗑️
                         </button>
                       )}
                     </div>

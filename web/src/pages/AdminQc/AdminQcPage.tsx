@@ -1,0 +1,788 @@
+import { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError, fileUrl } from "../../api/client";
+import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
+import TankSelect from "../../components/TankSelect";
+import IuPlantSelect from "../../components/IuPlantSelect";
+import DataTable from "../../components/DataTable";
+import Modal from "../../components/Modal";
+import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
+import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
+import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { useAuth } from "../../auth/AuthContext";
+
+/** Portal Quality Control > Input Admin QC (2026-07-28) -- header administratif
+ * tahap QC (Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed)
+ * disimpan di tabel AdminQc TERPISAH dari Planning > Approval (lihat
+ * server/prisma/schema.prisma), terhubung cuma lewat nomor Order. Spec
+ * Parameters di bawahnya BUKAN data baru -- itu CheckResult/CheckResultParameter
+ * yg SAMA PERSIS dgn menu "Input Check Results" (1 sumber data QC, bisa
+ * diedit dari 2 halaman), sesuai keputusan eksplisit user. */
+
+interface AdminQcRow {
+  adminQcId: string;
+  timestamp: string;
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string | null;
+  codeTanki: string | null;
+  typeLot: string | null;
+  mrpPic: string | null;
+  salesPic: string | null;
+  lotPassed: string | null;
+  qcToApproval: string | null;
+  qcPassed: string | null;
+  remark: string | null;
+  inputBy: string;
+}
+
+interface AdminQcHistoryRow extends AdminQcRow {
+  attachments: { id: number; fileName: string; filePath: string }[];
+}
+
+interface ParamRow {
+  no: number;
+  parameter: string;
+  standard: string;
+  result: string;
+  remark: string;
+  start: string;
+  finish: string;
+  pic: string;
+}
+
+interface CheckRow {
+  checkId: string;
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  customer: string | null;
+  custSegmen: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string | null;
+  lotCoa: string | null;
+  codeTanki: string | null;
+  remark: string | null;
+  appearanceNotes: string | null;
+  checkNotes: string | null;
+  parameters: ParamRow[];
+}
+
+interface LinkedSpecParameter {
+  no: number;
+  itemCheck: string;
+  standardSpec: string | null;
+  unit: string | null;
+}
+
+interface LinkedSpec {
+  specId: string;
+  parameters: LinkedSpecParameter[];
+}
+
+/** Field CheckResult yg TIDAK ditampilkan di halaman ini (Customer/Cust Segmen/
+ * Lot COA/Appearance Notes/Check Notes/Remark) -- kalau ada record CheckResult
+ * yg sudah ada utk Order ini, nilainya dibawa apa adanya (bukan dikosongkan)
+ * saat Save, supaya Input Admin QC tidak menimpa data yg dikelola dari menu
+ * "Input Check Results". */
+interface CheckPassthrough {
+  checkId: string | null;
+  customer: string;
+  custSegmen: string;
+  lotCoa: string;
+  appearanceNotes: string;
+  checkNotes: string;
+  remark: string;
+}
+
+const emptyCheckPassthrough: CheckPassthrough = {
+  checkId: null,
+  customer: "",
+  custSegmen: "",
+  lotCoa: "",
+  appearanceNotes: "",
+  checkNotes: "",
+  remark: "",
+};
+
+function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
+  return {
+    no: p.no,
+    parameter: p.itemCheck,
+    standard: [p.standardSpec, p.unit].filter(Boolean).join(" "),
+    result: "",
+    remark: "",
+    start: "",
+    finish: "",
+    pic: "",
+  };
+}
+
+const emptyForm = {
+  order: "",
+  materialNumber: "",
+  materialDescription: "",
+  batch: "",
+  orderQty: "",
+  plant: "",
+  iuPlant: "",
+  codeTanki: "",
+  typeLot: "",
+  mrpPic: "",
+  salesPic: "",
+  lotPassed: "",
+  qcToApproval: "",
+  qcPassed: "",
+  remark: "",
+};
+
+const HEADER_COL_DEFAULT_WIDTHS: Record<string, number> = {
+  order: 140,
+  materialNumber: 140,
+  materialDescription: 240,
+  batch: 120,
+  orderQty: 110,
+  plant: 100,
+  iuPlant: 140,
+  codeTanki: 140,
+  typeLot: 160,
+  mrpPic: 150,
+  salesPic: 150,
+  lotPassed: 170,
+  qcToApproval: 170,
+  qcPassed: 170,
+};
+
+const HEADER_COL_ROWS: string[][] = [
+  ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
+  ["iuPlant", "codeTanki", "typeLot", "mrpPic", "salesPic", "lotPassed", "qcToApproval", "qcPassed"],
+];
+
+const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
+  no: 44,
+  itemCheck: 220,
+  spec: 130,
+  result: 130,
+  verdict: 90,
+  start: 180,
+  finish: 180,
+  pic: 110,
+};
+
+/** Header tabel Spec Parameters dengan drag-handle di kanan utk mengubah lebar kolom bebas. */
+function ResizableHeader({ width, onResizeStart, children }: { width: number; onResizeStart: (e: ReactMouseEvent) => void; children: ReactNode }) {
+  return (
+    <th style={{ width, position: "relative" }}>
+      {children}
+      <div onMouseDown={onResizeStart} style={{ position: "absolute", right: 0, top: 0, height: "100%", width: 6, cursor: "col-resize" }} />
+    </th>
+  );
+}
+
+export default function AdminQcPage() {
+  const { user } = useAuth();
+  const { data: employees } = useEmployeeOptions();
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useState<"input" | "history">("input");
+  const [form, setForm] = useState(emptyForm);
+  const [params, setParams] = useState<ParamRow[]>([]);
+  const [checkPassthrough, setCheckPassthrough] = useState<CheckPassthrough>(emptyCheckPassthrough);
+  const [specStatus, setSpecStatus] = useState<"idle" | "loading" | "found" | "not-found">("idle");
+  const [editingAdminQcId, setEditingAdminQcId] = useState<string | null>(null);
+  const [lastSavedAdminQcId, setLastSavedAdminQcId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [attachFile, setAttachFile] = useState<File | null>(null);
+  const [attachmentModalId, setAttachmentModalId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { widths: headerColWidths, beginResize: beginHeaderResize, guideX, reset: resetHeaderColWidths } = useResizableColWidths(
+    HEADER_COL_DEFAULT_WIDTHS,
+    "adminQcHeaderColWidths",
+    HEADER_COL_ROWS
+  );
+  const { widths: specColWidths, beginResize: beginSpecResize, reset: resetSpecColWidths } = useResizableColWidths(
+    SPEC_TABLE_DEFAULT_WIDTHS,
+    "adminQcSpecColWidths"
+  );
+
+  function resetAllColWidths() {
+    resetHeaderColWidths();
+    resetSpecColWidths();
+  }
+
+  const historyQuery = useQuery({
+    queryKey: ["admin-qc-history"],
+    queryFn: () => api.get<{ success: boolean; data: AdminQcHistoryRow[] }>("/admin-qc/history").then((r) => r.data),
+  });
+
+  const attachmentsQuery = useQuery({
+    queryKey: ["admin-qc-attachments-modal", attachmentModalId],
+    queryFn: () =>
+      (historyQuery.data ?? []).find((r) => r.adminQcId === attachmentModalId)?.attachments ?? [],
+    enabled: !!attachmentModalId,
+  });
+
+  async function loadSpecForMaterial(materialNumber: string) {
+    const matNo = materialNumber.trim();
+    if (!matNo) {
+      setSpecStatus("idle");
+      setParams([]);
+      return;
+    }
+    setSpecStatus("loading");
+    try {
+      const res = await api.get<{ success: boolean; data: LinkedSpec }>(`/product-specs/by-material/${encodeURIComponent(matNo)}`);
+      setParams(res.data.parameters.map(paramRowFromSpec));
+      setSpecStatus("found");
+    } catch {
+      setParams([]);
+      setSpecStatus("not-found");
+    }
+  }
+
+  async function handleOrderFound(data: OrderRefData) {
+    setForm((f) => ({
+      ...f,
+      materialNumber: data.materialNumber ?? "",
+      materialDescription: data.materialDescription ?? "",
+      batch: data.batch ?? "",
+      orderQty: data.orderQty ?? "",
+      plant: data.plant ?? "",
+    }));
+
+    setEditingAdminQcId(null);
+    setLastSavedAdminQcId(null);
+    try {
+      const res = await api.get<{ success: boolean; data: AdminQcRow | null }>(`/admin-qc/latest-by-order/${encodeURIComponent(data.order)}`);
+      if (res.data) {
+        const latest = res.data;
+        setEditingAdminQcId(latest.adminQcId);
+        setLastSavedAdminQcId(latest.adminQcId);
+        setForm((f) => ({
+          ...f,
+          iuPlant: f.iuPlant || latest.iuPlant || "",
+          codeTanki: f.codeTanki || latest.codeTanki || "",
+          typeLot: f.typeLot || latest.typeLot || "",
+          mrpPic: f.mrpPic || latest.mrpPic || "",
+          salesPic: f.salesPic || latest.salesPic || "",
+          lotPassed: f.lotPassed || latest.lotPassed || "",
+          qcToApproval: f.qcToApproval || latest.qcToApproval || "",
+          qcPassed: f.qcPassed || latest.qcPassed || "",
+          remark: f.remark || latest.remark || "",
+        }));
+      }
+    } catch {
+      /* belum ada histori Admin QC utk Order ini -- biarkan kosong */
+    }
+
+    try {
+      const ctx = await api.get<{ success: boolean; data: { iuPlant: string; codeTanki: string } | null }>(
+        `/master-data/order-context/${encodeURIComponent(data.order)}`
+      );
+      if (ctx.data) {
+        setForm((f) => ({
+          ...f,
+          iuPlant: f.iuPlant || ctx.data!.iuPlant || "",
+          codeTanki: f.codeTanki || ctx.data!.codeTanki || "",
+        }));
+      }
+    } catch {
+      /* saran IU Plant/Code Tanki bersifat opsional -- kalau gagal, biarkan user isi manual */
+    }
+
+    // Spec Parameters -- prioritaskan Check Results yg SUDAH ADA utk Order ini
+    // (data yg sama dgn "Input Check Results"); kalau belum ada sama sekali,
+    // fallback ke Product Spek berdasarkan Material Number, sama pola dgn
+    // CheckResultsPage.tsx.
+    try {
+      const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(data.order)}`);
+      if (cr.data) {
+        setCheckPassthrough({
+          checkId: cr.data.checkId,
+          customer: cr.data.customer ?? "",
+          custSegmen: cr.data.custSegmen ?? "",
+          lotCoa: cr.data.lotCoa ?? "",
+          appearanceNotes: cr.data.appearanceNotes ?? "",
+          checkNotes: cr.data.checkNotes ?? "",
+          remark: cr.data.remark ?? "",
+        });
+        setParams(
+          cr.data.parameters.map((p) => ({
+            no: p.no,
+            parameter: p.parameter,
+            standard: p.standard ?? "",
+            result: p.result ?? "",
+            remark: p.remark ?? "",
+            start: p.start ?? "",
+            finish: p.finish ?? "",
+            pic: p.pic ?? "",
+          }))
+        );
+        setSpecStatus("found");
+      } else {
+        setCheckPassthrough(emptyCheckPassthrough);
+        await loadSpecForMaterial(data.materialNumber ?? "");
+      }
+    } catch {
+      setCheckPassthrough(emptyCheckPassthrough);
+      await loadSpecForMaterial(data.materialNumber ?? "");
+    }
+  }
+
+  function updateParam(idx: number, patch: Partial<ParamRow>) {
+    setParams((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  function resetForm() {
+    setForm(emptyForm);
+    setParams([]);
+    setCheckPassthrough(emptyCheckPassthrough);
+    setSpecStatus("idle");
+    setEditingAdminQcId(null);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const adminQcRes = editingAdminQcId
+        ? await api.put<{ success: boolean; data: AdminQcRow }>(`/admin-qc/${editingAdminQcId}`, form)
+        : await api.post<{ success: boolean; data: AdminQcRow }>("/admin-qc", form);
+
+      if (params.length > 0) {
+        const checkPayload = {
+          order: form.order,
+          materialNumber: form.materialNumber,
+          materialDescription: form.materialDescription,
+          batch: form.batch,
+          orderQty: form.orderQty,
+          plant: form.plant,
+          iuPlant: form.iuPlant,
+          codeTanki: form.codeTanki,
+          customer: checkPassthrough.customer,
+          custSegmen: checkPassthrough.custSegmen,
+          lotCoa: checkPassthrough.lotCoa,
+          appearanceNotes: checkPassthrough.appearanceNotes,
+          checkNotes: checkPassthrough.checkNotes,
+          remark: checkPassthrough.remark,
+          parameters: params,
+        };
+        if (checkPassthrough.checkId) {
+          await api.put(`/check-results/${checkPassthrough.checkId}`, checkPayload);
+        } else {
+          const created = await api.post<{ success: boolean; data: CheckRow }>("/check-results", checkPayload);
+          setCheckPassthrough((p) => ({ ...p, checkId: created.data.checkId }));
+        }
+      }
+
+      return adminQcRes;
+    },
+    onSuccess: (res) => {
+      setError("");
+      const wasEditing = editingAdminQcId;
+      const savedId = res.data.adminQcId;
+      resetForm();
+      setLastSavedAdminQcId(savedId);
+      queryClient.invalidateQueries({ queryKey: ["admin-qc-history"] });
+      if (attachFile) {
+        uploadMutation.mutate({ adminQcId: savedId, file: attachFile });
+      } else {
+        setMessage(wasEditing ? "Data Admin QC berhasil diperbarui." : "Data Admin QC berhasil disimpan.");
+      }
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ adminQcId, file }: { adminQcId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return api.post(`/admin-qc/${adminQcId}/attachments`, formData);
+    },
+    onSuccess: () => {
+      setMessage("Data & lampiran berhasil disimpan.");
+      setAttachFile(null);
+      queryClient.invalidateQueries({ queryKey: ["admin-qc-history"] });
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Data tersimpan, tapi gagal mengunggah lampiran."),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (adminQcId: string) => api.delete(`/admin-qc/${adminQcId}`),
+    onSuccess: () => {
+      setMessage("Data Admin QC berhasil dihapus.");
+      queryClient.invalidateQueries({ queryKey: ["admin-qc-history"] });
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menghapus data."),
+  });
+
+  function startEdit(row: AdminQcHistoryRow) {
+    setEditingAdminQcId(row.adminQcId);
+    setLastSavedAdminQcId(row.adminQcId);
+    setForm({
+      order: row.order,
+      materialNumber: row.materialNumber ?? "",
+      materialDescription: row.materialDescription ?? "",
+      batch: row.batch ?? "",
+      orderQty: row.orderQty ?? "",
+      plant: row.plant ?? "",
+      iuPlant: row.iuPlant ?? "",
+      codeTanki: row.codeTanki ?? "",
+      typeLot: row.typeLot ?? "",
+      mrpPic: row.mrpPic ?? "",
+      salesPic: row.salesPic ?? "",
+      lotPassed: row.lotPassed ?? "",
+      qcToApproval: row.qcToApproval ?? "",
+      qcPassed: row.qcPassed ?? "",
+      remark: row.remark ?? "",
+    });
+    void (async () => {
+      try {
+        const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(row.order)}`);
+        if (cr.data) {
+          setCheckPassthrough({
+            checkId: cr.data.checkId,
+            customer: cr.data.customer ?? "",
+            custSegmen: cr.data.custSegmen ?? "",
+            lotCoa: cr.data.lotCoa ?? "",
+            appearanceNotes: cr.data.appearanceNotes ?? "",
+            checkNotes: cr.data.checkNotes ?? "",
+            remark: cr.data.remark ?? "",
+          });
+          setParams(
+            cr.data.parameters.map((p) => ({
+              no: p.no,
+              parameter: p.parameter,
+              standard: p.standard ?? "",
+              result: p.result ?? "",
+              remark: p.remark ?? "",
+              start: p.start ?? "",
+              finish: p.finish ?? "",
+              pic: p.pic ?? "",
+            }))
+          );
+          setSpecStatus("found");
+        } else {
+          setCheckPassthrough(emptyCheckPassthrough);
+          await loadSpecForMaterial(row.materialNumber ?? "");
+        }
+      } catch {
+        setCheckPassthrough(emptyCheckPassthrough);
+      }
+    })();
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setMessage("");
+    setError("");
+    if (!isKnownEmployeeName(employees, form.mrpPic)) {
+      setError("Mrp Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownEmployeeName(employees, form.salesPic)) {
+      setError("Sales Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    const invalidPic = params.find((p) => !isKnownEmployeeName(employees, p.pic));
+    if (invalidPic) {
+      setError(`PIC "${invalidPic.pic}" tidak ditemukan di Data Karyawan. Pilih dari daftar saran.`);
+      return;
+    }
+    saveMutation.mutate();
+  }
+
+  const filteredHistory = (historyQuery.data ?? []).filter((row) =>
+    search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+          Input Admin QC
+        </button>
+        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+          History
+        </button>
+      </div>
+
+      {tab === "input" && (
+        <form className="panel" onSubmit={handleSubmit}>
+          <div className="panel-body">
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <button type="button" className="btn btn-outline" style={{ padding: "3px 10px", fontSize: "0.78rem" }} onClick={resetAllColWidths}>
+                ↺ Reset Lebar Kolom
+              </button>
+            </div>
+            <ExcelBlock title="Portal Quality Control » Input Admin QC">
+              {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
+              <ExcelRow>
+                <ExcelField label="Order" widthPx={headerColWidths.order} onResizeStart={beginHeaderResize("order")}>
+                  <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
+                </ExcelField>
+                <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderResize("materialNumber")}>
+                  <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
+                </ExcelField>
+                <ExcelField label="Material Description" widthPx={headerColWidths.materialDescription} onResizeStart={beginHeaderResize("materialDescription")}>
+                  <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
+                </ExcelField>
+                <ExcelField label="Batch" widthPx={headerColWidths.batch} onResizeStart={beginHeaderResize("batch")}>
+                  <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
+                </ExcelField>
+                <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderResize("orderQty")}>
+                  <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
+                </ExcelField>
+                <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderResize("plant")}>
+                  <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
+                </ExcelField>
+              </ExcelRow>
+              <ExcelRow>
+                <ExcelField label="IU Plant" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderResize("iuPlant")}>
+                  <IuPlantSelect bare id="admin-qc-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} />
+                </ExcelField>
+                <ExcelField label="Code Tanki" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderResize("codeTanki")}>
+                  <TankSelect bare id="admin-qc-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
+                </ExcelField>
+                <ExcelField label="Admin QC Stage" widthPx={headerColWidths.typeLot} onResizeStart={beginHeaderResize("typeLot")}>
+                  <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })}>
+                    <option value="">-- Pilih --</option>
+                    <option value="Improve">Improve</option>
+                    <option value="Joint Lot">Joint Lot</option>
+                    <option value="Lot Packing">Lot Packing</option>
+                    <option value="Approval">Approval</option>
+                  </select>
+                </ExcelField>
+                <ExcelField label="Mrp Pic" widthPx={headerColWidths.mrpPic} onResizeStart={beginHeaderResize("mrpPic")}>
+                  <EmployeeNameSelect bare id="admin-qc-mrp-pic" value={form.mrpPic} onChange={(v) => setForm({ ...form, mrpPic: v })} />
+                </ExcelField>
+                <ExcelField label="Sales Pic" widthPx={headerColWidths.salesPic} onResizeStart={beginHeaderResize("salesPic")}>
+                  <EmployeeNameSelect bare id="admin-qc-sales-pic" value={form.salesPic} onChange={(v) => setForm({ ...form, salesPic: v })} />
+                </ExcelField>
+                <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")}>
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} />
+                </ExcelField>
+                <ExcelField label="QC to App" widthPx={headerColWidths.qcToApproval} onResizeStart={beginHeaderResize("qcToApproval")}>
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} />
+                </ExcelField>
+                <ExcelField label="QC Passed" widthPx={headerColWidths.qcPassed} onResizeStart={beginHeaderResize("qcPassed")}>
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} />
+                </ExcelField>
+              </ExcelRow>
+            </ExcelBlock>
+
+            <h3 className="pp-section-title" style={{ marginTop: 18 }}>
+              Spec Parameters
+            </h3>
+            {specStatus === "idle" && (
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cari Order dulu supaya Spec Parameters otomatis terisi.</p>
+            )}
+            {specStatus === "loading" && <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Memuat Spec Parameters...</p>}
+            {specStatus === "not-found" && (
+              <p className="error-text">
+                Belum ada Check Results maupun Product Spek untuk Order/Material Number "{form.materialNumber}". Isi dulu
+                di menu <strong>Input Check Results</strong> atau <strong>Creating Product Spek</strong>.
+              </p>
+            )}
+            {specStatus === "found" && (
+              <p className="status-text">
+                {checkPassthrough.checkId ? `Terhubung ke Check Results ${checkPassthrough.checkId}` : "Spec Parameters dari Product Spek"} (
+                {params.length} item check).
+              </p>
+            )}
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table" style={{ tableLayout: "fixed" }}>
+                <thead>
+                  <tr>
+                    <ResizableHeader width={specColWidths.no} onResizeStart={beginSpecResize("no")}>No</ResizableHeader>
+                    <ResizableHeader width={specColWidths.itemCheck} onResizeStart={beginSpecResize("itemCheck")}>Item Check</ResizableHeader>
+                    <ResizableHeader width={specColWidths.spec} onResizeStart={beginSpecResize("spec")}>Spec</ResizableHeader>
+                    <ResizableHeader width={specColWidths.result} onResizeStart={beginSpecResize("result")}>Result</ResizableHeader>
+                    <ResizableHeader width={specColWidths.verdict} onResizeStart={beginSpecResize("verdict")}>Verdict</ResizableHeader>
+                    <ResizableHeader width={specColWidths.start} onResizeStart={beginSpecResize("start")}>Start</ResizableHeader>
+                    <ResizableHeader width={specColWidths.finish} onResizeStart={beginSpecResize("finish")}>Finish</ResizableHeader>
+                    <ResizableHeader width={specColWidths.pic} onResizeStart={beginSpecResize("pic")}>PIC</ResizableHeader>
+                  </tr>
+                </thead>
+                <tbody>
+                  {params.map((p, idx) => {
+                    const verdict = evaluateSpec(p.standard, p.result);
+                    return (
+                      <tr key={idx}>
+                        <td style={{ width: 40 }}>{p.no}</td>
+                        <td>{p.parameter}</td>
+                        <td>{p.standard || "-"}</td>
+                        <td>
+                          <input style={{ background: SPEC_VERDICT_COLOR[verdict] }} value={p.result} onChange={(e) => updateParam(idx, { result: e.target.value })} />
+                        </td>
+                        <td>{SPEC_VERDICT_LABEL[verdict]}</td>
+                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
+                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
+                        <td>
+                          <EmployeeNameSelect bare id={`admin-qc-pic-${idx}`} value={p.pic} onChange={(v) => updateParam(idx, { pic: v })} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {params.length === 0 && (
+                    <tr>
+                      <td colSpan={8}>Belum ada Spec Parameters.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="field" style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                <label style={{ margin: 0 }}>Remark</label>
+                <button type="button" className="btn btn-info" style={{ padding: "3px 12px" }} onClick={() => fileInputRef.current?.click()}>
+                  Upload File
+                </button>
+                {attachFile && <span style={{ fontSize: 12, color: "var(--muted)" }}>{attachFile.name}</span>}
+                <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={(e) => setAttachFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <textarea rows={5} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
+            </div>
+
+            {error && <p className="error-text">{error}</p>}
+            {message && <p className="status-text">{message}</p>}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button className="btn btn-success" type="submit" disabled={saveMutation.isPending || uploadMutation.isPending}>
+                {saveMutation.isPending || uploadMutation.isPending ? "Menyimpan..." : editingAdminQcId ? "Simpan Perubahan" : "Save Data"}
+              </button>
+              {editingAdminQcId && (
+                <button type="button" className="btn btn-outline" onClick={resetForm}>
+                  Batal Edit
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+      )}
+
+      {tab === "history" && (
+        <div className="panel">
+          <div className="panel-header">History Admin QC</div>
+          <div className="panel-body">
+            <input
+              placeholder="Cari nomor Order..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: AdminQcHistoryRow) => r.adminQcId}
+              exportFileName="history-admin-qc"
+              storageKey="admin-qc-history"
+              rows={filteredHistory}
+              columns={[
+                {
+                  key: "timestamp",
+                  label: "Timestamp",
+                  render: (r) => formatDateTime(r.timestamp),
+                  csvValue: (r) => toExcelDateTimeString(r.timestamp),
+                },
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
+                { key: "typeLot", label: "Admin QC Stage", render: (r) => r.typeLot },
+                { key: "mrpPic", label: "Mrp Pic", render: (r) => r.mrpPic },
+                { key: "salesPic", label: "Sales Pic", render: (r) => r.salesPic },
+                {
+                  key: "lotPassed",
+                  label: "Lot Passed",
+                  render: (r) => formatDateTime(r.lotPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.lotPassed),
+                },
+                {
+                  key: "qcToApproval",
+                  label: "QC to App",
+                  render: (r) => formatDateTime(r.qcToApproval),
+                  csvValue: (r) => toExcelDateTimeString(r.qcToApproval),
+                },
+                {
+                  key: "qcPassed",
+                  label: "QC Passed",
+                  render: (r) => formatDateTime(r.qcPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.qcPassed),
+                },
+                { key: "remark", label: "Remark", render: (r) => r.remark },
+                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+                { key: "attachments", label: "Lampiran", render: (r) => (r.attachments.length ? `${r.attachments.length} file` : "-") },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
+                        ✏️
+                      </button>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        title="Lampiran"
+                        aria-label="Lampiran"
+                        style={{ padding: "6px 10px" }}
+                        onClick={() => setAttachmentModalId(r.adminQcId)}
+                      >
+                        📎
+                      </button>
+                      {user?.access === "FULL_ACCESS" && (
+                        <button
+                          className="btn btn-danger"
+                          type="button"
+                          title="Hapus"
+                          aria-label="Hapus"
+                          style={{ padding: "6px 10px" }}
+                          onClick={() => {
+                            if (confirm(`Hapus data Admin QC untuk Order ${r.order}?`)) deleteMutation.mutate(r.adminQcId);
+                          }}
+                        >
+                          🗑️
+                        </button>
+                      )}
+                    </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {attachmentModalId && (
+        <Modal title={`Lampiran — ${attachmentModalId}`} onClose={() => setAttachmentModalId(null)}>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {(attachmentsQuery.data ?? []).map((a) => (
+              <li key={a.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                <a href={fileUrl(a.filePath)} target="_blank" rel="noreferrer">
+                  {a.fileName}
+                </a>
+              </li>
+            ))}
+            {(attachmentsQuery.data ?? []).length === 0 && <li>Belum ada lampiran.</li>}
+          </ul>
+        </Modal>
+      )}
+    </div>
+  );
+}

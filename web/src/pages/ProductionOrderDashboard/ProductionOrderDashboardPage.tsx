@@ -19,6 +19,10 @@ interface ProductionOrderRow {
   leadTimeProses: number;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
+  /** Label Proses Packing, TERPISAH dari kolom "Proses" -- sesuai instruksi
+   * eksplisit user (2026-07-28): kolom "Proses" cuma boleh diisi
+   * Premix/Milling/Aftermix/Colour Matching/QC/Approval. */
+  productionActions: string | null;
 }
 
 interface QcParamDetail {
@@ -47,6 +51,21 @@ interface ProcessRemark {
   process: string;
   remark: string | null;
   timestamp: string;
+}
+
+/** Detail Milling (input Fineness/Visco/Suhu per Pass) utk popup kolom
+ * "Proses" saat statusnya salah satu tahap Milling -- dari GET
+ * /milling/latest-by-order/:order (record Milling paling terakhir utk Order
+ * ini, sama sumbernya dgn yg dipakai MillingPage sendiri). */
+interface MillingDetail {
+  codeMesin: string | null;
+  spvProduksi: string;
+  leader: string | null;
+  start: string | null;
+  finish: string | null;
+  fineness: string[] | null;
+  visco: string[] | null;
+  suhu: string[] | null;
 }
 
 /**
@@ -84,11 +103,18 @@ const STAGE_ABBR: Record<string, string> = {
 };
 
 /** Label Proses tahap Approval (lihat approvalProcessLabel di
- * dashboard.routes.ts) -- beberapa di antaranya DIAWALI "QC" (mis. "QC - AP")
- * krn tahap paling awal Approval namanya masih menyebut QC, tapi ini BUKAN
- * hasil Input Check Results -- jadi harus dikecualikan dari deteksi "isQc"
- * (warna & popup Item Check) di bawah, supaya tidak ketuker sama Proses QC asli. */
-const APPROVAL_STAGE_LABELS = new Set(["QC - AP", "Prep - AP", "AP - Tech", "AP - SubmTech", "AP - Cust", "AP - OK"]);
+ * dashboard.routes.ts, direvisi 2026-07-28) -- 2 di antaranya DIAWALI "QC"
+ * ("QC - Joint Lot"/"QC - DN") krn nama tahapnya masih menyebut QC, tapi ini
+ * BUKAN hasil Input Check Results -- jadi SEMUA label di set ini dikecualikan
+ * dari deteksi "isQc" (popup Item Check) di bawah, supaya tidak ketuker sama
+ * Proses QC asli. */
+const APPROVAL_STAGE_LABELS = new Set(["Improve", "QC - Joint Lot", "QC - DN", "QU - Approval", "Approval", "Approval - DN"]);
+
+/** 2 dari label Approval di atas SENGAJA diberi warna QC (kuning) bukan warna
+ * Approval (olive) -- "Joint Lot"/"Lot Packing" masih bagian alur pengecekan
+ * QC secara bisnis, sesuai instruksi eksplisit user (2026-07-28). Dicek
+ * LEBIH DULU dari APPROVAL_STAGE_LABELS di getProcessColor supaya menang. */
+const APPROVAL_QC_COLOR_LABELS = new Set(["QC - Joint Lot", "QC - DN"]);
 
 /** Label Proses tahap granular Packing (lihat packingProcessLabel di
  * dashboard.routes.ts) -- direvisi 2026-07-24: tahap Start & Finish sekarang
@@ -124,6 +150,7 @@ const AFTERMIX_STAGE_LABELS = new Set(["QU - Aftermix", "Aftermix", "Aftermix - 
  * Matching", "QC : Visco : Pass") -- dicocokkan ke salah satu warna di
  * STAGE_COLORS lewat prefix/substring, bukan exact match. */
 function getProcessColor(process: string): { bg: string; fg: string } {
+  if (APPROVAL_QC_COLOR_LABELS.has(process)) return STAGE_COLORS.QC;
   if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
   if (PACKING_STAGE_LABELS.has(process)) return STAGE_COLORS.Packing;
   if (PREMIX_STAGE_LABELS.has(process)) return STAGE_COLORS.Premix;
@@ -134,13 +161,19 @@ function getProcessColor(process: string): { bg: string; fg: string } {
   return STAGE_COLORS[process] ?? { bg: "#e2e8f0", fg: "#1e293b" };
 }
 
-function ProcessBadge({ process, onClick }: { process: string; onClick?: () => void }) {
-  const isQc = process.startsWith("QC") && !APPROVAL_STAGE_LABELS.has(process);
+/** `onClick`/`tooltip` opsional -- kalau diisi (lihat pemanggil di kolom
+ * "Proses" -- QC & Milling py popup detailnya sendiri2), badge jadi
+ * clickable+underline; kalau tidak, tampil biasa (bukan link). Sebelumnya
+ * "clickable" ditentukan HARDCODE di dalam komponen ini (cuma cek prefix
+ * "QC"), dipindah ke pemanggil supaya tahap lain (mis. Milling) bisa py
+ * popup detailnya sendiri juga, sesuai permintaan eksplisit user (2026-07-28). */
+function ProcessBadge({ process, onClick, tooltip }: { process: string; onClick?: () => void; tooltip?: string }) {
   const colors = getProcessColor(process);
+  const clickable = Boolean(onClick);
   return (
     <span
-      onClick={isQc ? onClick : undefined}
-      title={isQc ? "Klik utk lihat detail Item Check, Start, Finish, Verdict" : undefined}
+      onClick={onClick}
+      title={tooltip}
       style={{
         display: "inline-block",
         padding: "2px 10px",
@@ -150,8 +183,8 @@ function ProcessBadge({ process, onClick }: { process: string; onClick?: () => v
         whiteSpace: "nowrap",
         background: colors.bg,
         color: colors.fg,
-        cursor: isQc ? "pointer" : "default",
-        textDecoration: isQc ? "underline" : "none",
+        cursor: clickable ? "pointer" : "default",
+        textDecoration: clickable ? "underline" : "none",
       }}
     >
       {process}
@@ -238,11 +271,58 @@ function StageChip({ label, done, colors }: { label: string; done: boolean; colo
   );
 }
 
+/** Isi popup detail Milling: tabel Pass 1..N (Fineness/Visco/Suhu), full dari
+ * Pass pertama sampai terakhir yg sudah diinput -- sesuai permintaan
+ * eksplisit user (2026-07-28), sama pola tabel Pass di History Milling. */
+function MillingDetailTable({ detail }: { detail: MillingDetail }) {
+  const finenessArr = detail.fineness ?? [];
+  const viscoArr = detail.visco ?? [];
+  const suhuArr = detail.suhu ?? [];
+  const passCount = Math.max(finenessArr.length, viscoArr.length, suhuArr.length);
+  return (
+    <>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Pass</th>
+              <th>Fineness</th>
+              <th>Visco</th>
+              <th>Suhu</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: passCount }).map((_, idx) => (
+              <tr key={idx}>
+                <td>Pass {idx + 1}</td>
+                <td>{finenessArr[idx] || "-"}</td>
+                <td>{viscoArr[idx] || "-"}</td>
+                <td>{suhuArr[idx] || "-"}</td>
+              </tr>
+            ))}
+            {passCount === 0 && (
+              <tr>
+                <td colSpan={4}>Belum ada bacaan Fineness/Visco/Suhu.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+        Code Mesin: {detail.codeMesin || "-"} · SPV Produksi: {detail.spvProduksi || "-"} · Leader: {detail.leader || "-"}
+        <br />
+        Start: {formatDateTime(detail.start)} · Finish: {detail.finish ? formatDateTime(detail.finish) : "Belum selesai"}
+      </p>
+    </>
+  );
+}
+
 export default function ProductionOrderDashboardPage() {
   const [search, setSearch] = useState("");
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [leadTimeDetailOrder, setLeadTimeDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
+  const [millingDetailOrder, setMillingDetailOrder] = useState<string | null>(null);
 
   const rowsQuery = useQuery({
     queryKey: ["dashboard-production-orders", search],
@@ -281,6 +361,15 @@ export default function ProductionOrderDashboardPage() {
         )
         .then((r) => r.data),
     enabled: remarkDetailOrder != null,
+  });
+
+  const millingDetailQuery = useQuery({
+    queryKey: ["dashboard-milling-detail", millingDetailOrder],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: MillingDetail | null }>(`/milling/latest-by-order/${encodeURIComponent(millingDetailOrder!)}`)
+        .then((r) => r.data),
+    enabled: millingDetailOrder != null,
   });
 
   return (
@@ -329,19 +418,62 @@ export default function ProductionOrderDashboardPage() {
             {
               key: "process",
               label: "Proses",
-              render: (r) => <ProcessBadge process={r.process} onClick={() => setQcDetailOrder(r.order)} />,
+              render: (r) => {
+                if (MILLING_STAGE_LABELS.has(r.process)) {
+                  return (
+                    <ProcessBadge
+                      process={r.process}
+                      onClick={() => setMillingDetailOrder(r.order)}
+                      tooltip="Klik utk lihat detail Pass Fineness/Visco/Suhu"
+                    />
+                  );
+                }
+                const isQc = r.process.startsWith("QC") && !APPROVAL_STAGE_LABELS.has(r.process);
+                if (isQc) {
+                  return (
+                    <ProcessBadge
+                      process={r.process}
+                      onClick={() => setQcDetailOrder(r.order)}
+                      tooltip="Klik utk lihat detail Item Check, Start, Finish, Verdict"
+                    />
+                  );
+                }
+                return <ProcessBadge process={r.process} />;
+              },
               csvValue: (r) => r.process,
+            },
+            {
+              key: "productionActions",
+              label: "Production Actions",
+              render: (r) => (r.productionActions ? <ProcessBadge process={r.productionActions} /> : "-"),
+              csvValue: (r) => r.productionActions ?? "-",
             },
             {
               key: "start",
               label: "Start Proses",
-              render: (r) => formatDateTime(r.start),
+              render: (r) => (
+                <span
+                  onClick={() => setLeadTimeDetailOrder(r.order)}
+                  title="Klik utk lihat rangkuman Start & Finish di semua tahap"
+                  style={{ cursor: "pointer", textDecoration: "underline" }}
+                >
+                  {formatDateTime(r.start)}
+                </span>
+              ),
               csvValue: (r) => toExcelDateTimeString(r.start),
             },
             {
               key: "finish",
               label: "Finish Proses",
-              render: (r) => formatDateTime(r.finish),
+              render: (r) => (
+                <span
+                  onClick={() => setLeadTimeDetailOrder(r.order)}
+                  title="Klik utk lihat rangkuman Start & Finish di semua tahap"
+                  style={{ cursor: "pointer", textDecoration: "underline" }}
+                >
+                  {formatDateTime(r.finish)}
+                </span>
+              ),
               csvValue: (r) => toExcelDateTimeString(r.finish),
             },
             {
@@ -422,7 +554,7 @@ export default function ProductionOrderDashboardPage() {
       )}
 
       {leadTimeDetailOrder && (
-        <Modal title={`Lead Time per Proses — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
+        <Modal title={`Start & Finish per Tahap — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
           {leadTimeDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
           {!leadTimeDetailQuery.isLoading && (leadTimeDetailQuery.data?.length ?? 0) === 0 && (
             <p style={{ color: "var(--text-muted)" }}>Belum ada tahapan proses yang punya data Start untuk Order ini.</p>
@@ -491,6 +623,16 @@ export default function ProductionOrderDashboardPage() {
             sendiri-sendiri -- popup ini menampilkan Remark dari SEMUA tahap yang pernah diinput utk Order ini
             sekaligus, bukan cuma Remark dari input paling terakhir (yang tampil di kolom Remark tabel).
           </p>
+        </Modal>
+      )}
+
+      {millingDetailOrder && (
+        <Modal title={`Detail Pass Milling — Order ${millingDetailOrder}`} onClose={() => setMillingDetailOrder(null)} width={520}>
+          {millingDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
+          {!millingDetailQuery.isLoading && !millingDetailQuery.data && (
+            <p style={{ color: "var(--text-muted)" }}>Belum ada data Milling untuk Order ini.</p>
+          )}
+          {millingDetailQuery.data && <MillingDetailTable detail={millingDetailQuery.data} />}
         </Modal>
       )}
     </div>

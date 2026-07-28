@@ -21,6 +21,12 @@ interface ProductionOrderRow {
   leadTimeProses: number;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
+  /** Label Proses Packing utk Order ini, TERPISAH dari kolom "Proses" --
+   * sesuai instruksi eksplisit user (2026-07-28): kolom "Proses" cuma boleh
+   * diisi Premix/Milling/Aftermix/Colour Matching/QC/Approval, Packing tidak
+   * boleh lagi jadi kandidat "paling akhir" utk kolom itu. Lihat
+   * latestPackingLabelByOrder. */
+  productionActions: string | null;
 }
 
 /**
@@ -241,6 +247,27 @@ function latestMoment(start: Date | null, finish: Date | null, fallbackTimestamp
   return finish ?? start ?? fallbackTimestamp;
 }
 
+/**
+ * Label Packing PALING TERAKHIR per Order -- dipakai utk kolom terpisah
+ * "Production Actions" di Dashboard Production Order Monitoring & Tank
+ * Monitoring, sesuai instruksi eksplisit user (2026-07-28): kolom "Proses"
+ * cuma boleh diisi Premix/Milling/Aftermix/Colour Matching/QC/Approval --
+ * Packing TIDAK lagi ikut diadu jadi kandidat "paling akhir" utk kolom itu
+ * (lihat pemanggil -- Packing SENGAJA tidak dimasukkan ke array `rows`/
+ * `touches` yg dipakai utk menentukan pemenang "Proses").
+ */
+function latestPackingLabelByOrder(rows: (PackingStageFields & { timestamp: Date })[]): Map<string, string> {
+  const latestByOrder = new Map<string, { moment: Date; row: PackingStageFields }>();
+  for (const r of rows) {
+    const moment = latestMoment(r.start, r.finish, r.timestamp);
+    const existing = latestByOrder.get(r.order);
+    if (!existing || moment.getTime() > existing.moment.getTime()) latestByOrder.set(r.order, { moment, row: r });
+  }
+  const labels = new Map<string, string>();
+  for (const [order, { row }] of latestByOrder) labels.set(order, packingProcessLabel(row));
+  return labels;
+}
+
 interface QcParam {
   parameter: string;
   standard: string | null;
@@ -279,6 +306,7 @@ function qcProcessLabel(param: QcParam | undefined): string {
 }
 
 interface ApprovalStageFields {
+  typeLot: string | null;
   qcToApproval: Date | null;
   prepareProduksi: Date | null;
   sendToTech: Date | null;
@@ -288,25 +316,27 @@ interface ApprovalStageFields {
 }
 
 /**
- * Label Proses utk Approval (Production & MRP Schedule > Approval) -- tahapan
- * granular ditentukan dari kolom PALING LANJUT yg sudah terisi di form Input
- * Proses (urutan form: QC Input Column -> Production Input Column ->
- * Technical Input Column), sesuai instruksi eksplisit user (2026-07-24):
- * QC to App -> Prepare Date -> Send To Tech -> Submit Tech -> Submit Cust ->
- * Finish App. Dicek dari yg paling lanjut turun ke yg paling awal, krn form-nya
- * diisi berurutan (begitu 1 kolom penanda tahap terisi, tahap sebelumnya
- * otomatis dianggap terlewati). Kalau QC to App masih kosong, Order ini
- * dianggap BELUM masuk tahap Approval manapun (return null, tidak ikut diadu
- * jadi Proses utama dashboard -- tapi tetap dihitung "done" di Proses Bar,
- * lihat approvalOrders Set).
+ * Label Proses utk Approval (Production & MRP Schedule > Approval) -- direvisi
+ * total 2026-07-28 sesuai instruksi eksplisit user, menggantikan skema lama
+ * (AP - OK/Cust/SubmTech/Tech/Prep-AP/QC-AP). Tahapan sekarang py 2 sumbu:
+ * 1) "Admin QC Stage" (kolom typeLot) menentukan label AWAL (Improve/Joint
+ *    Lot/Lot Packing/Approval) sebelum production/technical input dimulai.
+ * 2) Begitu salah satu dari Prepare Date/Send To Tech/Submit Tech sudah
+ *    terisi, labelnya jadi "QU - Approval" TERLEPAS dari Admin QC Stage yg
+ *    dipilih (lihat superRefine di approval.routes.ts -- tahap ini SELALU
+ *    mewajibkan QC to App terisi juga, jadi baris ini valid utk cabang mana
+ *    pun kecuali Improve murni). Submit Cust/Finish App py labelnya sendiri.
+ * Dicek dari yg paling lanjut turun ke yg paling awal, krn tiap tahap
+ * berikutnya mewajibkan SEMUA tahap sebelumnya (validasi kumulatif).
  */
 function approvalProcessLabel(a: ApprovalStageFields): string | null {
-  if (a.finishApp) return "AP - OK";
-  if (a.submitToCustomer) return "AP - Cust";
-  if (a.technicalDateReceiving) return "AP - SubmTech";
-  if (a.sendToTech) return "AP - Tech";
-  if (a.prepareProduksi) return "Prep - AP";
-  if (a.qcToApproval) return "QC - AP";
+  if (a.finishApp) return "Approval - DN";
+  if (a.submitToCustomer) return "Approval";
+  if (a.technicalDateReceiving || a.sendToTech || a.prepareProduksi) return "QU - Approval";
+  if (a.typeLot === "Approval") return "QU - Approval";
+  if (a.typeLot === "Lot Packing") return "QC - DN";
+  if (a.typeLot === "Joint Lot") return "QC - Joint Lot";
+  if (a.typeLot === "Improve") return "Improve";
   return null;
 }
 
@@ -439,7 +469,6 @@ dashboardRouter.get(
           order: true,
           materialNumber: true,
           orderQty: true,
-          qcToApproval: true,
           prepareProduksi: true,
           sendToTech: true,
           technicalDateReceiving: true,
@@ -452,6 +481,20 @@ dashboardRouter.get(
         take: 500,
       }),
     ]);
+
+    // Admin QC Stage/QC to App/QC Passed TIDAK LAGI di ApprovalSchedule --
+    // dipindah ke tabel AdminQc terpisah (2026-07-28, menu "Input Admin QC").
+    // Diambil di sini & digabung per Order (yg PALING BARU) supaya
+    // approvalProcessLabel/dashboard tetap bisa baca ketiganya sama seperti
+    // sebelum dipisah.
+    const adminQcRows = await prisma.adminQc.findMany({
+      select: { order: true, typeLot: true, qcToApproval: true, qcPassed: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
+    });
+    const latestAdminQcByOrder = new Map<string, (typeof adminQcRows)[number]>();
+    for (const r of adminQcRows) {
+      if (!latestAdminQcByOrder.has(r.order)) latestAdminQcByOrder.set(r.order, r);
+    }
 
     // Set per tahap (utk kolom "Proses Bar") -- dari data yg SAMA yg sudah
     // di-fetch di atas, tidak perlu query lagi.
@@ -503,9 +546,16 @@ dashboardRouter.get(
       return relevant.map((d) => ({ name: d.name, done: d.doneSet.has(order) }));
     }
 
+    // Label Packing per Order, dipakai kolom "Production Actions" TERPISAH di
+    // bawah -- Packing SENGAJA TIDAK dimasukkan ke `rows` (kandidat pemenang
+    // kolom "Proses"/Start Proses/Finish Proses/Remark), sesuai instruksi
+    // eksplisit user (2026-07-28): kolom "Proses" cuma boleh diisi
+    // Premix/Milling/Aftermix/Colour Matching/QC/Approval.
+    const packingActionsByOrder = latestPackingLabelByOrder(packing);
+
     const rows: Omit<
       ProductionOrderRow,
-      "materialNumber" | "materialDescription" | "batch" | "leadTimeProses" | "stages" | "progressPercent"
+      "materialNumber" | "materialDescription" | "batch" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -534,7 +584,6 @@ dashboardRouter.get(
         remark: r.remark,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
-      ...packing.map((r) => ({ ...r, process: packingProcessLabel(r), timestamp: latestMoment(r.start, r.finish, r.timestamp) })),
       ...checkResults.map((r) => {
         const rep = qcRepresentativeParam(r.parameters);
         return {
@@ -552,22 +601,27 @@ dashboardRouter.get(
       }),
       ...approvals
         .map((r) => {
-          const process = approvalProcessLabel(r);
+          const adminQc = latestAdminQcByOrder.get(r.order);
+          const merged = { ...r, typeLot: adminQc?.typeLot ?? null, qcToApproval: adminQc?.qcToApproval ?? null };
+          const process = approvalProcessLabel(merged);
           if (!process) return null;
           return {
             order: r.order,
             orderQty: r.orderQty,
             process,
-            // Start dashboard utk Approval SENGAJA cuma pakai kolom "QC to App"
-            // (bukan Finish App atau tgl tahap aktifnya) sesuai instruksi eksplisit
-            // -- Finish SENGAJA selalu dikosongkan (null), juga sesuai instruksi.
-            start: r.qcToApproval,
-            finish: null as Date | null,
+            // Start/Finish Proses utk Approval SENGAJA diambil dari "QC to App"
+            // dan "QC Passed" (kolom History Admin QC -- sejak Admin QC dipisah
+            // jadi tabel & menu sendiri 2026-07-28), BUKAN Finish App atau tgl
+            // tahap aktif lainnya -- berlaku utk semua label Proses granular
+            // Approval (Improve/QC - Joint Lot/QC - DN/QU - Approval/Approval/
+            // Approval - DN), sesuai instruksi eksplisit user.
+            start: adminQc?.qcToApproval ?? null,
+            finish: adminQc?.qcPassed ?? null,
             remark: r.remark,
             // Dipakai juga sbg acuan "paling baru" lintas modul (pola sama dgn QC
             // yg pakai Start Item Check) -- fallback ke timestamp Save kalau QC to
             // App kosong tapi tahap yg lebih lanjut sudah terisi (jarang terjadi).
-            timestamp: r.qcToApproval ?? r.timestamp,
+            timestamp: adminQc?.qcToApproval ?? r.timestamp,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null),
@@ -627,6 +681,7 @@ dashboardRouter.get(
         leadTimeProses: countBusinessDaysElapsed(firstSeen, now),
         stages,
         progressPercent,
+        productionActions: packingActionsByOrder.get(r.order) ?? null,
       };
     });
 
@@ -666,6 +721,10 @@ export interface TankStatusInfo {
     start: Date | null;
     finish: Date | null;
     since: Date;
+    /** Label Proses Packing utk Order yg lagi megang tank ini, TERPISAH dari
+     * `process` -- sesuai instruksi eksplisit user (2026-07-28). Lihat
+     * latestPackingLabelByOrder. */
+    productionActions: string | null;
   } | null;
 }
 
@@ -687,7 +746,7 @@ export interface TankStatusInfo {
  * modul manapun juga dianggap "Kosong".
  */
 async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
-  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, checkResults] = await Promise.all([
+  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults] = await Promise.all([
     prisma.masterTank.findMany({ orderBy: { code: "asc" } }),
     prisma.premixAftermixLog.findMany({
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, start: true, finish: true, timestamp: true },
@@ -699,10 +758,47 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, start: true, finish: true, timestamp: true },
     }),
     prisma.packingLog.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, start: true, finish: true, timestamp: true },
+      select: {
+        order: true,
+        materialNumber: true,
+        materialDescription: true,
+        batch: true,
+        orderQty: true,
+        plant: true,
+        iuPlant: true,
+        remark: true,
+        codeTanki: true,
+        spvName: true,
+        leaderName: true,
+        totalQty: true,
+        qtyPerMan: true,
+        formReceived: true,
+        start: true,
+        finish: true,
+        timestamp: true,
+      },
     }),
     prisma.approvalSchedule.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, timestamp: true },
+      select: {
+        order: true,
+        materialNumber: true,
+        batch: true,
+        orderQty: true,
+        remark: true,
+        codeTanki: true,
+        prepareProduksi: true,
+        sendToTech: true,
+        technicalDateReceiving: true,
+        submitToCustomer: true,
+        finishApp: true,
+        timestamp: true,
+      },
+    }),
+    // Admin QC Stage/QC to App/QC Passed TIDAK LAGI di ApprovalSchedule --
+    // lihat komentar sama di /production-orders di atas.
+    prisma.adminQc.findMany({
+      select: { order: true, typeLot: true, qcToApproval: true, qcPassed: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
     }),
     prisma.checkResult.findMany({
       select: {
@@ -769,23 +865,24 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       moment: latestMoment(r.start, r.finish, r.timestamp),
     });
   }
-  for (const r of packing) {
-    if (!r.codeTanki) continue;
-    touches.push({
-      code: r.codeTanki,
-      order: r.order,
-      materialNumber: r.materialNumber,
-      batch: r.batch,
-      orderQty: r.orderQty,
-      remark: r.remark,
-      process: "Packing",
-      start: r.start,
-      finish: r.finish,
-      moment: latestMoment(r.start, r.finish, r.timestamp),
-    });
+  // Packing SENGAJA TIDAK ikut jadi "touch" (kandidat okupansi/label Proses
+  // tank) -- sesuai instruksi eksplisit user (2026-07-28), sama alasannya dgn
+  // /production-orders. `packingOrders` Set di atas (freeing logic) tetap
+  // dihitung independen dari data Packing yg sama, jadi perilaku "tank
+  // dikosongkan lagi begitu Order-nya sudah Packing" TIDAK berubah.
+  // Admin QC Stage/QC to App/QC Passed TIDAK LAGI di ApprovalSchedule --
+  // lihat komentar sama di /production-orders.
+  const latestAdminQcByOrderForTank = new Map<string, (typeof adminQcRowsForTank)[number]>();
+  for (const r of adminQcRowsForTank) {
+    if (!latestAdminQcByOrderForTank.has(r.order)) latestAdminQcByOrderForTank.set(r.order, r);
   }
   for (const r of approvals) {
     if (!r.codeTanki) continue;
+    // Label Proses granular (bukan "Approval" statis) + Start/Finish dari "QC
+    // to App"/"QC Passed" (tabel AdminQc, sejak dipisah dari ApprovalSchedule
+    // 2026-07-28) -- SAMA PERSIS dgn /production-orders.
+    const adminQc = latestAdminQcByOrderForTank.get(r.order);
+    const merged = { ...r, typeLot: adminQc?.typeLot ?? null, qcToApproval: adminQc?.qcToApproval ?? null };
     touches.push({
       code: r.codeTanki,
       order: r.order,
@@ -793,10 +890,10 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       batch: r.batch,
       orderQty: r.orderQty,
       remark: r.remark,
-      process: "Approval",
-      start: null,
-      finish: null,
-      moment: r.timestamp,
+      process: approvalProcessLabel(merged) ?? "Approval",
+      start: adminQc?.qcToApproval ?? null,
+      finish: adminQc?.qcPassed ?? null,
+      moment: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
     });
   }
   for (const r of checkResults) {
@@ -832,6 +929,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     select: { order: true, materialDescription: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
+  const packingActionsByOrder = latestPackingLabelByOrder(packing);
 
   const map = new Map<string, TankStatusInfo>();
   for (const tank of tanks) {
@@ -859,6 +957,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
               start: touch.start,
               finish: touch.finish,
               since: touch.moment,
+              productionActions: packingActionsByOrder.get(touch.order) ?? null,
             }
           : null,
     });
@@ -901,7 +1000,7 @@ dashboardRouter.get(
   asyncRoute(async (req, res) => {
     const order = req.params.order.trim();
 
-    const [premixAftermix, milling, colourMatching, packing, checkResult] = await Promise.all([
+    const [premixAftermix, milling, colourMatching, packing, checkResult, approval, adminQc] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         where: { order },
         select: { section: true, start: true, finish: true },
@@ -913,6 +1012,20 @@ dashboardRouter.get(
       prisma.checkResult.findFirst({
         where: { order },
         select: { parameters: { select: { start: true, finish: true } } },
+        orderBy: { timestamp: "desc" },
+      }),
+      // Approval tidak py kolom Start/Finish yg literal -- "Start"-nya QC to
+      // App (sekarang di tabel AdminQc terpisah, lihat query di bawah),
+      // "Finish"-nya Finish App, sesuai permintaan eksplisit user (2026-07-28)
+      // utk merangkum SEMUA tahap termasuk Approval.
+      prisma.approvalSchedule.findFirst({
+        where: { order },
+        select: { finishApp: true },
+        orderBy: { timestamp: "desc" },
+      }),
+      prisma.adminQc.findFirst({
+        where: { order },
+        select: { qcToApproval: true },
         orderBy: { timestamp: "desc" },
       }),
     ]);
@@ -927,14 +1040,16 @@ dashboardRouter.get(
       if (p.finish && (!qcFinish || p.finish.getTime() > qcFinish.getTime())) qcFinish = p.finish;
     }
 
+    // Urutan SAMA PERSIS dgn STAGE_SEQUENCE di ProductionOrderDashboardPage.tsx.
     const now = new Date();
     const stages: StageLeadTime[] = [
       buildStage("Premix", premix?.start ?? null, premix?.finish ?? null, now),
-      buildStage("Aftermix", aftermix?.start ?? null, aftermix?.finish ?? null, now),
       buildStage("Milling", milling?.start ?? null, milling?.finish ?? null, now),
+      buildStage("Aftermix", aftermix?.start ?? null, aftermix?.finish ?? null, now),
       buildStage("Colour Matching", colourMatching?.start ?? null, colourMatching?.finish ?? null, now),
-      buildStage("Packing", packing?.start ?? null, packing?.finish ?? null, now),
       buildStage("QC", qcStart, qcFinish, now),
+      buildStage("Approval", adminQc?.qcToApproval ?? null, approval?.finishApp ?? null, now),
+      buildStage("Packing", packing?.start ?? null, packing?.finish ?? null, now),
     ].filter((s) => s.start != null);
 
     res.json({ success: true, data: stages });

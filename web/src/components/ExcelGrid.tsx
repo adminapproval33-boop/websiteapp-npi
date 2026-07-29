@@ -108,8 +108,15 @@ export function ExcelMemberField({
             }
           }}
         />
-        <button type="button" className="btn btn-outline" style={{ padding: "2px 10px" }} onClick={onAdd}>
-          + Add
+        <button
+          type="button"
+          className="btn btn-outline"
+          title="Tambah Member"
+          aria-label="Tambah Member"
+          style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+          onClick={onAdd}
+        >
+          +
         </button>
       </div>
       <div className="excel-member-list">
@@ -118,10 +125,12 @@ export function ExcelMemberField({
             {m}
             <button
               type="button"
+              title="Kurangi Member"
+              aria-label="Kurangi Member"
               onClick={() => onRemove(idx)}
               style={{ border: "none", background: "none", color: "var(--danger)", cursor: "pointer", fontWeight: 700 }}
             >
-              − Reduce
+              −
             </button>
           </span>
         ))}

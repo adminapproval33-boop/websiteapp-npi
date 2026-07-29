@@ -69,6 +69,25 @@ interface HistoryRow {
   attachments: { id: number; fileName: string; filePath: string }[];
 }
 
+/** Baris "List Antrian Packing" -- Order yg Admin QC Stage terbarunya sudah
+ * punya QC Passed terisi dan belum diinput ke Packing (lihat GET
+ * /packing/queue di packing.routes.ts). */
+interface QueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string | null;
+  codeTanki: string | null;
+  typeLot: string | null;
+  lotPassed: string | null;
+  qcToApproval: string | null;
+  qcPassed: string | null;
+  remark: string | null;
+}
+
 /** "Kolom inti" Packing yg jadi syarat wajib di SEMUA tahap Proses granular di
  * bawah (SPV Produksi, Leader, Order, Material Number, Material Description,
  * Batch, Order Qty, Plant, IU Plant, Code Tanki, Volume) -- sesuai instruksi
@@ -134,13 +153,14 @@ export default function PackingPage() {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -152,6 +172,11 @@ export default function PackingPage() {
   const historyQuery = useQuery({
     queryKey: ["packing-history"],
     queryFn: () => api.get<{ success: boolean; data: HistoryRow[] }>("/packing/history").then((r) => r.data),
+  });
+
+  const queueQuery = useQuery({
+    queryKey: ["packing-queue"],
+    queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/packing/queue").then((r) => r.data),
   });
 
   const saveMutation = useMutation({
@@ -167,6 +192,7 @@ export default function PackingPage() {
       setForm(emptyForm);
       setEditingId(null);
       queryClient.invalidateQueries({ queryKey: ["packing-history"] });
+      queryClient.invalidateQueries({ queryKey: ["packing-queue"] });
       if (attachmentFile) {
         uploadMutation.mutate({ id: res.data.id, file: attachmentFile });
       } else {
@@ -272,6 +298,36 @@ export default function PackingPage() {
     }
   }
 
+  /** Isi Order dari List Antrian Packing ke form Input Packing (lewat alur
+   * handleOrderFound yg sama dgn ketik manual di OrderLookup), supaya
+   * Material/Batch/Qty/Plant/IU Plant/Code Tanki tersaran otomatis begitu
+   * tim Packing mengambil Order ini dari antrian. */
+  async function loadIntoInput(row: QueueRow) {
+    setForm((f) => ({ ...f, order: row.order }));
+    await handleOrderFound({
+      order: row.order,
+      batch: row.batch,
+      materialNumber: row.materialNumber,
+      materialDescription: row.materialDescription,
+      orderQty: row.orderQty,
+      plant: row.plant,
+      jenis: null,
+      warnaDasar: null,
+      volume: null,
+    });
+    // IU Plant/Code Tanki dari Admin QC Order ini lebih akurat drpd saran
+    // order-context umum di handleOrderFound -- pakai sbg fallback terakhir
+    // kalau belum kesisi dari sumber lain.
+    setForm((f) => ({
+      ...f,
+      iuPlant: f.iuPlant || row.iuPlant || "",
+      codeTanki: f.codeTanki || row.codeTanki || "",
+    }));
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
   function handleOrderQtyChange(orderQty: string) {
     // Qty/Man (Ltr) SENGAJA tidak lagi dihitung ulang di sini -- rumusnya
     // sekarang Qty/Pcs x Volume, tidak terkait Order Qty (lihat lib/qty.ts).
@@ -346,11 +402,19 @@ export default function PackingPage() {
       setError("Leader tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
     }
+    if ((form.start || form.finish) && form.members.length === 0) {
+      setError("Member wajib diisi kalau Start atau Finish sudah diisi.");
+      return;
+    }
     saveMutation.mutate();
   }
 
   const filteredHistory = (historyQuery.data ?? []).filter((row) =>
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
+  );
+
+  const filteredQueue = (queueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
 
   function findEmployee(name: string | null) {
@@ -367,6 +431,9 @@ export default function PackingPage() {
         </button>
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
+        </button>
+        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          List Antrian Packing
         </button>
       </div>
 
@@ -472,11 +539,26 @@ export default function PackingPage() {
               </ExcelRow>
               <ExcelRow>
                 <div className="excel-cell" style={{ flexBasis: "20%", maxWidth: "20%", flexDirection: "row", gap: 4, padding: 4 }}>
-                  <button type="button" className="btn btn-info" style={{ flex: 1 }} onClick={addMember}>
-                    + Add
+                  <button
+                    type="button"
+                    className="btn btn-info"
+                    title="Tambah Member"
+                    aria-label="Tambah Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={addMember}
+                  >
+                    +
                   </button>
-                  <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={removeLastMember} disabled={form.members.length === 0}>
-                    − Reduce
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    title="Kurangi Member"
+                    aria-label="Kurangi Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={removeLastMember}
+                    disabled={form.members.length === 0}
+                  >
+                    −
                   </button>
                 </div>
               </ExcelRow>
@@ -625,6 +707,76 @@ export default function PackingPage() {
                         </button>
                       )}
                     </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && (
+        <div className="panel">
+          <div className="panel-header">List Antrian Packing</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              Order yang Admin QC Stage-nya (menu Input Admin QC) sudah punya QC Passed terisi dan sedang menunggu
+              diinput ke Packing -- diurutkan yang paling lama menunggu duluan (FIFO). Order otomatis hilang dari
+              daftar ini begitu sudah ada input Packing untuk Order tersebut.
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: QueueRow) => r.order}
+              exportFileName="list-antrian-packing"
+              storageKey="packing-queue"
+              rows={filteredQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
+                { key: "typeLot", label: "Admin QC Stage", render: (r) => r.typeLot },
+                {
+                  key: "lotPassed",
+                  label: "Lot Passed",
+                  render: (r) => formatDateTime(r.lotPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.lotPassed),
+                },
+                {
+                  key: "qcToApproval",
+                  label: "QC to App",
+                  render: (r) => formatDateTime(r.qcToApproval),
+                  csvValue: (r) => toExcelDateTimeString(r.qcToApproval),
+                },
+                {
+                  key: "qcPassed",
+                  label: "QC Passed",
+                  render: (r) => formatDateTime(r.qcPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.qcPassed),
+                },
+                { key: "remark", label: "Remark (Admin QC)", render: (r) => r.remark },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Packing
+                    </button>
                   ),
                   csvValue: () => "",
                 },

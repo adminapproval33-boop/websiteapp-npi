@@ -14,26 +14,35 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
-const saveSchema = z.object({
-  order: z.string().trim().min(1, "Order wajib diisi."),
-  materialNumber: z.string().optional(),
-  materialDescription: z.string().optional(),
-  batch: z.string().trim().min(1, "Batch wajib diisi."),
-  orderQty: z.string().optional(),
-  plant: z.string().optional(),
-  iuPlant: z.string().optional(),
-  spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
-  members: z.array(z.string()).optional(),
-  formReceived: optionalDate,
-  start: optionalDate,
-  leaderName: z.string().optional(),
-  qtyPerMan: z.string().optional(),
-  totalQty: z.string().optional(),
-  qtyPcs: z.string().optional(),
-  finish: optionalDate,
-  codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
-  remark: z.string().optional(),
-});
+const saveSchema = z
+  .object({
+    order: z.string().trim().min(1, "Order wajib diisi."),
+    materialNumber: z.string().optional(),
+    materialDescription: z.string().optional(),
+    batch: z.string().trim().min(1, "Batch wajib diisi."),
+    orderQty: z.string().optional(),
+    plant: z.string().optional(),
+    iuPlant: z.string().optional(),
+    spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
+    members: z.array(z.string()).optional(),
+    formReceived: optionalDate,
+    start: optionalDate,
+    leaderName: z.string().optional(),
+    qtyPerMan: z.string().optional(),
+    totalQty: z.string().optional(),
+    qtyPcs: z.string().optional(),
+    finish: optionalDate,
+    codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+    remark: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // Member wajib diisi begitu Start ATAU Finish sudah diisi -- sesuai
+    // instruksi eksplisit user (2026-07-29).
+    const hasMembers = Array.isArray(data.members) && data.members.length > 0;
+    if ((data.start != null || data.finish != null) && !hasMembers) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start atau Finish sudah diisi." });
+    }
+  });
 
 /// Data terakhir untuk Order ini di Packing -- dipakai supaya begitu Order
 /// yang sama diketik lagi, semua kolom yang sudah pernah diisi langsung muncul.
@@ -46,6 +55,65 @@ packingRouter.get(
       orderBy: { timestamp: "desc" },
     });
     res.json({ success: true, data: latest });
+  })
+);
+
+// ===================== List Antrian Packing =====================
+
+/** Order yg Admin QC Stage TERBARUnya sudah punya QC Passed terisi (lihat
+ * modules/adminQc), dan BELUM PERNAH diinput ke Packing -- ini yg dipakai
+ * menu "List Antrian Packing" (2026-07-29, sesuai instruksi eksplisit user).
+ * Order otomatis hilang dari daftar ini begitu sudah ada input Packing utk
+ * Order tersebut. Pola sama persis dgn PWO Schedule & Queue di Milling/
+ * Aftermix/Colour Matching dan List Antrian Approval (lihat
+ * modules/milling/milling.routes.ts, modules/approval/approval.routes.ts). */
+packingRouter.get(
+  "/queue",
+  asyncRoute(async (_req, res) => {
+    const [adminQcRows, packingOrders] = await Promise.all([
+      prisma.adminQc.findMany({ orderBy: { timestamp: "desc" } }),
+      prisma.packingLog.findMany({ select: { order: true } }),
+    ]);
+
+    const packingOrderSet = new Set(packingOrders.map((r) => r.order));
+
+    // Dedupe ke Admin QC Stage PALING TERAKHIR per Order (baris pertama yg
+    // ditemui, krn adminQcRows sudah diurutkan timestamp desc).
+    const latestByOrder = new Map<string, (typeof adminQcRows)[number]>();
+    for (const r of adminQcRows) {
+      if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+    }
+
+    const queueRows = Array.from(latestByOrder.values()).filter((r) => r.qcPassed != null && !packingOrderSet.has(r.order));
+    queueRows.sort((a, b) => a.qcPassed!.getTime() - b.qcPassed!.getTime());
+
+    const uniqueOrders = queueRows.map((r) => r.order);
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: uniqueOrders } },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+    });
+    const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    const data = queueRows.map((r) => {
+      const master = masterByOrder.get(r.order);
+      return {
+        order: r.order,
+        materialNumber: master?.materialNumber ?? r.materialNumber,
+        materialDescription: master?.materialDescription ?? r.materialDescription,
+        batch: master?.batch ?? r.batch,
+        orderQty: master?.orderQty ?? r.orderQty,
+        plant: master?.plant ?? r.plant,
+        iuPlant: r.iuPlant,
+        codeTanki: r.codeTanki,
+        typeLot: r.typeLot,
+        lotPassed: r.lotPassed,
+        qcToApproval: r.qcToApproval,
+        qcPassed: r.qcPassed,
+        remark: r.remark,
+      };
+    });
+
+    res.json({ success: true, data });
   })
 );
 

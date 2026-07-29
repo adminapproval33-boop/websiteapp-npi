@@ -16,16 +16,27 @@ const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
   .transform((v) => (v ? v : null));
 
-const parameterSchema = z.object({
-  no: z.number().int(),
-  parameter: z.string().trim().min(1, "Item Check wajib diisi."),
-  standard: z.string().optional(),
-  result: z.string().optional(),
-  remark: z.string().optional(),
-  start: optionalDate,
-  finish: optionalDate,
-  pic: z.string().optional(),
-});
+const parameterSchema = z
+  .object({
+    no: z.number().int(),
+    parameter: z.string().trim().min(1, "Item Check wajib diisi."),
+    standard: z.string().optional(),
+    result: z.string().optional(),
+    remark: z.string().optional(),
+    start: optionalDate,
+    finish: optionalDate,
+    pic: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // Begitu Result sebuah Item Check diisi, Start/Finish/PIC baris itu WAJIB
+    // ikut diisi -- Verdict sendiri otomatis mengikuti Result+Spec (lihat
+    // lib/specEval.ts di frontend), jadi tidak perlu dicek terpisah di sini.
+    if (!data.result || !data.result.trim()) return;
+    const label = data.parameter || `baris ${data.no}`;
+    if (data.start == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["start"], message: `Start wajib diisi kalau Result "${label}" sudah diisi.` });
+    if (data.finish == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["finish"], message: `Finish wajib diisi kalau Result "${label}" sudah diisi.` });
+    if (!data.pic || !data.pic.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pic"], message: `PIC wajib diisi kalau Result "${label}" sudah diisi.` });
+  });
 
 const saveSchema = z.object({
   order: z.string().trim().min(1, "Order wajib diisi."),

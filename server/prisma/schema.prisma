@@ -403,9 +403,12 @@ model IcrAppearanceFile {
 }
 
 /// Planning Schedule > Approval. approvalId = group key (dulu "Approval ID").
-/// Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed DIPINDAH
-/// ke model AdminQc terpisah (2026-07-28, lihat komentar di sana) -- kalau
-/// perlu nilai QC to App/QC Passed di sini, lookup AdminQc by `order`.
+/// Admin QC Stage/Lot Passed/QC to App/QC Passed DIPINDAH ke model AdminQc
+/// terpisah (2026-07-28, lihat komentar di sana) -- kalau perlu nilai QC to
+/// App/QC Passed di sini, lookup AdminQc by `order`. Mrp Pic/Sales Pic sempat
+/// ikut pindah ke AdminQc tapi DIKEMBALIKAN ke sini (2026-07-29, revisi
+/// layout eksplisit user) karena keduanya bagian dari header Order/Plant,
+/// bukan tahap QC.
 model ApprovalSchedule {
   approvalId             String   @id @default(uuid())
   timestamp              DateTime @default(now())
@@ -418,6 +421,8 @@ model ApprovalSchedule {
   plant                  String?
   iuPlant                String?
   codeTanki              String?
+  mrpPic                 String?
+  salesPic               String?
   prepareProduksi        DateTime?
   sprayMan               String?
   wetSample              String?
@@ -454,15 +459,16 @@ model ApprovalAttachment {
 }
 
 /// Portal Quality Control > Input Admin QC (2026-07-28). Header administratif
-/// tahap QC (Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed)
-/// -- SENGAJA DIPISAH dari ApprovalSchedule (Production & MRP Schedule >
-/// Approval) jadi tabel independen sendiri, terhubung ke Approval & ke modul
-/// lain HANYA lewat nomor Order (bukan foreign key), sesuai instruksi
-/// eksplisit user: pilihan "2 tabel terpisah" (bukan 1 record yg sama spt
-/// Premix/Aftermix). Spec Parameters (Item Check) di halaman ini TIDAK
-/// disimpan di sini -- itu tetap CheckResult/CheckResultParameter yg SAMA
-/// dgn menu "Input Check Results" (1 sumber data QC, dieditnya bisa dari
-/// 2 halaman).
+/// tahap QC (Admin QC Stage/Lot Passed/QC to App/QC Passed) -- SENGAJA
+/// DIPISAH dari ApprovalSchedule (Production & MRP Schedule > Approval) jadi
+/// tabel independen sendiri, terhubung ke Approval & ke modul lain HANYA
+/// lewat nomor Order (bukan foreign key), sesuai instruksi eksplisit user:
+/// pilihan "2 tabel terpisah" (bukan 1 record yg sama spt Premix/Aftermix).
+/// Mrp Pic/Sales Pic sempat ikut ke sini tapi DIKEMBALIKAN ke ApprovalSchedule
+/// (2026-07-29, revisi layout eksplisit user). Spec Parameters (Item Check)
+/// di halaman ini TIDAK disimpan di sini -- itu tetap CheckResult/
+/// CheckResultParameter yg SAMA dgn menu "Input Check Results" (1 sumber
+/// data QC, dieditnya bisa dari 2 halaman).
 model AdminQc {
   adminQcId           String    @id @default(uuid())
   timestamp           DateTime  @default(now())
@@ -476,8 +482,6 @@ model AdminQc {
   iuPlant             String?
   codeTanki           String?
   typeLot             String?
-  mrpPic              String?
-  salesPic            String?
   lotPassed           DateTime?
   qcToApproval        DateTime?
   qcPassed            DateTime?

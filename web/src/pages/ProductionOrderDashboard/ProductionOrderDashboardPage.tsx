@@ -102,28 +102,25 @@ const STAGE_ABBR: Record<string, string> = {
   Done: "DN",
 };
 
-/** Label Proses tahap Approval (lihat approvalProcessLabel di
- * dashboard.routes.ts, direvisi 2026-07-28) -- 2 di antaranya DIAWALI "QC"
- * ("QC - Joint Lot"/"QC - DN") krn nama tahapnya masih menyebut QC, tapi ini
- * BUKAN hasil Input Check Results -- jadi SEMUA label di set ini dikecualikan
- * dari deteksi "isQc" (popup Item Check) di bawah, supaya tidak ketuker sama
- * Proses QC asli. */
-const APPROVAL_STAGE_LABELS = new Set(["Improve", "QC - Joint Lot", "QC - DN", "QU - Approval", "Approval", "Approval - DN"]);
+/** Label Proses tahap Approval (lihat finishBasedLabel di dashboard.routes.ts,
+ * direvisi TOTAL 2026-07-29 -- cuma 3 state lagi, PERSIS mengikuti keberadaan
+ * Order di "List Antrian Approval"/"Approval - Lot History"/Finish App). Set
+ * ini SEMUA dikecualikan dari deteksi "isQc" (popup Item Check) di bawah
+ * walau "QU - Approval" diawali "QU" bukan "QC", supaya aman kalau ada label
+ * lain yg mirip di masa depan. */
+const APPROVAL_STAGE_LABELS = new Set(["QU - Approval", "Approval", "Approval - DN"]);
 
-/** 2 dari label Approval di atas SENGAJA diberi warna QC (kuning) bukan warna
- * Approval (olive) -- "Joint Lot"/"Lot Packing" masih bagian alur pengecekan
- * QC secara bisnis, sesuai instruksi eksplisit user (2026-07-28). Dicek
- * LEBIH DULU dari APPROVAL_STAGE_LABELS di getProcessColor supaya menang. */
-const APPROVAL_QC_COLOR_LABELS = new Set(["QC - Joint Lot", "QC - DN"]);
-
-/** Label Proses tahap granular Packing (lihat packingProcessLabel di
- * dashboard.routes.ts) -- direvisi 2026-07-24: tahap Start & Finish sekarang
- * labelnya persis "Packing"/"Done" (cocok langsung ke key STAGE_COLORS yg
- * sama lewat fallback di bawah, gak perlu dipetakan khusus di sini). Cuma
- * tahap Form Received ("QU - PC") yg perlu dipetakan manual krn teksnya gak
- * cocok ke key STAGE_COLORS manapun -- tetap dipetakan ke warna Packing biar
- * konsisten sama tahap Start/Finish. */
-const PACKING_STAGE_LABELS = new Set(["QU - PC"]);
+/** Label Proses Packing di kolom "Production Actions" (lihat
+ * latestPackingLabelByOrder di dashboard.routes.ts, direvisi 2026-07-29 --
+ * "QU - Packing" (List Antrian Packing) dan "Packing" (History Packing,
+ * Finish belum terisi) dipetakan ke warna Packing (hijau). "Done" (History
+ * Packing, Finish SUDAH terisi) SENGAJA TIDAK masuk set ini -- itu dipetakan
+ * ke warna "Done" (hijau tua) lewat exact-match key STAGE_COLORS.Done di
+ * bawah, BEDA dari warna Packing, sesuai instruksi eksplisit user. "Packing"
+ * polos sudah otomatis kena warna Packing lewat fallback ke STAGE_COLORS di
+ * bawah juga, tapi tetap didaftarkan di sini spy jelas, sama pola dgn
+ * PREMIX_STAGE_LABELS dkk. */
+const PACKING_STAGE_LABELS = new Set(["QU - Packing", "Packing"]);
 
 /** Label Proses granular Premix (lihat premixProcessLabel di
  * dashboard.routes.ts) -- SEMUA tahap (QU - Premix / Premix / Premix - DN)
@@ -150,7 +147,6 @@ const AFTERMIX_STAGE_LABELS = new Set(["QU - Aftermix", "Aftermix", "Aftermix - 
  * Matching", "QC : Visco : Pass") -- dicocokkan ke salah satu warna di
  * STAGE_COLORS lewat prefix/substring, bukan exact match. */
 function getProcessColor(process: string): { bg: string; fg: string } {
-  if (APPROVAL_QC_COLOR_LABELS.has(process)) return STAGE_COLORS.QC;
   if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
   if (PACKING_STAGE_LABELS.has(process)) return STAGE_COLORS.Packing;
   if (PREMIX_STAGE_LABELS.has(process)) return STAGE_COLORS.Premix;

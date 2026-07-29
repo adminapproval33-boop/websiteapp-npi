@@ -110,49 +110,64 @@ millingRouter.get(
 );
 
 /**
- * "PWO Schedule & Queue" -- daftar PWO (Order) yang sudah Finish Premix dan
- * SEDANG MENUNGGU dikerjakan Milling (belum ada input Milling sama sekali
- * utk Order itu), sesuai instruksi eksplisit user (2026-07-26). Begitu Order
- * sudah punya input Milling (Start/Finish Milling terisi ATAU baru
- * form-received sekalipun -- pokoknya ada baris di MillingLog), Order itu
- * otomatis hilang dari antrian ini (bukan cuma dari daftar, statusnya sudah
- * "sedang/selesai dikerjakan" jadi bukan lagi antrian).
- *
+ * "Premix - DN" -- DISEDERHANAKAN LAGI 2026-07-30 sesuai instruksi eksplisit
+ * user (Premix sekarang ikut disederhanakan spt Aftermix/Milling/dst),
+ * SAMA PERSIS dgn premixProcessLabel di dashboard.routes.ts: cuma Finish/
+ * Start/Form Received (Leader/Member/Qty per Man TIDAK lagi disyaratkan) --
+ * supaya definisi "Premix - DN" konsisten antara kolom "Proses" dashboard &
+ * syarat masuk antrian ini.
+ */
+function isPremixDone(r: { formReceived: Date | null; start: Date | null; finish: Date | null }): boolean {
+  return Boolean(r.finish && r.start && r.formReceived);
+}
+
+/**
+ * "PWO Schedule & Queue" -- daftar PWO (Order) yang sudah "Premix - DN" dan
+ * SEDANG MENUNGGU dikerjakan Milling, DIREVISI 2026-07-29 sesuai instruksi
+ * eksplisit user (dari versi 2026-07-26), pola sama dgn revisi
+ * /colour-matching/pwo-queue & /premix-aftermix/aftermix-pwo-queue -- BEDA-nya
+ * di sini TIDAK ada syarat histori Material Number (tidak diminta utk
+ * Milling):
+ * 1) Syarat "Premix Done" sekarang literal "Premix - DN" (lihat isPremixDone
+ *    di atas) -- sebelumnya cuma cek `finish != null` polos.
+ * 2) Order yg SUDAH py baris MillingLog tapi Start-nya BELUM terisi (baru
+ *    Form Received) TETAP di antrian ini -- SEBELUMNYA begitu ADA baris
+ *    Milling sama sekali langsung dikeluarkan; sekarang baru dikeluarkan
+ *    begitu Start-nya terisi.
  * Order yang sudah py input di TAHAP SETELAH Milling (Aftermix, Colour
- * Matching, Approval, Packing) JUGA dikeluarkan dari antrian, walau belum
- * pernah ada input Milling utk Order itu -- sesuai instruksi eksplisit user
- * (2026-07-26): secara alur proses, kalau Order sudah masuk tahap setelah
- * Milling, berarti Premix-nya (dan tahap Milling-nya, entah kenapa tidak
- * tercatat) sudah pasti selesai, jadi Order itu tidak relevan lagi
- * ditampilkan sbg "menunggu Milling". QC SENGAJA tidak diikutkan di sini
- * (bukan bagian dari 4 modul yg disebutkan eksplisit oleh user).
- *
- * Status Premix per Order diambil dari baris PALING TERAKHIR (timestamp Save
- * terbaru) di section PREMIX -- konsisten dgn "status terkini" di
- * /dashboard/production-orders, BUKAN baris pertama yg pernah py Finish.
- * Diurutkan Finish Premix PALING AWAL duluan (FIFO -- yg paling lama
- * menunggu dikerjakan Milling ditampilkan paling atas), sesuai instruksi
- * eksplisit user.
+ * Matching, Approval, Packing) tetap dikeluarkan dari antrian spt
+ * sebelumnya. Diurutkan Finish Premix PALING AWAL duluan (FIFO).
  */
 millingRouter.get(
   "/pwo-queue",
   asyncRoute(async (_req, res) => {
-    const [premixLogs, millingOrders, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
+    const [premixLogs, millingLogs, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         where: { section: "PREMIX" },
         orderBy: { timestamp: "desc" },
       }),
-      prisma.millingLog.findMany({ select: { order: true } }),
+      prisma.millingLog.findMany({ orderBy: { timestamp: "desc" } }),
       prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, select: { order: true } }),
       prisma.colourMatchingLog.findMany({ select: { order: true } }),
       prisma.approvalSchedule.findMany({ select: { order: true } }),
       prisma.packingLog.findMany({ select: { order: true } }),
     ]);
 
-    const millingOrderSet = new Set(millingOrders.map((r) => r.order));
+    // Dedupe ke baris MillingLog PALING TERAKHIR per Order, lalu ambil yg
+    // Start-nya SUDAH terisi -- syarat #2 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun).
+    const latestMillingByOrder = new Map<string, (typeof millingLogs)[number]>();
+    for (const r of millingLogs) {
+      if (!latestMillingByOrder.has(r.order)) latestMillingByOrder.set(r.order, r);
+    }
+    const startedMillingOrderSet = new Set(
+      Array.from(latestMillingByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
+
     // Order yg sudah masuk tahap manapun setelah Milling -- dianggap sudah
-    // "lewat" Milling, jadi ikut dikeluarkan dari antrian sama seperti
-    // millingOrderSet di atas.
+    // "lewat" Milling, jadi ikut dikeluarkan dari antrian.
     const pastMillingOrderSet = new Set([
       ...aftermixOrders.map((r) => r.order),
       ...colourMatchingOrders.map((r) => r.order),
@@ -168,7 +183,7 @@ millingRouter.get(
     }
 
     const queueRows = Array.from(latestByOrder.values()).filter(
-      (r) => r.finish != null && !millingOrderSet.has(r.order) && !pastMillingOrderSet.has(r.order)
+      (r) => isPremixDone(r) && !startedMillingOrderSet.has(r.order) && !pastMillingOrderSet.has(r.order)
     );
     queueRows.sort((a, b) => a.finish!.getTime() - b.finish!.getTime());
 

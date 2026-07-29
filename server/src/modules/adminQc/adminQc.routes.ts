@@ -25,8 +25,6 @@ const saveSchema = z
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     typeLot: z.string().trim().min(1, "Admin QC Stage wajib diisi."),
-    mrpPic: z.string().trim().min(1, "Mrp Pic wajib diisi."),
-    salesPic: z.string().trim().min(1, "Sales Pic wajib diisi."),
     lotPassed: optionalDate,
     qcToApproval: optionalDate,
     qcPassed: optionalDate,

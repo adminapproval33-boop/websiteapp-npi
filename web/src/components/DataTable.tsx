@@ -76,7 +76,21 @@ export default function DataTable<T>({
       columns.map((c) => ({
         id: c.key,
         header: c.label,
-        accessorFn: (row: T) => (c.csvValue ? c.csvValue(row) : "") ?? "",
+        // Dipakai TanStack utk filter (`getFilteredRowModel`) & sort -- BUKAN
+        // cuma CSV export walau namanya `csvValue`. Kalau kolom tidak
+        // mendefinisikan `csvValue` (paling banyak kolom teks polos spt
+        // Order/Batch), SEBELUMNYA accessor-nya selalu "" apa pun isi
+        // barisnya -- filter/sort di kolom itu jadi tidak pernah nemu apa-apa
+        // (bug: user ketik nomor Order yg jelas ada, hasil filter kosong).
+        // Fallback ke hasil `render()` kalau berupa string/number polos
+        // (kasus paling umum) -- kolom yg render-nya JSX kompleks (badge,
+        // tombol Aksi) sudah SELALU py `csvValue` eksplisit di semua
+        // pemanggil, jadi tidak kena cabang fallback ini.
+        accessorFn: (row: T) => {
+          if (c.csvValue) return c.csvValue(row) ?? "";
+          const rendered = c.render(row);
+          return typeof rendered === "string" || typeof rendered === "number" ? rendered : "";
+        },
         cell: (info) => c.render(info.row.original),
         size: c.defaultWidth ?? 170,
         minSize: 60,

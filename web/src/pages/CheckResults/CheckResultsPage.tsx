@@ -154,7 +154,7 @@ const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
   spec: 130,
   start: 180,
   finish: 180,
-  result: 130,
+  result: 90,
   verdict: 90,
   pic: 110,
 };
@@ -419,6 +419,8 @@ export default function CheckResultsPage() {
     if (!form.remark.trim()) return "Remark wajib diisi sebelum Save/Print.";
     const invalidPic = params.find((p) => !isKnownEmployeeName(employees, p.pic));
     if (invalidPic) return `PIC "${invalidPic.pic}" tidak ditemukan di Data Karyawan. Pilih dari daftar saran.`;
+    const incompleteRow = params.find((p) => p.result.trim() && (!p.start || !p.finish || !p.pic.trim()));
+    if (incompleteRow) return `Start/Finish/PIC "${incompleteRow.parameter}" wajib diisi karena Result sudah diisi.`;
     return null;
   }
 
@@ -586,14 +588,14 @@ export default function CheckResultsPage() {
                         <td>{p.standard || "-"}</td>
                         <td>
                           <input
-                            style={{ background: SPEC_VERDICT_COLOR[verdict] }}
+                            style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%" }}
                             value={p.result}
                             onChange={(e) => updateParam(idx, { result: e.target.value })}
                           />
                         </td>
                         <td>{SPEC_VERDICT_LABEL[verdict]}</td>
-                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
-                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
+                        <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
+                        <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
                         <td>
                           <EmployeeNameSelect bare id={`pic-${idx}`} value={p.pic} onChange={(v) => updateParam(idx, { pic: v })} />
                         </td>

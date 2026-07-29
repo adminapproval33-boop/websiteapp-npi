@@ -77,30 +77,22 @@ interface ColourMatchingStageFields {
   formReceived: Date | null;
   start: Date | null;
   finish: Date | null;
-  iuPlant: string | null;
-  members: unknown;
-  formPerMan: string | null;
 }
 
 /**
- * Label Proses granular Colour Matching -- direvisi 2026-07-26 sesuai
- * instruksi eksplisit user (dulu cuma 3 label berbasis Start/Finish: "Queue
- * Colour Matching"/"Colour Matching"/"Oke Colour Matching", krn Form Received
- * dulu SELALU wajib). Sekarang Form Received sendiri jadi tahap pertama yg
- * opsional -- pola SAMA PERSIS dgn premixOrAftermixProcessLabel/
- * millingProcessLabel: tahapan ditentukan dari kolom PALING LANJUT yg sudah
- * terisi (Form Received -> Start -> Finish), dgn syarat kolom pendukung tahap
- * itu (IU Plant, lalu Member & Form/Man begitu Start terisi) juga sudah
- * terisi -- SAMA PERSIS dgn superRefine di colourMatching.routes.ts. Dicek
- * dari yg paling lanjut (Finish) turun ke yg paling awal (Form Received).
+ * Label Proses granular Colour Matching -- DISEDERHANAKAN TOTAL 2026-07-29
+ * sesuai instruksi eksplisit user, menggantikan versi 2026-07-26 yg juga
+ * mensyaratkan IU Plant/Member/Form per Man terisi. SEKARANG murni dari
+ * kolom Form Received/Start/Finish saja (3 state, sama pola dgn Approval/
+ * Packing yg sudah disederhanakan lebih dulu):
+ * - Form Received terisi -> "QU - Colour Matching".
+ * - Form Received + Start terisi -> "Colour Matching".
+ * - Form Received + Start + Finish terisi -> "Colour Matching - DN".
  */
 function colourMatchingProcessLabel(r: ColourMatchingStageFields): string {
-  const hasIuPlant = Boolean(r.iuPlant && r.iuPlant.trim());
-  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
-  const hasFormPerMan = Boolean(r.formPerMan && r.formPerMan.trim());
-  if (r.finish && r.start && r.formReceived && hasIuPlant && hasMembers && hasFormPerMan) return "Colour Matching - DN";
-  if (r.start && r.formReceived && hasIuPlant && hasMembers && hasFormPerMan) return "Colour Matching";
-  if (r.formReceived && hasIuPlant) return "QU - Colour Matching";
+  if (r.finish && r.start && r.formReceived) return "Colour Matching - DN";
+  if (r.start && r.formReceived) return "Colour Matching";
+  if (r.formReceived) return "QU - Colour Matching";
   return "-";
 }
 
@@ -108,29 +100,41 @@ interface PremixStageFields {
   formReceived: Date | null;
   start: Date | null;
   finish: Date | null;
-  leader: string | null;
-  qtyPerMan: string | null;
-  members: unknown;
 }
 
 /**
- * Label Proses granular PREMIX & AFTERMIX -- SAMA PERSIS logikanya (cuma beda
- * nama tahap di labelnya), krn kedua section berbagi 1 model & 1 superRefine
- * yg identik di premixAftermix.routes.ts (direvisi 2026-07-26 supaya AFTERMIX
- * ikut dapat tahapan granular yg sama dgn PREMIX, bukan lagi label statis
- * "Aftermix"). Tahapan ditentukan dari kolom PALING LANJUT yg sudah terisi
- * (Form Received -> Start -> Finish), dgn syarat kolom pendukung tahap itu
- * (Leader, lalu Member & Qty/Man (Liter) begitu Start terisi) juga sudah
- * terisi. Dicek dari yg paling lanjut (Finish) turun ke yg paling awal
- * (Form Received).
+ * Label Proses granular PREMIX -- DISEDERHANAKAN TOTAL 2026-07-30 sesuai
+ * instruksi eksplisit user, menggantikan versi lama yg jg mensyaratkan
+ * Leader/Member/Qty per Man terisi (dulu fungsi ini SAMA PERSIS dipakai jg
+ * utk AFTERMIX, tapi Aftermix sudah disederhanakan lebih dulu 2026-07-29,
+ * lihat aftermixProcessLabel). SEKARANG murni dari kolom Form Received/
+ * Start/Finish saja (3 state, pola sama dgn Approval/Packing/Colour
+ * Matching/Aftermix/Milling yg sudah disederhanakan lebih dulu):
+ * - Form Received terisi -> "QU - Premix".
+ * - Form Received + Start terisi -> "Premix".
+ * - Form Received + Start + Finish terisi -> "Premix - DN".
  */
-function premixOrAftermixProcessLabel(r: PremixStageFields, stageName: "Premix" | "Aftermix"): string {
-  const hasLeader = Boolean(r.leader && r.leader.trim());
-  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
-  const hasQtyPerMan = Boolean(r.qtyPerMan && r.qtyPerMan.trim());
-  if (r.finish && r.start && r.formReceived && hasLeader && hasMembers && hasQtyPerMan) return `${stageName} - DN`;
-  if (r.start && r.formReceived && hasLeader && hasMembers && hasQtyPerMan) return stageName;
-  if (r.formReceived && hasLeader) return `QU - ${stageName}`;
+function premixProcessLabel(r: PremixStageFields): string {
+  if (r.finish && r.start && r.formReceived) return "Premix - DN";
+  if (r.start && r.formReceived) return "Premix";
+  if (r.formReceived) return "QU - Premix";
+  return "-";
+}
+
+/**
+ * Label Proses granular AFTERMIX -- DISEDERHANAKAN TOTAL 2026-07-29 sesuai
+ * instruksi eksplisit user, menggantikan versi lama yg berbagi logika dgn
+ * Premix (jg mensyaratkan Leader/Member/Qty per Man terisi). SEKARANG murni
+ * dari kolom Form Received/Start/Finish saja (3 state, pola sama dgn
+ * Approval/Packing/Colour Matching yg sudah disederhanakan lebih dulu):
+ * - Form Received terisi -> "QU - Aftermix".
+ * - Form Received + Start terisi -> "Aftermix".
+ * - Form Received + Start + Finish terisi -> "Aftermix - DN".
+ */
+function aftermixProcessLabel(r: { formReceived: Date | null; start: Date | null; finish: Date | null }): string {
+  if (r.finish && r.start && r.formReceived) return "Aftermix - DN";
+  if (r.start && r.formReceived) return "Aftermix";
+  if (r.formReceived) return "QU - Aftermix";
   return "-";
 }
 
@@ -138,41 +142,23 @@ interface MillingStageFields {
   formReceived: Date | null;
   start: Date | null;
   finish: Date | null;
-  leader: string | null;
-  codeTanki1: string | null;
-  codeMesin: string | null;
-  qtyAct: string | null;
-  members: unknown;
-  fineness: unknown;
-  visco: unknown;
-  suhu: unknown;
 }
 
 /**
- * Label Proses granular Milling -- tahapan ditentukan dari kolom PALING
- * LANJUT yg sudah terisi (Form Received -> Start -> Finish), dgn syarat
- * kolom pendukung tahap itu (Leader, Code Tanki 1, Code Mesin, lalu Member,
- * Qty Act, Fineness, Visco, & Suhu begitu Start terisi) juga sudah terisi --
- * SAMA PERSIS dgn superRefine di milling.routes.ts, sesuai instruksi
- * eksplisit user (2026-07-26). Code Tanki 2 SENGAJA TIDAK dicek di sini --
- * itu auto-terisi dari Premix, bukan syarat wajib manual. "Ada isi" utk
- * Fineness/Visco/Suhu cukup salah satu dari 10 slot terisi (bukan semua 10).
+ * Label Proses granular Milling -- DISEDERHANAKAN TOTAL 2026-07-29 sesuai
+ * instruksi eksplisit user, menggantikan versi 2026-07-26 yg jg mensyaratkan
+ * Leader/Code Tanki 1/Code Mesin/Member/Qty Act/Fineness/Visco/Suhu terisi.
+ * SEKARANG murni dari kolom Form Received/Start/Finish saja (3 state, pola
+ * sama dgn Approval/Packing/Colour Matching/Aftermix yg sudah disederhanakan
+ * lebih dulu):
+ * - Form Received terisi -> "QU - Milling".
+ * - Form Received + Start terisi -> "Milling".
+ * - Form Received + Start + Finish terisi -> "Milling - DN".
  */
 function millingProcessLabel(r: MillingStageFields): string {
-  const hasLeader = Boolean(r.leader && r.leader.trim());
-  const hasCodeTanki1 = Boolean(r.codeTanki1 && r.codeTanki1.trim());
-  const hasCodeMesin = Boolean(r.codeMesin && r.codeMesin.trim());
-  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
-  const hasQtyAct = Boolean(r.qtyAct && r.qtyAct.trim());
-  const hasReadings = (v: unknown) => Array.isArray(v) && v.some((x) => typeof x === "string" && x.trim().length > 0);
-  const hasFineness = hasReadings(r.fineness);
-  const hasVisco = hasReadings(r.visco);
-  const hasSuhu = hasReadings(r.suhu);
-  const tier1Ok = hasLeader && hasCodeTanki1 && hasCodeMesin;
-  const tier2Ok = tier1Ok && hasMembers && hasQtyAct && hasFineness && hasVisco && hasSuhu;
-  if (r.finish && r.start && r.formReceived && tier2Ok) return "Milling - DN";
-  if (r.start && r.formReceived && tier2Ok) return "Milling";
-  if (r.formReceived && tier1Ok) return "QU - Milling";
+  if (r.finish && r.start && r.formReceived) return "Milling - DN";
+  if (r.start && r.formReceived) return "Milling";
+  if (r.formReceived) return "QU - Milling";
   return "-";
 }
 
@@ -192,48 +178,7 @@ interface PackingStageFields {
   formReceived: Date | null;
   start: Date | null;
   finish: Date | null;
-}
-
-/**
- * "Kolom inti" Packing yg jadi syarat wajib di SEMUA tahap Proses granular di
- * bawah (SPV Produksi, Leader, Order, Material Number, Material Description,
- * Batch, Order Qty, Plant, IU Plant, Code Tanki, Volume) -- SAMA PERSIS dgn
- * packingCoreFieldsFilled di PackingPage.tsx. "Volume" = kolom totalQty.
- * Qty/Man SENGAJA TIDAK dimasukkan di sini -- itu cuma syarat tahap
- * Packing/Done, lihat packingProcessLabel (direvisi 2026-07-24).
- */
-function packingCoreFieldsFilled(r: PackingStageFields): boolean {
-  return Boolean(
-    r.order &&
-      r.materialNumber &&
-      r.materialDescription &&
-      r.batch &&
-      r.orderQty &&
-      r.plant &&
-      r.iuPlant &&
-      r.codeTanki &&
-      r.spvName &&
-      r.leaderName &&
-      r.totalQty
-  );
-}
-
-/**
- * Label Proses Packing -- tahapan granular ditentukan dari kolom PALING
- * LANJUT yg sudah terisi (Form Received -> Start -> Finish), dgn syarat
- * "kolom inti" (lihat packingCoreFieldsFilled) DAN semua kolom tahap
- * sebelumnya juga sudah terisi -- SAMA PERSIS dgn packingProcessLabel di
- * PackingPage.tsx, supaya label Proses di dashboard ini konsisten dgn label
- * di History Packing sendiri (direvisi 2026-07-24: Qty/Man dimunculkan lagi,
- * jadi syarat WAJIB tahap "Packing" & "Done" -- TAPI BUKAN syarat tahap
- * "QU - PC", sesuai instruksi eksplisit).
- */
-function packingProcessLabel(r: PackingStageFields): string {
-  if (!packingCoreFieldsFilled(r)) return "-";
-  if (r.finish && r.start && r.formReceived && r.qtyPerMan) return "Done";
-  if (r.start && r.formReceived && r.qtyPerMan) return "Packing";
-  if (r.formReceived) return "QU - PC";
-  return "-";
+  remark: string | null;
 }
 
 /**
@@ -248,23 +193,42 @@ function latestMoment(start: Date | null, finish: Date | null, fallbackTimestamp
 }
 
 /**
- * Label Packing PALING TERAKHIR per Order -- dipakai utk kolom terpisah
- * "Production Actions" di Dashboard Production Order Monitoring & Tank
- * Monitoring, sesuai instruksi eksplisit user (2026-07-28): kolom "Proses"
- * cuma boleh diisi Premix/Milling/Aftermix/Colour Matching/QC/Approval --
- * Packing TIDAK lagi ikut diadu jadi kandidat "paling akhir" utk kolom itu
- * (lihat pemanggil -- Packing SENGAJA tidak dimasukkan ke array `rows`/
- * `touches` yg dipakai utk menentukan pemenang "Proses").
+ * Baris PackingLog PALING TERAKHIR per Order (dedupe by latestMoment) --
+ * dipakai BERSAMA oleh latestPackingLabelByOrder (kolom "Production Actions")
+ * DAN override Start Proses/Finish Proses/Remark di /production-orders
+ * (2026-07-29, instruksi eksplisit user: begitu Order ybs py baris PackingLog
+ * beneran, 3 kolom itu ambil dari History Packing, BUKAN lagi dari
+ * Premix/Milling/Aftermix/Colour Matching/Approval spt biasanya).
  */
-function latestPackingLabelByOrder(rows: (PackingStageFields & { timestamp: Date })[]): Map<string, string> {
+function latestPackingRowByOrder(rows: (PackingStageFields & { timestamp: Date })[]): Map<string, PackingStageFields> {
   const latestByOrder = new Map<string, { moment: Date; row: PackingStageFields }>();
   for (const r of rows) {
     const moment = latestMoment(r.start, r.finish, r.timestamp);
     const existing = latestByOrder.get(r.order);
     if (!existing || moment.getTime() > existing.moment.getTime()) latestByOrder.set(r.order, { moment, row: r });
   }
+  const result = new Map<string, PackingStageFields>();
+  for (const [order, { row }] of latestByOrder) result.set(order, row);
+  return result;
+}
+
+/**
+ * Label Packing PALING TERAKHIR per Order -- dipakai utk kolom terpisah
+ * "Production Actions" di Dashboard Production Order Monitoring & Tank
+ * Monitoring. Skema granular lama (QU-PC/Packing/Done, berbasis Form
+ * Received/Start/Finish/Qty per Man) sempat diganti "Packing"/"Packing - DN"
+ * (2026-07-29), lalu DIREVISI LAGI hari yg sama sesuai instruksi eksplisit
+ * user: label DN-nya sekarang "Done" (bukan "Packing - DN"), warnanya ikut
+ * pakai warna "Done" (hijau tua) -- BEDA dari Approval yg tetap "Approval -
+ * DN" warna Approval sendiri, jadi TIDAK pakai finishBasedLabel di sini.
+ * "QU - Packing" (Order yg qcPassed-nya sudah terisi tapi belum py baris
+ * PackingLog sama sekali) DITAMBAHKAN terpisah oleh pemanggil (lihat
+ * queuePackingOrders) krn fungsi ini cuma bisa lihat Order yg SUDAH py baris
+ * PackingLog.
+ */
+function latestPackingLabelByOrder(latestPackingRow: Map<string, PackingStageFields>): Map<string, string> {
   const labels = new Map<string, string>();
-  for (const [order, { row }] of latestByOrder) labels.set(order, packingProcessLabel(row));
+  for (const [order, row] of latestPackingRow) labels.set(order, row.finish ? "Done" : "Packing");
   return labels;
 }
 
@@ -305,39 +269,24 @@ function qcProcessLabel(param: QcParam | undefined): string {
   return `QC : ${param.parameter} : ${verdictLabel}`;
 }
 
-interface ApprovalStageFields {
-  typeLot: string | null;
-  qcToApproval: Date | null;
-  prepareProduksi: Date | null;
-  sendToTech: Date | null;
-  technicalDateReceiving: Date | null;
-  submitToCustomer: Date | null;
-  finishApp: Date | null;
-}
-
 /**
- * Label Proses utk Approval (Production & MRP Schedule > Approval) -- direvisi
- * total 2026-07-28 sesuai instruksi eksplisit user, menggantikan skema lama
- * (AP - OK/Cust/SubmTech/Tech/Prep-AP/QC-AP). Tahapan sekarang py 2 sumbu:
- * 1) "Admin QC Stage" (kolom typeLot) menentukan label AWAL (Improve/Joint
- *    Lot/Lot Packing/Approval) sebelum production/technical input dimulai.
- * 2) Begitu salah satu dari Prepare Date/Send To Tech/Submit Tech sudah
- *    terisi, labelnya jadi "QU - Approval" TERLEPAS dari Admin QC Stage yg
- *    dipilih (lihat superRefine di approval.routes.ts -- tahap ini SELALU
- *    mewajibkan QC to App terisi juga, jadi baris ini valid utk cabang mana
- *    pun kecuali Improve murni). Submit Cust/Finish App py labelnya sendiri.
- * Dicek dari yg paling lanjut turun ke yg paling awal, krn tiap tahap
- * berikutnya mewajibkan SEMUA tahap sebelumnya (validasi kumulatif).
+ * Label "Proses" utk Approval -- direvisi TOTAL 2026-07-29 sesuai instruksi
+ * eksplisit user, menggantikan skema granular lama (berbasis Admin QC
+ * Stage/Prepare Date/dst). Cuma 3 state, PERSIS mengikuti keberadaan Order
+ * di tab menu Approval:
+ * 1) "List Antrian Approval" (lihat GET /approvals/queue) -- Order BELUM py
+ *    baris di ApprovalSchedule, tapi Admin QC Stage-nya sudah Approval/Joint
+ *    Lot -- label "QU - Approval".
+ * 2) Order SUDAH py baris di ApprovalSchedule ("Lot History") tapi Finish
+ *    App belum terisi -- label "Approval".
+ * 3) Sama spt di atas TAPI Finish App SUDAH terisi -- label "Approval - DN".
+ * Packing PAKAI skema serupa (lihat latestPackingLabelByOrder) tapi label DN-
+ * nya "Done" (bukan "Packing - DN") dan warnanya beda (hijau tua, bukan
+ * hijau Packing) -- makanya Packing TIDAK pakai fungsi generik ini lagi
+ * (direvisi 2026-07-29, instruksi eksplisit user yg kedua kalinya).
  */
-function approvalProcessLabel(a: ApprovalStageFields): string | null {
-  if (a.finishApp) return "Approval - DN";
-  if (a.submitToCustomer) return "Approval";
-  if (a.technicalDateReceiving || a.sendToTech || a.prepareProduksi) return "QU - Approval";
-  if (a.typeLot === "Approval") return "QU - Approval";
-  if (a.typeLot === "Lot Packing") return "QC - DN";
-  if (a.typeLot === "Joint Lot") return "QC - Joint Lot";
-  if (a.typeLot === "Improve") return "Improve";
-  return null;
+function finishBasedLabel(stageName: "Approval", finish: Date | null): string {
+  return finish ? `${stageName} - DN` : stageName;
 }
 
 /**
@@ -488,7 +437,7 @@ dashboardRouter.get(
     // approvalProcessLabel/dashboard tetap bisa baca ketiganya sama seperti
     // sebelum dipisah.
     const adminQcRows = await prisma.adminQc.findMany({
-      select: { order: true, typeLot: true, qcToApproval: true, qcPassed: true, timestamp: true },
+      select: { order: true, orderQty: true, typeLot: true, qcToApproval: true, qcPassed: true, remark: true, timestamp: true },
       orderBy: { timestamp: "desc" },
     });
     const latestAdminQcByOrder = new Map<string, (typeof adminQcRows)[number]>();
@@ -546,12 +495,199 @@ dashboardRouter.get(
       return relevant.map((d) => ({ name: d.name, done: d.doneSet.has(order) }));
     }
 
-    // Label Packing per Order, dipakai kolom "Production Actions" TERPISAH di
-    // bawah -- Packing SENGAJA TIDAK dimasukkan ke `rows` (kandidat pemenang
-    // kolom "Proses"/Start Proses/Finish Proses/Remark), sesuai instruksi
-    // eksplisit user (2026-07-28): kolom "Proses" cuma boleh diisi
-    // Premix/Milling/Aftermix/Colour Matching/QC/Approval.
-    const packingActionsByOrder = latestPackingLabelByOrder(packing);
+    // Label Packing per Order utk kolom "Production Actions" -- mulai dari
+    // Order yg SUDAH py baris PackingLog (Packing/Done), lalu ditambah Order
+    // yg BELUM py baris PackingLog sama sekali tapi qcPassed-nya sudah terisi
+    // ("List Antrian Packing", lihat GET /packing/queue) -- "QU - Packing".
+    // Dua sumber ini SALING LEPAS (queuePackingOrders sudah memfilter
+    // `!packingOrders.has(...)`), jadi aman digabung tanpa bentrok.
+    const latestPackingRow = latestPackingRowByOrder(packing);
+    const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRow);
+    const queuePackingOrders = Array.from(latestAdminQcByOrder.values()).filter(
+      (a) => a.qcPassed != null && !packingOrders.has(a.order)
+    );
+    for (const a of queuePackingOrders) packingActionsByOrder.set(a.order, "QU - Packing");
+
+    // Order yg Admin QC Stage-nya sudah "Approval"/"Joint Lot" tapi BELUM py
+    // baris di ApprovalSchedule -- "List Antrian Approval" (lihat GET
+    // /approvals/queue, filter-nya SENGAJA disamakan persis, TERMASUK tidak
+    // mengecek status Packing sama sekali -- direvisi 2026-07-29, instruksi
+    // eksplisit user: kolom "Proses" & "Production Actions" harus independen,
+    // supaya tetap ketahuan kalau ada Order yg tim Packing-nya sudah input
+    // duluan tapi administrasi Approval-nya belum selesai, BUKAN otomatis
+    // dianggap "sudah lewat" cuma krn Packing kebetulan lebih dulu).
+    const queueApprovalRows = Array.from(latestAdminQcByOrder.values())
+      .filter((a) => (a.typeLot === "Approval" || a.typeLot === "Joint Lot") && !approvalOrders.has(a.order))
+      .map((a) => ({
+        order: a.order,
+        orderQty: a.orderQty,
+        process: "QU - Approval",
+        start: a.qcToApproval,
+        finish: null as Date | null,
+        remark: a.remark,
+        timestamp: a.qcToApproval ?? a.timestamp,
+      }));
+
+    const latestAftermixByOrder = new Map<string, (typeof premixAftermix)[number]>();
+    for (const r of premixAftermix) {
+      if (r.section !== "AFTERMIX") continue;
+      if (!latestAftermixByOrder.has(r.order)) latestAftermixByOrder.set(r.order, r);
+    }
+
+    // Order yg ADA di Master Data Cooispi, Material Number-nya PERNAH py
+    // histori Premix, tapi BELUM PERNAH diinput ke Premix maupun tahap
+    // manapun setelahnya -- "PWO Schedule & Queue" Premix (lihat GET
+    // /premix-aftermix/premix-pwo-queue, filter-nya disamakan persis).
+    // Dipakai utk baris "QU - Premix" kolom "Proses" (2026-07-30, instruksi
+    // eksplisit user). BEDA dari queueMillingRows/dst -- sumbernya Master
+    // Data langsung (Premix tahap pertama, tidak py tahap sebelumnya), jadi
+    // perlu fetch TERSENDIRI di luar Promise.all utama -- SENGAJA difilter
+    // `materialNumber IN (...)` di level DB (bukan fetch semua ~500rb baris
+    // Master Data ke memory) supaya tetap ringan.
+    const allMasterOrders =
+      premixMaterials.size > 0
+        ? await prisma.masterOrder.findMany({
+            where: { materialNumber: { in: Array.from(premixMaterials) } },
+            select: { order: true, orderQty: true, materialNumber: true },
+          })
+        : [];
+    const queuePremixRows = allMasterOrders
+      .filter(
+        (r) =>
+          r.materialNumber != null &&
+          !premixOrders.has(r.order) &&
+          !millingOrders.has(r.order) &&
+          !aftermixOrders.has(r.order) &&
+          !colourMatchingOrders.has(r.order) &&
+          !approvalOrders.has(r.order) &&
+          !packingOrders.has(r.order)
+      )
+      .map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: "QU - Premix",
+        start: null as Date | null,
+        finish: null as Date | null,
+        remark: null as string | null,
+        // Master Data tidak py timestamp yg bisa diandalkan (lihat komentar
+        // panjang di /premix-aftermix/premix-pwo-queue) -- SENGAJA pakai
+        // epoch (paling lama) supaya baris ini HANYA menang kalau memang
+        // tidak ada histori produksi apa pun lagi utk Order ini (fallback
+        // paling rendah prioritasnya, bukan yg paling baru).
+        timestamp: new Date(0),
+      }));
+
+    // Order yg Premix-nya sudah "Premix - DN", tapi BELUM py baris MillingLog
+    // SAMA SEKALI -- "PWO Schedule & Queue" Milling (lihat GET
+    // /milling/pwo-queue, filter-nya disamakan persis, TERMASUK tidak ada
+    // syarat histori Material Number -- BEDA dari Aftermix/Colour Matching,
+    // tidak diminta utk Milling). Dipakai utk baris "QU - Milling" kolom
+    // "Proses" (2026-07-29, instruksi eksplisit user). Begitu SUDAH ada baris
+    // MillingLog (walau baru Form Received), milling.map di bawah sudah
+    // otomatis menangani labelnya sendiri (SAMA "QU - Milling" selama Start
+    // belum terisi, lewat millingProcessLabel) -- sumber INI cuma ngisi gap
+    // SEBELUM ada baris sama sekali.
+    const latestPremixByOrder = new Map<string, (typeof premixAftermix)[number]>();
+    for (const r of premixAftermix) {
+      if (r.section !== "PREMIX") continue;
+      if (!latestPremixByOrder.has(r.order)) latestPremixByOrder.set(r.order, r);
+    }
+    const queueMillingRows = Array.from(latestPremixByOrder.values())
+      .filter(
+        (r) =>
+          premixProcessLabel(r) === "Premix - DN" &&
+          !millingOrders.has(r.order) &&
+          !aftermixOrders.has(r.order) &&
+          !colourMatchingOrders.has(r.order) &&
+          !approvalOrders.has(r.order) &&
+          !packingOrders.has(r.order)
+      )
+      .map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: "QU - Milling",
+        start: null as Date | null,
+        finish: null as Date | null,
+        remark: r.remark,
+        // +1ms drpd Finish Premix -- SENGAJA supaya "QU - Milling" menang
+        // tie-break drpd "Premix - DN" (baris Premix sendiri pakai timestamp
+        // Finish yg SAMA persis), sama pola dgn queueAftermixRows/
+        // queueColourMatchingRows.
+        timestamp: new Date(r.finish!.getTime() + 1),
+      }));
+
+    // Order yg Milling-nya sudah "Milling - DN" DAN Material Number-nya
+    // PERNAH py histori Aftermix, tapi BELUM py baris Aftermix SAMA SEKALI --
+    // "PWO Schedule & Queue" Aftermix (lihat GET /premix-aftermix/
+    // aftermix-pwo-queue, filter-nya disamakan persis). Dipakai utk baris
+    // "QU - Aftermix" kolom "Proses" (2026-07-29, instruksi eksplisit user).
+    // Begitu SUDAH ada baris Aftermix (walau baru Form Received),
+    // premixAftermix.map di bawah sudah otomatis menangani labelnya sendiri
+    // (SAMA "QU - Aftermix" selama Start belum terisi, lewat
+    // aftermixProcessLabel) -- sumber INI cuma ngisi gap SEBELUM ada baris
+    // sama sekali.
+    const latestMillingByOrder = new Map<string, (typeof milling)[number]>();
+    for (const r of milling) {
+      if (!latestMillingByOrder.has(r.order)) latestMillingByOrder.set(r.order, r);
+    }
+    const queueAftermixRows = Array.from(latestMillingByOrder.values())
+      .filter(
+        (r) =>
+          millingProcessLabel(r) === "Milling - DN" &&
+          r.materialNumber != null &&
+          aftermixMaterials.has(r.materialNumber) &&
+          !aftermixOrders.has(r.order) &&
+          !colourMatchingOrders.has(r.order) &&
+          !approvalOrders.has(r.order) &&
+          !packingOrders.has(r.order)
+      )
+      .map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: "QU - Aftermix",
+        start: null as Date | null,
+        finish: null as Date | null,
+        remark: r.remark,
+        // +1ms drpd Finish Milling -- SENGAJA supaya "QU - Aftermix" menang
+        // tie-break drpd "Milling - DN" (baris Milling sendiri pakai
+        // timestamp Finish yg SAMA persis), sama pola dgn queueColourMatchingRows.
+        timestamp: new Date(r.finish!.getTime() + 1),
+      }));
+
+    // Order yg Aftermix-nya sudah "Aftermix - DN" DAN Material Number-nya
+    // PERNAH py histori Colour Matching, tapi BELUM py baris ColourMatchingLog
+    // SAMA SEKALI -- "PWO Schedule & Queue" Colour Matching (lihat GET
+    // /colour-matching/pwo-queue, filter-nya disamakan persis). Dipakai utk
+    // baris "QU - Colour Matching" kolom "Proses" (2026-07-29, instruksi
+    // eksplisit user). Begitu SUDAH ada baris ColourMatchingLog (walau baru
+    // Form Received), colourMatching.map di bawah sudah otomatis menangani
+    // labelnya sendiri (SAMA "QU - Colour Matching" selama Start belum
+    // terisi, lewat colourMatchingProcessLabel) -- sumber INI cuma ngisi gap
+    // SEBELUM ada baris sama sekali.
+    const queueColourMatchingRows = Array.from(latestAftermixByOrder.values())
+      .filter(
+        (r) =>
+          aftermixProcessLabel(r) === "Aftermix - DN" &&
+          r.materialNumber != null &&
+          colourMatchingMaterials.has(r.materialNumber) &&
+          !colourMatchingOrders.has(r.order) &&
+          !approvalOrders.has(r.order) &&
+          !packingOrders.has(r.order)
+      )
+      .map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: "QU - Colour Matching",
+        start: null as Date | null,
+        finish: null as Date | null,
+        remark: r.remark,
+        // +1ms drpd Finish Aftermix -- SENGAJA supaya "QU - Colour Matching"
+        // menang tie-break drpd "Aftermix - DN" (baris Aftermix di bawah
+        // pakai timestamp Finish yg SAMA persis) saat diurutkan "paling baru
+        // menang". Order ini logisnya masuk antrian TEPAT setelah Aftermix
+        // selesai, jadi wajar kalau lebih "baru" walau selisihnya cuma 1ms.
+        timestamp: new Date(r.finish!.getTime() + 1),
+      }));
 
     const rows: Omit<
       ProductionOrderRow,
@@ -560,12 +696,15 @@ dashboardRouter.get(
       ...premixAftermix.map((r) => ({
         order: r.order,
         orderQty: r.orderQty,
-        process: premixOrAftermixProcessLabel(r, r.section === "PREMIX" ? "Premix" : "Aftermix"),
+        process: r.section === "PREMIX" ? premixProcessLabel(r) : aftermixProcessLabel(r),
         start: r.start,
         finish: r.finish,
         remark: r.remark,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
+      ...queuePremixRows,
+      ...queueMillingRows,
+      ...queueAftermixRows,
       ...milling.map((r) => ({
         order: r.order,
         orderQty: r.orderQty,
@@ -584,12 +723,21 @@ dashboardRouter.get(
         remark: r.remark,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
+      ...queueColourMatchingRows,
       ...checkResults.map((r) => {
         const rep = qcRepresentativeParam(r.parameters);
+        // Label Proses QC direvisi TOTAL 2026-07-29 sesuai instruksi eksplisit
+        // user, menggantikan format lama "QC : <Item Check> : <Verdict>" --
+        // sekarang cuma 2 state: Order ada di "History Input Check Results"
+        // (baris CheckResult ini sendiri) -> "QC"; DITAMBAH Order ybs QC
+        // Passed-nya (tabel AdminQc, menu "History Admin QC") sudah terisi ->
+        // "QC - DN". Popup detail Item Check (qcDetailOrder di frontend) TETAP
+        // jalan spt biasa krn dipicu oleh nomor Order, bukan isi label ini.
+        const adminQc = latestAdminQcByOrder.get(r.order);
         return {
           order: r.order,
           orderQty: r.orderQty,
-          process: qcProcessLabel(rep),
+          process: adminQc?.qcPassed ? "QC - DN" : "QC",
           start: rep?.start ?? null,
           finish: rep?.finish ?? null,
           remark: r.remark,
@@ -599,32 +747,23 @@ dashboardRouter.get(
           timestamp: rep?.start ?? r.timestamp,
         };
       }),
-      ...approvals
-        .map((r) => {
-          const adminQc = latestAdminQcByOrder.get(r.order);
-          const merged = { ...r, typeLot: adminQc?.typeLot ?? null, qcToApproval: adminQc?.qcToApproval ?? null };
-          const process = approvalProcessLabel(merged);
-          if (!process) return null;
-          return {
-            order: r.order,
-            orderQty: r.orderQty,
-            process,
-            // Start/Finish Proses utk Approval SENGAJA diambil dari "QC to App"
-            // dan "QC Passed" (kolom History Admin QC -- sejak Admin QC dipisah
-            // jadi tabel & menu sendiri 2026-07-28), BUKAN Finish App atau tgl
-            // tahap aktif lainnya -- berlaku utk semua label Proses granular
-            // Approval (Improve/QC - Joint Lot/QC - DN/QU - Approval/Approval/
-            // Approval - DN), sesuai instruksi eksplisit user.
-            start: adminQc?.qcToApproval ?? null,
-            finish: adminQc?.qcPassed ?? null,
-            remark: r.remark,
-            // Dipakai juga sbg acuan "paling baru" lintas modul (pola sama dgn QC
-            // yg pakai Start Item Check) -- fallback ke timestamp Save kalau QC to
-            // App kosong tapi tahap yg lebih lanjut sudah terisi (jarang terjadi).
-            timestamp: adminQc?.qcToApproval ?? r.timestamp,
-          };
-        })
-        .filter((r): r is NonNullable<typeof r> => r !== null),
+      ...queueApprovalRows,
+      ...approvals.map((r) => {
+        const adminQc = latestAdminQcByOrder.get(r.order);
+        return {
+          order: r.order,
+          orderQty: r.orderQty,
+          process: finishBasedLabel("Approval", r.finishApp),
+          // Start Proses tetap diambil dari "QC to App" (kolom History Admin
+          // QC) spy konsisten sama sebelumnya; Finish Proses SEKARANG Finish
+          // App langsung (bukan lagi QC Passed) -- sesuai instruksi 2026-07-29:
+          // status "Approval - DN" ditentukan murni dari Finish App.
+          start: adminQc?.qcToApproval ?? null,
+          finish: r.finishApp,
+          remark: r.remark,
+          timestamp: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
+        };
+      }),
     ];
 
     // "Pertama kali Order ini dibuat" (utk Lead Time Proses) = baris TERCEPAT
@@ -673,11 +812,22 @@ dashboardRouter.get(
       const firstSeen = firstSeenByOrder.get(r.order) ?? r.timestamp;
       const stages = computeStages(r.order, master?.materialNumber ?? null);
       const progressPercent = stages.length === 0 ? 0 : Math.round((stages.filter((s) => s.done).length / stages.length) * 100);
+      // Begitu Order ybs SUDAH py baris nyata di History Packing, kolom Start
+      // Proses/Finish Proses/Remark ambil dari SANA (bukan lagi dari
+      // Premix/Milling/Aftermix/Colour Matching/Approval spt biasanya) --
+      // sesuai instruksi eksplisit user (2026-07-29). Kalau Order cuma
+      // "QU - Packing" (baru di antrian, belum py baris PackingLog beneran)
+      // TIDAK ada override -- History Packing-nya sendiri memang belum ada
+      // apa-apa, jadi 3 kolom itu tetap ikut logika lama.
+      const packingRow = latestPackingRow.get(r.order);
       return {
         ...r,
         materialNumber: master?.materialNumber ?? null,
         materialDescription: master?.materialDescription ?? null,
         batch: master?.batch ?? null,
+        start: packingRow ? packingRow.start : r.start,
+        finish: packingRow ? packingRow.finish : r.finish,
+        remark: packingRow ? packingRow.remark : r.remark,
         leadTimeProses: countBusinessDaysElapsed(firstSeen, now),
         stages,
         progressPercent,
@@ -865,24 +1015,23 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       moment: latestMoment(r.start, r.finish, r.timestamp),
     });
   }
-  // Packing SENGAJA TIDAK ikut jadi "touch" (kandidat okupansi/label Proses
-  // tank) -- sesuai instruksi eksplisit user (2026-07-28), sama alasannya dgn
-  // /production-orders. `packingOrders` Set di atas (freeing logic) tetap
-  // dihitung independen dari data Packing yg sama, jadi perilaku "tank
-  // dikosongkan lagi begitu Order-nya sudah Packing" TIDAK berubah.
-  // Admin QC Stage/QC to App/QC Passed TIDAK LAGI di ApprovalSchedule --
-  // lihat komentar sama di /production-orders.
+  // Packing SENGAJA TIDAK ikut jadi "touch" di Tank Monitoring (kandidat
+  // okupansi tank) -- beda topik dari kolom "Proses" di /production-orders
+  // (yg SEKARANG per 2026-07-29 sudah mengikutkan Packing lagi, lihat
+  // finishBasedLabel di atas). Di SINI Packing tetap dikecualikan krn
+  // freeing-logic tank (`packingOrders` Set di atas) sudah menjadikan
+  // Packing sbg PENANDA "tank dikosongkan lagi", bukan tahap okupansi --
+  // memasukkannya jadi touch juga akan kontradiktif dgn logika freeing itu.
   const latestAdminQcByOrderForTank = new Map<string, (typeof adminQcRowsForTank)[number]>();
   for (const r of adminQcRowsForTank) {
     if (!latestAdminQcByOrderForTank.has(r.order)) latestAdminQcByOrderForTank.set(r.order, r);
   }
   for (const r of approvals) {
     if (!r.codeTanki) continue;
-    // Label Proses granular (bukan "Approval" statis) + Start/Finish dari "QC
-    // to App"/"QC Passed" (tabel AdminQc, sejak dipisah dari ApprovalSchedule
-    // 2026-07-28) -- SAMA PERSIS dgn /production-orders.
+    // Label Proses Approval/Approval - DN murni dari Finish App (SAMA
+    // PERSIS dgn /production-orders, lihat finishBasedLabel) -- Start dari
+    // "QC to App" (tabel AdminQc) spy konsisten sama sebelumnya.
     const adminQc = latestAdminQcByOrderForTank.get(r.order);
-    const merged = { ...r, typeLot: adminQc?.typeLot ?? null, qcToApproval: adminQc?.qcToApproval ?? null };
     touches.push({
       code: r.codeTanki,
       order: r.order,
@@ -890,9 +1039,9 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       batch: r.batch,
       orderQty: r.orderQty,
       remark: r.remark,
-      process: approvalProcessLabel(merged) ?? "Approval",
+      process: finishBasedLabel("Approval", r.finishApp),
       start: adminQc?.qcToApproval ?? null,
-      finish: adminQc?.qcPassed ?? null,
+      finish: r.finishApp,
       moment: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
     });
   }
@@ -929,7 +1078,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     select: { order: true, materialDescription: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
-  const packingActionsByOrder = latestPackingLabelByOrder(packing);
+  const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
 
   const map = new Map<string, TankStatusInfo>();
   for (const tank of tanks) {

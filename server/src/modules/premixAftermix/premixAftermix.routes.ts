@@ -86,6 +86,99 @@ premixAftermixRouter.get(
 );
 
 /**
+ * "PWO Schedule & Queue" khusus PREMIX -- BEDA dari antrian Milling/Aftermix/
+ * Colour Matching (sumbernya History tahap SEBELUMNYA), Premix adalah tahap
+ * PERTAMA jadi tidak py tahap sebelumnya -- sumbernya langsung Master Data
+ * Cooispi (Referensi Order/PO SAP-COOISPI), sesuai instruksi eksplisit user
+ * (2026-07-29, ditegaskan ulang 2026-07-30). Order masuk antrian ini kalau:
+ * 1) Ada di Master Data Cooispi, DAN
+ * 2) Material Number-nya PERNAH py histori Premix (lintas Order manapun) --
+ *    kalau Material Number itu memang tidak pernah lewat Premix, dianggap
+ *    produk itu prosesnya TANPA Premix (bukan bug, bukan "ketinggalan"),
+ *    jadi TIDAK masuk antrian, DAN
+ * 3) Start-nya BELUM terisi (bukan "belum py baris Premix sama sekali") --
+ *    Order yg SUDAH py baris PremixLog tapi baru Form Received (Start belum
+ *    diisi) TETAP di antrian ini, DIPERBAIKI 2026-07-30 sesuai instruksi
+ *    eksplisit user supaya konsisten dgn pola Milling/Aftermix/Colour
+ *    Matching (sebelumnya salah exclude begitu ADA baris Premix apa pun), DAN
+ * 4) BELUM masuk tahap manapun setelah Premix (Milling, Aftermix, Colour
+ *    Matching, Approval, Packing) -- kalau sudah, berarti Premix-nya sudah
+ *    pasti "terlewati" entah kenapa tidak tercatat, jadi tidak relevan lagi
+ *    ditampilkan sbg "menunggu Premix".
+ * MasterOrder TIDAK py kolom timestamp "kapan Order ini pertama muncul" yg
+ * bisa diandalkan (updatedAt ikut ke-refresh tiap kali file di-upload ulang,
+ * termasuk utk Order lama) -- diurutkan `id` ASC (urutan insert) sbg proxy
+ * FIFO, bukan tanggal.
+ */
+premixAftermixRouter.get(
+  "/premix-pwo-queue",
+  asyncRoute(async (_req, res) => {
+    const [masterOrders, premixLogs, millingOrders, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
+      prisma.masterOrder.findMany({
+        select: { id: true, order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+        orderBy: { id: "asc" },
+      }),
+      prisma.premixAftermixLog.findMany({ where: { section: "PREMIX" }, orderBy: { timestamp: "desc" } }),
+      prisma.millingLog.findMany({ select: { order: true } }),
+      prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, select: { order: true } }),
+      prisma.colourMatchingLog.findMany({ select: { order: true } }),
+      prisma.approvalSchedule.findMany({ select: { order: true } }),
+      prisma.packingLog.findMany({ select: { order: true } }),
+    ]);
+
+    const premixMaterialSet = new Set(
+      premixLogs.filter((r): r is typeof r & { materialNumber: string } => r.materialNumber != null).map((r) => r.materialNumber)
+    );
+
+    // Dedupe ke baris Premix PALING TERAKHIR per Order, lalu ambil yg
+    // Start-nya SUDAH terisi -- syarat #3 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun). Baris Form-Received-only
+    // (belum ada di set ini) tetap dipakai jg utk menyuguhkan formReceived-nya
+    // sendiri di kolom queue, bukan cuma referensi Master Data polos.
+    const latestPremixByOrder = new Map<string, (typeof premixLogs)[number]>();
+    for (const r of premixLogs) {
+      if (!latestPremixByOrder.has(r.order)) latestPremixByOrder.set(r.order, r);
+    }
+    const startedPremixOrderSet = new Set(
+      Array.from(latestPremixByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
+
+    const pastPremixOrderSet = new Set([
+      ...millingOrders.map((r) => r.order),
+      ...aftermixOrders.map((r) => r.order),
+      ...colourMatchingOrders.map((r) => r.order),
+      ...approvalOrders.map((r) => r.order),
+      ...packingOrders.map((r) => r.order),
+    ]);
+
+    const data = masterOrders
+      .filter(
+        (r) =>
+          r.materialNumber != null &&
+          premixMaterialSet.has(r.materialNumber) &&
+          !startedPremixOrderSet.has(r.order) &&
+          !pastPremixOrderSet.has(r.order)
+      )
+      .map((r) => ({
+        order: r.order,
+        materialNumber: r.materialNumber,
+        materialDescription: r.materialDescription,
+        batch: r.batch,
+        orderQty: r.orderQty,
+        plant: r.plant,
+        // Kalau sudah ada baris Premix Form-Received-only utk Order ini,
+        // tampilkan tanggalnya -- lebih informatif drpd cuma referensi
+        // Master Data polos.
+        formReceived: latestPremixByOrder.get(r.order)?.formReceived ?? null,
+      }));
+
+    res.json({ success: true, data });
+  })
+);
+
+/**
  * "Milling - DN" -- syarat lengkap tahap terakhir Milling (Finish, Start,
  * Form Received, Leader, Code Tanki 1, Code Mesin, Member, Qty Act, Fineness,
  * Visco, Suhu semua terisi) -- SAMA PERSIS dgn millingProcessLabel di
@@ -128,30 +221,53 @@ function isMillingDone(r: {
 
 /**
  * "PWO Schedule & Queue" khusus AFTERMIX -- daftar PWO (Order) yang sudah
- * "Milling - DN" dan SEDANG MENUNGGU dikerjakan Aftermix (belum ada input
- * Aftermix utk Order itu), sesuai instruksi eksplisit user (2026-07-26) --
- * pola sama persis dgn /milling/pwo-queue (yg sumbernya Premix Finish,
- * antriannya utk Milling). Order yang sudah masuk tahap SETELAH Aftermix
- * (Colour Matching, Approval, Packing) JUGA dikeluarkan dari antrian, sama
- * alasannya dgn queue Milling: secara alur proses berarti Aftermix-nya sudah
- * pasti selesai walau entah kenapa tidak tercatat. Diurutkan Finish Milling
- * paling awal duluan (FIFO).
+ * "Milling - DN" dan SEDANG MENUNGGU dikerjakan Aftermix, DIREVISI TOTAL
+ * 2026-07-29 sesuai instruksi eksplisit user (dari versi 2026-07-26), pola
+ * SAMA PERSIS dgn revisi /colour-matching/pwo-queue:
+ * 1) Order Milling - DN SEKARANG juga wajib Material Number-nya PERNAH py
+ *    histori Aftermix (lintas Order/Batch manapun) -- Material yg memang
+ *    tidak pernah lewat Aftermix tidak lagi otomatis nyangkut di antrian ini.
+ * 2) Order yg SUDAH py baris Aftermix (premixAftermixLog section AFTERMIX)
+ *    tapi Start-nya BELUM terisi (baru Form Received) TETAP di antrian ini --
+ *    SEBELUMNYA begitu ADA baris Aftermix sama sekali langsung dikeluarkan;
+ *    sekarang baru dikeluarkan begitu Start-nya terisi.
+ * Order yg sudah masuk tahap SETELAH Aftermix (Colour Matching, Approval,
+ * Packing) tetap dikeluarkan dari antrian spt sebelumnya. Diurutkan Finish
+ * Milling paling awal duluan (FIFO).
  */
 premixAftermixRouter.get(
   "/aftermix-pwo-queue",
   asyncRoute(async (_req, res) => {
-    const [millingLogs, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
+    const [millingLogs, aftermixLogs, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
       prisma.millingLog.findMany({ orderBy: { timestamp: "desc" } }),
-      prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, select: { order: true } }),
+      prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, orderBy: { timestamp: "desc" } }),
       prisma.colourMatchingLog.findMany({ select: { order: true } }),
       prisma.approvalSchedule.findMany({ select: { order: true } }),
       prisma.packingLog.findMany({ select: { order: true } }),
     ]);
 
-    // Order yg sudah masuk Aftermix sendiri ATAU tahap manapun setelahnya --
-    // dianggap sudah "lewat" dari antrian menunggu Aftermix.
+    // Material Number yg PERNAH py histori Aftermix (lintas Order manapun) --
+    // syarat #1 di atas.
+    const aftermixMaterialSet = new Set(
+      aftermixLogs.filter((r): r is typeof r & { materialNumber: string } => r.materialNumber != null).map((r) => r.materialNumber)
+    );
+
+    // Dedupe ke baris Aftermix PALING TERAKHIR per Order, lalu ambil yg
+    // Start-nya SUDAH terisi -- syarat #2 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun).
+    const latestAftermixByOrder = new Map<string, (typeof aftermixLogs)[number]>();
+    for (const r of aftermixLogs) {
+      if (!latestAftermixByOrder.has(r.order)) latestAftermixByOrder.set(r.order, r);
+    }
+    const startedAftermixOrderSet = new Set(
+      Array.from(latestAftermixByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
+
+    // Order yg sudah masuk tahap manapun SETELAH Aftermix -- dianggap sudah
+    // "lewat" dari antrian menunggu Aftermix.
     const pastAftermixOrderSet = new Set([
-      ...aftermixOrders.map((r) => r.order),
       ...colourMatchingOrders.map((r) => r.order),
       ...approvalOrders.map((r) => r.order),
       ...packingOrders.map((r) => r.order),
@@ -166,7 +282,12 @@ premixAftermixRouter.get(
     }
 
     const queueRows = Array.from(latestByOrder.values()).filter(
-      (r) => isMillingDone(r) && !pastAftermixOrderSet.has(r.order)
+      (r) =>
+        isMillingDone(r) &&
+        r.materialNumber != null &&
+        aftermixMaterialSet.has(r.materialNumber) &&
+        !startedAftermixOrderSet.has(r.order) &&
+        !pastAftermixOrderSet.has(r.order)
     );
     queueRows.sort((a, b) => a.finish!.getTime() - b.finish!.getTime());
 

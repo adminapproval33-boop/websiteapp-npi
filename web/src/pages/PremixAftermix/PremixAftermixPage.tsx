@@ -67,6 +67,25 @@ interface QueueRow {
   remark: string | null;
 }
 
+/** Baris antrian "PWO Schedule & Queue" -- khusus PREMIX, sumbernya Master
+ * Data Cooispi (Referensi Order/PO SAP-COOISPI), BUKAN History tahap
+ * sebelumnya (Premix tahap pertama, tidak punya tahap sebelumnya) -- lihat
+ * GET /premix-aftermix/premix-pwo-queue (2026-07-29). Cuma field referensi
+ * dasar (belum ada data crew/tanki/tanggal krn belum pernah diproses sama
+ * sekali). */
+interface PremixQueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  /** Terisi kalau Order ini sudah py baris Premix Form-Received-only (Start
+   * belum diisi) -- Order itu TETAP di antrian ini sampai Start terisi,
+   * lihat GET /premix-aftermix/premix-pwo-queue (direvisi 2026-07-30). */
+  formReceived: string | null;
+}
+
 interface LogRow {
   id: number;
   timestamp: string;
@@ -135,13 +154,23 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
       api.get<{ success: boolean; data: LogRow[] }>(`/premix-aftermix/history?section=${section}`).then((r) => r.data),
   });
 
-  // Antrian "PWO Schedule & Queue" cuma relevan utk AFTERMIX (sumbernya
-  // History Milling) -- sengaja `enabled: section === "AFTERMIX"` supaya
-  // halaman Premix tidak ikut fetch endpoint ini percuma.
+  // Antrian "PWO Schedule & Queue" AFTERMIX (sumbernya History Milling) --
+  // sengaja `enabled: section === "AFTERMIX"` supaya halaman Premix tidak
+  // ikut fetch endpoint ini percuma.
   const queueQuery = useQuery({
     queryKey: ["aftermix-pwo-queue"],
     queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/premix-aftermix/aftermix-pwo-queue").then((r) => r.data),
     enabled: section === "AFTERMIX",
+  });
+
+  // Antrian "PWO Schedule & Queue" PREMIX (sumbernya Master Data Cooispi,
+  // BUKAN History tahap sebelumnya -- Premix tahap pertama), lihat GET
+  // /premix-aftermix/premix-pwo-queue (2026-07-29). `enabled: section ===
+  // "PREMIX"` supaya halaman Aftermix tidak ikut fetch endpoint ini percuma.
+  const premixQueueQuery = useQuery({
+    queryKey: ["premix-pwo-queue"],
+    queryFn: () => api.get<{ success: boolean; data: PremixQueueRow[] }>("/premix-aftermix/premix-pwo-queue").then((r) => r.data),
+    enabled: section === "PREMIX",
   });
 
   const saveMutation = useMutation({
@@ -303,10 +332,19 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
     setError("");
   }
 
-  /** Isi Order dari PWO Schedule & Queue ke form Input Aftermix (lewat alur
-   * handleOrderFound yg sama dgn ketik manual di OrderLookup) -- sama pola
-   * dgn loadIntoInput di MillingPage.tsx. */
-  function loadIntoInput(row: QueueRow) {
+  /** Isi Order dari PWO Schedule & Queue ke form Input Premix/Aftermix (lewat
+   * alur handleOrderFound yg sama dgn ketik manual di OrderLookup) -- sama
+   * pola dgn loadIntoInput di MillingPage.tsx. Parameter-nya SENGAJA dibuat
+   * minimal (bukan QueueRow penuh) supaya bisa dipakai bareng utk baris
+   * antrian Premix (PremixQueueRow, field-nya lebih sedikit) maupun Aftermix. */
+  function loadIntoInput(row: {
+    order: string;
+    batch: string | null;
+    materialNumber: string | null;
+    materialDescription: string | null;
+    orderQty: string | null;
+    plant: string | null;
+  }) {
     setForm((f) => ({ ...f, order: row.order }));
     handleOrderFound({
       order: row.order,
@@ -356,6 +394,10 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
 
+  const filteredPremixQueue = (premixQueueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
+  );
+
   function findEmployee(name: string | null) {
     const trimmed = (name ?? "").trim().toLowerCase();
     if (!trimmed) return undefined;
@@ -371,11 +413,9 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
         </button>
-        {section === "AFTERMIX" && (
-          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
-            PWO Schedule &amp; Queue
-          </button>
-        )}
+        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          PWO Schedule &amp; Queue
+        </button>
       </div>
 
       {tab === "input" && (
@@ -461,11 +501,26 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
               </ExcelRow>
               <ExcelRow>
                 <div className="excel-cell" style={{ flexBasis: "20%", maxWidth: "20%", flexDirection: "row", gap: 4, padding: 4 }}>
-                  <button type="button" className="btn btn-info" style={{ flex: 1 }} onClick={addMember}>
-                    + Add
+                  <button
+                    type="button"
+                    className="btn btn-info"
+                    title="Tambah Member"
+                    aria-label="Tambah Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={addMember}
+                  >
+                    +
                   </button>
-                  <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={removeLastMember} disabled={form.members.length === 0}>
-                    − Reduce
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    title="Kurangi Member"
+                    aria-label="Kurangi Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={removeLastMember}
+                    disabled={form.members.length === 0}
+                  >
+                    −
                   </button>
                 </div>
               </ExcelRow>
@@ -681,6 +736,63 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                       onClick={() => loadIntoInput(r)}
                     >
                       Input Aftermix
+                    </button>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && section === "PREMIX" && (
+        <div className="panel">
+          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              PWO dari Master Data Cooispi yang Material Number-nya pernah punya histori Premix, dan Start Premix-nya
+              belum diisi (termasuk yang baru Form Received) -- diurutkan sesuai urutan Master Data Cooispi. PWO
+              otomatis hilang dari daftar ini begitu Start Premix-nya sudah diisi, atau begitu PWO itu sudah masuk
+              tahap setelah Premix (Milling, Aftermix, Colour Matching, Approval, Packing). Material Number yang
+              memang tidak pernah lewat Premix (bukan bagian rangkaian proses material itu) tidak ikut ditampilkan di
+              sini.
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: PremixQueueRow) => r.order}
+              exportFileName="premix-pwo-schedule-queue"
+              storageKey="premix-pwo-queue"
+              rows={filteredPremixQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                {
+                  key: "formReceived",
+                  label: "Form Received",
+                  render: (r) => (r.formReceived ? formatDateTime(r.formReceived) : "-"),
+                  csvValue: (r) => (r.formReceived ? toExcelDateTimeString(r.formReceived) : ""),
+                },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Premix
                     </button>
                   ),
                   csvValue: () => "",

@@ -7,19 +7,20 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
 
 /** Portal Quality Control > Input Admin QC (2026-07-28) -- header administratif
- * tahap QC (Admin QC Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed)
- * disimpan di tabel AdminQc TERPISAH dari Planning > Approval (lihat
+ * tahap QC (Admin QC Stage/Lot Passed/QC to App/QC Passed) disimpan di tabel
+ * AdminQc TERPISAH dari Planning > Approval (lihat
  * server/prisma/schema.prisma), terhubung cuma lewat nomor Order. Spec
  * Parameters di bawahnya BUKAN data baru -- itu CheckResult/CheckResultParameter
- * yg SAMA PERSIS dgn menu "Input Check Results" (1 sumber data QC, bisa
- * diedit dari 2 halaman), sesuai keputusan eksplisit user. */
+ * yg SAMA PERSIS dgn menu "Input Check Results", ditampilkan di sini SEBAGAI
+ * REFERENSI VIEW-ONLY (2026-07-29, revisi eksplisit user -- Admin QC cuma
+ * boleh lihat, edit/isi Spec Parameters HANYA lewat menu "Input Check
+ * Results"). Sebelumnya bisa diedit dari 2 halaman; sekarang cuma 1. */
 
 interface AdminQcRow {
   adminQcId: string;
@@ -33,8 +34,6 @@ interface AdminQcRow {
   iuPlant: string | null;
   codeTanki: string | null;
   typeLot: string | null;
-  mrpPic: string | null;
-  salesPic: string | null;
   lotPassed: string | null;
   qcToApproval: string | null;
   qcPassed: string | null;
@@ -88,29 +87,17 @@ interface LinkedSpec {
   parameters: LinkedSpecParameter[];
 }
 
-/** Field CheckResult yg TIDAK ditampilkan di halaman ini (Customer/Cust Segmen/
- * Lot COA/Appearance Notes/Check Notes/Remark) -- kalau ada record CheckResult
- * yg sudah ada utk Order ini, nilainya dibawa apa adanya (bukan dikosongkan)
- * saat Save, supaya Input Admin QC tidak menimpa data yg dikelola dari menu
- * "Input Check Results". */
+/** Cuma nyimpen checkId Check Results yg terhubung ke Order ini (kalau ada) --
+ * dipakai buat teks "Terhubung ke Check Results X" di bawah. Field CheckResult
+ * lain (Customer/Cust Segmen/Lot COA/dll) TIDAK perlu disimpan di sini lagi
+ * karena Spec Parameters di halaman ini VIEW-ONLY (2026-07-29) -- tidak ada
+ * lagi write-back ke Check Results dari Admin QC. */
 interface CheckPassthrough {
   checkId: string | null;
-  customer: string;
-  custSegmen: string;
-  lotCoa: string;
-  appearanceNotes: string;
-  checkNotes: string;
-  remark: string;
 }
 
 const emptyCheckPassthrough: CheckPassthrough = {
   checkId: null,
-  customer: "",
-  custSegmen: "",
-  lotCoa: "",
-  appearanceNotes: "",
-  checkNotes: "",
-  remark: "",
 };
 
 function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
@@ -136,8 +123,6 @@ const emptyForm = {
   iuPlant: "",
   codeTanki: "",
   typeLot: "",
-  mrpPic: "",
-  salesPic: "",
   lotPassed: "",
   qcToApproval: "",
   qcPassed: "",
@@ -154,8 +139,6 @@ const HEADER_COL_DEFAULT_WIDTHS: Record<string, number> = {
   iuPlant: 140,
   codeTanki: 140,
   typeLot: 160,
-  mrpPic: 150,
-  salesPic: 150,
   lotPassed: 170,
   qcToApproval: 170,
   qcPassed: 170,
@@ -163,14 +146,14 @@ const HEADER_COL_DEFAULT_WIDTHS: Record<string, number> = {
 
 const HEADER_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
-  ["iuPlant", "codeTanki", "typeLot", "mrpPic", "salesPic", "lotPassed", "qcToApproval", "qcPassed"],
+  ["iuPlant", "codeTanki", "typeLot", "lotPassed", "qcToApproval", "qcPassed"],
 ];
 
 const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
   no: 44,
   itemCheck: 220,
   spec: 130,
-  result: 130,
+  result: 90,
   verdict: 90,
   start: 180,
   finish: 180,
@@ -189,7 +172,6 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
 
 export default function AdminQcPage() {
   const { user } = useAuth();
-  const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history">("input");
   const [form, setForm] = useState(emptyForm);
@@ -273,8 +255,6 @@ export default function AdminQcPage() {
           iuPlant: f.iuPlant || latest.iuPlant || "",
           codeTanki: f.codeTanki || latest.codeTanki || "",
           typeLot: f.typeLot || latest.typeLot || "",
-          mrpPic: f.mrpPic || latest.mrpPic || "",
-          salesPic: f.salesPic || latest.salesPic || "",
           lotPassed: f.lotPassed || latest.lotPassed || "",
           qcToApproval: f.qcToApproval || latest.qcToApproval || "",
           qcPassed: f.qcPassed || latest.qcPassed || "",
@@ -307,15 +287,7 @@ export default function AdminQcPage() {
     try {
       const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(data.order)}`);
       if (cr.data) {
-        setCheckPassthrough({
-          checkId: cr.data.checkId,
-          customer: cr.data.customer ?? "",
-          custSegmen: cr.data.custSegmen ?? "",
-          lotCoa: cr.data.lotCoa ?? "",
-          appearanceNotes: cr.data.appearanceNotes ?? "",
-          checkNotes: cr.data.checkNotes ?? "",
-          remark: cr.data.remark ?? "",
-        });
+        setCheckPassthrough({ checkId: cr.data.checkId });
         setParams(
           cr.data.parameters.map((p) => ({
             no: p.no,
@@ -339,10 +311,6 @@ export default function AdminQcPage() {
     }
   }
 
-  function updateParam(idx: number, patch: Partial<ParamRow>) {
-    setParams((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  }
-
   function resetForm() {
     setForm(emptyForm);
     setParams([]);
@@ -353,37 +321,12 @@ export default function AdminQcPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const adminQcRes = editingAdminQcId
+      // Spec Parameters (params/checkPassthrough) VIEW-ONLY di halaman ini --
+      // Admin QC cuma menyimpan header-nya sendiri, tidak menulis balik ke
+      // Check Results (lihat komentar CheckPassthrough di atas).
+      return editingAdminQcId
         ? await api.put<{ success: boolean; data: AdminQcRow }>(`/admin-qc/${editingAdminQcId}`, form)
         : await api.post<{ success: boolean; data: AdminQcRow }>("/admin-qc", form);
-
-      if (params.length > 0) {
-        const checkPayload = {
-          order: form.order,
-          materialNumber: form.materialNumber,
-          materialDescription: form.materialDescription,
-          batch: form.batch,
-          orderQty: form.orderQty,
-          plant: form.plant,
-          iuPlant: form.iuPlant,
-          codeTanki: form.codeTanki,
-          customer: checkPassthrough.customer,
-          custSegmen: checkPassthrough.custSegmen,
-          lotCoa: checkPassthrough.lotCoa,
-          appearanceNotes: checkPassthrough.appearanceNotes,
-          checkNotes: checkPassthrough.checkNotes,
-          remark: checkPassthrough.remark,
-          parameters: params,
-        };
-        if (checkPassthrough.checkId) {
-          await api.put(`/check-results/${checkPassthrough.checkId}`, checkPayload);
-        } else {
-          const created = await api.post<{ success: boolean; data: CheckRow }>("/check-results", checkPayload);
-          setCheckPassthrough((p) => ({ ...p, checkId: created.data.checkId }));
-        }
-      }
-
-      return adminQcRes;
     },
     onSuccess: (res) => {
       setError("");
@@ -437,8 +380,6 @@ export default function AdminQcPage() {
       iuPlant: row.iuPlant ?? "",
       codeTanki: row.codeTanki ?? "",
       typeLot: row.typeLot ?? "",
-      mrpPic: row.mrpPic ?? "",
-      salesPic: row.salesPic ?? "",
       lotPassed: row.lotPassed ?? "",
       qcToApproval: row.qcToApproval ?? "",
       qcPassed: row.qcPassed ?? "",
@@ -448,15 +389,7 @@ export default function AdminQcPage() {
       try {
         const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(row.order)}`);
         if (cr.data) {
-          setCheckPassthrough({
-            checkId: cr.data.checkId,
-            customer: cr.data.customer ?? "",
-            custSegmen: cr.data.custSegmen ?? "",
-            lotCoa: cr.data.lotCoa ?? "",
-            appearanceNotes: cr.data.appearanceNotes ?? "",
-            checkNotes: cr.data.checkNotes ?? "",
-            remark: cr.data.remark ?? "",
-          });
+          setCheckPassthrough({ checkId: cr.data.checkId });
           setParams(
             cr.data.parameters.map((p) => ({
               no: p.no,
@@ -487,19 +420,6 @@ export default function AdminQcPage() {
     e.preventDefault();
     setMessage("");
     setError("");
-    if (!isKnownEmployeeName(employees, form.mrpPic)) {
-      setError("Mrp Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
-      return;
-    }
-    if (!isKnownEmployeeName(employees, form.salesPic)) {
-      setError("Sales Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
-      return;
-    }
-    const invalidPic = params.find((p) => !isKnownEmployeeName(employees, p.pic));
-    if (invalidPic) {
-      setError(`PIC "${invalidPic.pic}" tidak ditemukan di Data Karyawan. Pilih dari daftar saran.`);
-      return;
-    }
     saveMutation.mutate();
   }
 
@@ -564,12 +484,6 @@ export default function AdminQcPage() {
                     <option value="Approval">Approval</option>
                   </select>
                 </ExcelField>
-                <ExcelField label="Mrp Pic" widthPx={headerColWidths.mrpPic} onResizeStart={beginHeaderResize("mrpPic")}>
-                  <EmployeeNameSelect bare id="admin-qc-mrp-pic" value={form.mrpPic} onChange={(v) => setForm({ ...form, mrpPic: v })} />
-                </ExcelField>
-                <ExcelField label="Sales Pic" widthPx={headerColWidths.salesPic} onResizeStart={beginHeaderResize("salesPic")}>
-                  <EmployeeNameSelect bare id="admin-qc-sales-pic" value={form.salesPic} onChange={(v) => setForm({ ...form, salesPic: v })} />
-                </ExcelField>
                 <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} />
                 </ExcelField>
@@ -601,6 +515,10 @@ export default function AdminQcPage() {
                 {params.length} item check).
               </p>
             )}
+            <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+              Tabel di bawah ini hanya tampilan (view-only) -- untuk mengisi/mengubah Result, Start, Finish, atau PIC,
+              gunakan menu <strong>Input Check Results</strong>.
+            </p>
             <div style={{ overflowX: "auto" }}>
               <table className="data-table" style={{ tableLayout: "fixed" }}>
                 <thead>
@@ -623,15 +541,11 @@ export default function AdminQcPage() {
                         <td style={{ width: 40 }}>{p.no}</td>
                         <td>{p.parameter}</td>
                         <td>{p.standard || "-"}</td>
-                        <td>
-                          <input style={{ background: SPEC_VERDICT_COLOR[verdict] }} value={p.result} onChange={(e) => updateParam(idx, { result: e.target.value })} />
-                        </td>
+                        <td style={{ background: SPEC_VERDICT_COLOR[verdict] }}>{p.result || "-"}</td>
                         <td>{SPEC_VERDICT_LABEL[verdict]}</td>
-                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
-                        <td><input type="datetime-local" value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
-                        <td>
-                          <EmployeeNameSelect bare id={`admin-qc-pic-${idx}`} value={p.pic} onChange={(v) => updateParam(idx, { pic: v })} />
-                        </td>
+                        <td>{formatDateTime(p.start)}</td>
+                        <td>{formatDateTime(p.finish)}</td>
+                        <td>{p.pic || "-"}</td>
                       </tr>
                     );
                   })}
@@ -704,8 +618,6 @@ export default function AdminQcPage() {
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
                 { key: "typeLot", label: "Admin QC Stage", render: (r) => r.typeLot },
-                { key: "mrpPic", label: "Mrp Pic", render: (r) => r.mrpPic },
-                { key: "salesPic", label: "Sales Pic", render: (r) => r.salesPic },
                 {
                   key: "lotPassed",
                   label: "Lot Passed",

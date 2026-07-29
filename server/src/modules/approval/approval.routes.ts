@@ -26,6 +26,8 @@ const saveSchema = z
     plant: z.string().trim().min(1, "Plant wajib diisi."),
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+    mrpPic: z.string().trim().min(1, "Mrp Pic wajib diisi."),
+    salesPic: z.string().trim().min(1, "Sales Pic wajib diisi."),
     prepareProduksi: optionalDate,
     sprayMan: z.string().optional(),
     wetSample: z.string().optional(),
@@ -42,10 +44,10 @@ const saveSchema = z
   })
   .superRefine(async (data, ctx) => {
     // Order/Material Number/Material Description/Batch/Order Qty/Plant/IU
-    // Plant/Code Tanki sudah wajib TANPA SYARAT lewat skema di atas. Admin QC
-    // Stage/Mrp Pic/Sales Pic/Lot Passed/QC to App/QC Passed TIDAK LAGI ada
-    // di modul/tabel ini -- dipindah ke menu & tabel AdminQc terpisah
-    // (2026-07-28, sesuai instruksi eksplisit user). Rangkaian Production/
+    // Plant/Code Tanki/Mrp Pic/Sales Pic sudah wajib TANPA SYARAT lewat skema
+    // di atas. Admin QC Stage/Lot Passed/QC to App/QC Passed TIDAK ada di
+    // modul/tabel ini -- itu di menu & tabel AdminQc terpisah (2026-07-28,
+    // sesuai instruksi eksplisit user). Rangkaian Production/
     // Technical Input Column (Prepare Date -> Send To Tech -> Submit Tech ->
     // Submit Cust -> Finish App) TETAP mewajibkan "QC to App" sudah terisi
     // lebih dulu, tapi SEKARANG dicek dgn lookup tabel AdminQc by Order
@@ -178,6 +180,72 @@ approvalRouter.get(
   })
 );
 
+// ===================== List Antrian Approval =====================
+
+/** Order yg Admin QC Stage TERBARUnya "Approval" atau "Joint Lot" (lihat
+ * modules/adminQc), dan BELUM PERNAH diinput ke ApprovalSchedule -- ini yg
+ * dipakai menu "List Antrian Approval" (2026-07-29, sesuai instruksi
+ * eksplisit user). Order otomatis hilang dari daftar ini begitu sudah ada
+ * input Approval utk Order tersebut -- SENGAJA TIDAK dicek status Packing
+ * (direvisi 2026-07-29, instruksi eksplisit user): sempat Order yg sudah
+ * py baris PackingLog ikut dikeluarkan dari sini juga, tapi itu bikin
+ * administrasi Approval jadi "terlewat" begitu saja kalau tim Packing input
+ * lebih dulu drpd tim Approval (padahal urutan real-world tidak selalu
+ * berurutan) -- kolom "Proses" & "Production Actions" SENGAJA dibuat
+ * independen, supaya tetap ketahuan kalau ada Order yg sudah di-Packing
+ * tapi administrasi Approval-nya belum selesai. */
+approvalRouter.get(
+  "/queue",
+  asyncRoute(async (_req, res) => {
+    const [adminQcRows, approvalOrders] = await Promise.all([
+      prisma.adminQc.findMany({ orderBy: { timestamp: "desc" } }),
+      prisma.approvalSchedule.findMany({ select: { order: true } }),
+    ]);
+
+    const approvalOrderSet = new Set(approvalOrders.map((r) => r.order));
+
+    // Dedupe ke Admin QC Stage PALING TERAKHIR per Order (baris pertama yg
+    // ditemui, krn adminQcRows sudah diurutkan timestamp desc).
+    const latestByOrder = new Map<string, (typeof adminQcRows)[number]>();
+    for (const r of adminQcRows) {
+      if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+    }
+
+    const queueRows = Array.from(latestByOrder.values()).filter(
+      (r) => (r.typeLot === "Approval" || r.typeLot === "Joint Lot") && !approvalOrderSet.has(r.order)
+    );
+    queueRows.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    const uniqueOrders = queueRows.map((r) => r.order);
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: uniqueOrders } },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+    });
+    const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    const data = queueRows.map((r) => {
+      const master = masterByOrder.get(r.order);
+      return {
+        order: r.order,
+        materialNumber: master?.materialNumber ?? r.materialNumber,
+        materialDescription: master?.materialDescription ?? r.materialDescription,
+        batch: master?.batch ?? r.batch,
+        orderQty: master?.orderQty ?? r.orderQty,
+        plant: master?.plant ?? r.plant,
+        iuPlant: r.iuPlant,
+        codeTanki: r.codeTanki,
+        typeLot: r.typeLot,
+        lotPassed: r.lotPassed,
+        qcToApproval: r.qcToApproval,
+        qcPassed: r.qcPassed,
+        remark: r.remark,
+      };
+    });
+
+    res.json({ success: true, data });
+  })
+);
+
 // ===================== Product List (item yang belum Finish App) =====================
 
 approvalRouter.get(
@@ -215,6 +283,8 @@ const FILTERABLE_COLUMNS = [
   "plant",
   "iuPlant",
   "codeTanki",
+  "mrpPic",
+  "salesPic",
   "sprayMan",
   "customer",
   "techName",

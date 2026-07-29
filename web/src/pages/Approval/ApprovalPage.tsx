@@ -23,6 +23,8 @@ interface ApprovalRow {
   plant: string | null;
   iuPlant: string | null;
   codeTanki: string | null;
+  mrpPic: string | null;
+  salesPic: string | null;
   prepareProduksi: string | null;
   sprayMan: string | null;
   wetSample: string | null;
@@ -45,6 +47,25 @@ interface LotHistoryRow extends ApprovalRow {
   hasAttachment: boolean;
 }
 
+/** Baris "List Antrian Approval" -- Order yg Admin QC Stage terbarunya
+ * "Approval"/"Joint Lot" dan belum diinput ke Approval (lihat GET
+ * /approvals/queue di approval.routes.ts). */
+interface QueueRow {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
+  iuPlant: string | null;
+  codeTanki: string | null;
+  typeLot: string | null;
+  lotPassed: string | null;
+  qcToApproval: string | null;
+  qcPassed: string | null;
+  remark: string | null;
+}
+
 interface Attachment {
   id: number;
   fileName: string;
@@ -62,6 +83,8 @@ const FILTER_COLUMNS = [
   { value: "plant", label: "Plant" },
   { value: "iuPlant", label: "IU Plant" },
   { value: "codeTanki", label: "Code Tanki" },
+  { value: "mrpPic", label: "Mrp Pic" },
+  { value: "salesPic", label: "Sales Pic" },
   { value: "sprayMan", label: "Spray Man" },
   { value: "customer", label: "Customer" },
   { value: "techName", label: "Tech Name" },
@@ -76,6 +99,8 @@ const emptyForm = {
   plant: "",
   iuPlant: "",
   codeTanki: "",
+  mrpPic: "",
+  salesPic: "",
   prepareProduksi: "",
   sprayMan: "",
   wetSample: "",
@@ -92,9 +117,11 @@ const emptyForm = {
 };
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
- * user pernah drag-resize (lihat lib/useResizableColWidths). Admin QC Stage/Mrp
- * Pic/Sales Pic/Lot Passed/QC to App/QC Passed DIPINDAH ke menu "Input Admin QC"
- * terpisah (2026-07-28, sesuai instruksi eksplisit user) -- tidak ada lagi di sini. */
+ * user pernah drag-resize (lihat lib/useResizableColWidths). Admin QC Stage/Lot
+ * Passed/QC to App/QC Passed DIPINDAH ke menu "Input Admin QC" terpisah
+ * (2026-07-28, sesuai instruksi eksplisit user) -- tidak ada lagi di sini. Mrp
+ * Pic/Sales Pic sempat ikut pindah tapi DIKEMBALIKAN ke sini (2026-07-29,
+ * revisi layout eksplisit user). */
 const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
   order: 140,
   materialNumber: 140,
@@ -104,6 +131,8 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
   plant: 100,
   iuPlant: 150,
   codeTankiRow2: 150,
+  mrpPic: 150,
+  salesPic: 150,
   prepareDate: 170,
   sprayMan: 140,
   wetSample: 130,
@@ -122,7 +151,7 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
  * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah. */
 const APPROVAL_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
-  ["iuPlant", "codeTankiRow2"],
+  ["iuPlant", "codeTankiRow2", "mrpPic", "salesPic"],
   ["prepareDate", "sprayMan", "wetSample", "panel", "lotCoa", "sendToTech"],
   ["submitTech", "submitCust", "customer", "custSegmen", "techName", "finishApp"],
 ];
@@ -131,12 +160,13 @@ export default function ApprovalPage() {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
   const [form, setForm] = useState(emptyForm);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [attachFile, setAttachFile] = useState<File | null>(null);
+  const [queueSearch, setQueueSearch] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
     APPROVAL_COL_DEFAULT_WIDTHS,
@@ -163,6 +193,11 @@ export default function ApprovalPage() {
     enabled: !!attachmentModalId,
   });
 
+  const queueQuery = useQuery({
+    queryKey: ["approval-queue"],
+    queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/approvals/queue").then((r) => r.data),
+  });
+
   const saveMutation = useMutation({
     mutationFn: () =>
       editingApprovalId
@@ -174,6 +209,7 @@ export default function ApprovalPage() {
       setForm(emptyForm);
       setEditingApprovalId(null);
       queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
+      queryClient.invalidateQueries({ queryKey: ["approval-queue"] });
       if (attachFile) {
         uploadMutation.mutate({ approvalId: res.data.approvalId, file: attachFile });
       } else {
@@ -235,6 +271,8 @@ export default function ApprovalPage() {
           wetSample: f.wetSample || latest.wetSample || "",
           iuPlant: f.iuPlant || latest.iuPlant || "",
           codeTanki: f.codeTanki || latest.codeTanki || "",
+          mrpPic: f.mrpPic || latest.mrpPic || "",
+          salesPic: f.salesPic || latest.salesPic || "",
           remark: f.remark || latest.remark || "",
           prepareProduksi: f.prepareProduksi || latest.prepareProduksi || "",
           sprayMan: f.sprayMan || latest.sprayMan || "",
@@ -266,6 +304,36 @@ export default function ApprovalPage() {
     }
   }
 
+  /** Isi Order dari List Antrian Approval ke form Input Approval (lewat alur
+   * handleOrderFound yg sama dgn ketik manual di OrderLookup), supaya
+   * Material/Batch/Qty/Plant/IU Plant/Code Tanki tersaran otomatis begitu
+   * tim Approval mengambil Order ini dari antrian. */
+  async function loadIntoInput(row: QueueRow) {
+    setForm((f) => ({ ...f, order: row.order }));
+    await handleOrderFound({
+      order: row.order,
+      batch: row.batch,
+      materialNumber: row.materialNumber,
+      materialDescription: row.materialDescription,
+      orderQty: row.orderQty,
+      plant: row.plant,
+      jenis: null,
+      warnaDasar: null,
+      volume: null,
+    });
+    // IU Plant/Code Tanki dari Admin QC Order ini lebih akurat drpd saran
+    // order-context umum di handleOrderFound -- pakai sbg fallback terakhir
+    // kalau belum kesisi dari sumber lain.
+    setForm((f) => ({
+      ...f,
+      iuPlant: f.iuPlant || row.iuPlant || "",
+      codeTanki: f.codeTanki || row.codeTanki || "",
+    }));
+    setTab("input");
+    setMessage("");
+    setError("");
+  }
+
   function startEdit(row: LotHistoryRow) {
     setEditingApprovalId(row.approvalId);
     setForm({
@@ -277,6 +345,8 @@ export default function ApprovalPage() {
       plant: row.plant ?? "",
       iuPlant: row.iuPlant ?? "",
       codeTanki: row.codeTanki ?? "",
+      mrpPic: row.mrpPic ?? "",
+      salesPic: row.salesPic ?? "",
       prepareProduksi: row.prepareProduksi ?? "",
       sprayMan: row.sprayMan ?? "",
       wetSample: row.wetSample ?? "",
@@ -307,6 +377,14 @@ export default function ApprovalPage() {
     e.preventDefault();
     setMessage("");
     setError("");
+    if (!isKnownEmployeeName(employees, form.mrpPic)) {
+      setError("Mrp Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownEmployeeName(employees, form.salesPic)) {
+      setError("Sales Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
     if (!isKnownEmployeeName(employees, form.techName)) {
       setError("Tech Name tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
@@ -314,14 +392,21 @@ export default function ApprovalPage() {
     saveMutation.mutate();
   }
 
+  const filteredQueue = (queueQuery.data ?? []).filter((row) =>
+    queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
         <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Input Schedule
+          Input Approval
         </button>
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           Lot History
+        </button>
+        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          List Antrian Approval
         </button>
       </div>
 
@@ -361,6 +446,12 @@ export default function ApprovalPage() {
                 </ExcelField>
                 <ExcelField label="Code Tanki" widthPx={colWidths.codeTankiRow2} onResizeStart={beginResize("codeTankiRow2")}>
                   <TankSelect bare id="approval-tank-1" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
+                </ExcelField>
+                <ExcelField label="Mrp Pic" widthPx={colWidths.mrpPic} onResizeStart={beginResize("mrpPic")}>
+                  <EmployeeNameSelect bare id="approval-mrp-pic" value={form.mrpPic} onChange={(v) => setForm({ ...form, mrpPic: v })} />
+                </ExcelField>
+                <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")}>
+                  <EmployeeNameSelect bare id="approval-sales-pic" value={form.salesPic} onChange={(v) => setForm({ ...form, salesPic: v })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelSubHeader label="Production Input Column" color="production" />
@@ -484,14 +575,15 @@ export default function ApprovalPage() {
               exportFileName="approval-lot-history"
               storageKey="approval-lot-history"
               rows={historyQuery.data ?? []}
+              freezeFirstColumn
               columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
                 {
                   key: "timestamp",
                   label: "Timestamp",
                   render: (r) => formatDateTime(r.timestamp),
                   csvValue: (r) => toExcelDateTimeString(r.timestamp),
                 },
-                { key: "order", label: "Order", render: (r) => r.order },
                 { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
                 { key: "batch", label: "Batch", render: (r) => r.batch },
@@ -499,6 +591,8 @@ export default function ApprovalPage() {
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
+                { key: "mrpPic", label: "Mrp Pic", render: (r) => r.mrpPic },
+                { key: "salesPic", label: "Sales Pic", render: (r) => r.salesPic },
                 {
                   key: "prepareProduksi",
                   label: "Prepare Date",
@@ -579,6 +673,77 @@ export default function ApprovalPage() {
                         </button>
                       )}
                     </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "queue" && (
+        <div className="panel">
+          <div className="panel-header">List Antrian Approval</div>
+          <div className="panel-body">
+            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+              Order yang Admin QC Stage-nya (menu Input Admin QC) sudah "Approval" atau "Joint Lot" dan sedang
+              menunggu diinput ke Approval -- diurutkan yang paling lama menunggu duluan (FIFO). Order otomatis
+              hilang dari daftar ini begitu sudah ada input Approval untuk Order tersebut, atau begitu Order itu
+              sudah masuk Packing.
+            </p>
+            <input
+              placeholder="Cari nomor Order..."
+              value={queueSearch}
+              onChange={(e) => setQueueSearch(e.target.value)}
+              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+            />
+            <DataTable
+              rowKey={(r: QueueRow) => r.order}
+              exportFileName="list-antrian-approval"
+              storageKey="approval-queue"
+              rows={filteredQueue}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
+                { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+                { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
+                { key: "typeLot", label: "Admin QC Stage", render: (r) => r.typeLot },
+                {
+                  key: "lotPassed",
+                  label: "Lot Passed",
+                  render: (r) => formatDateTime(r.lotPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.lotPassed),
+                },
+                {
+                  key: "qcToApproval",
+                  label: "QC to App",
+                  render: (r) => formatDateTime(r.qcToApproval),
+                  csvValue: (r) => toExcelDateTimeString(r.qcToApproval),
+                },
+                {
+                  key: "qcPassed",
+                  label: "QC Passed",
+                  render: (r) => formatDateTime(r.qcPassed),
+                  csvValue: (r) => toExcelDateTimeString(r.qcPassed),
+                },
+                { key: "remark", label: "Remark (Admin QC)", render: (r) => r.remark },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                      onClick={() => loadIntoInput(r)}
+                    >
+                      Input Approval
+                    </button>
                   ),
                   csvValue: () => "",
                 },

@@ -153,7 +153,7 @@ export default function EmployeeNameSelect({
         required={required}
         placeholder={placeholder}
         autoComplete="off"
-        style={isInvalid ? { borderColor: "var(--danger)", background: "#fef2f2" } : undefined}
+        style={isInvalid ? { width: "100%", borderColor: "var(--danger)", background: "#fef2f2" } : { width: "100%" }}
         title={isInvalid ? "Nama tidak ditemukan di Data Karyawan. Pilih dari daftar saran." : undefined}
       />
       {dropdown}

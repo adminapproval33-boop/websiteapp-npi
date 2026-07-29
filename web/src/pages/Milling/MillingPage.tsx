@@ -717,11 +717,26 @@ export default function MillingPage() {
               </ExcelRow>
               <ExcelRow>
                 <div className="excel-cell" style={{ flexBasis: "15%", maxWidth: "15%", flexDirection: "row", gap: 4, padding: 4 }}>
-                  <button type="button" className="btn btn-info" style={{ flex: 1 }} onClick={addMember}>
-                    + Add
+                  <button
+                    type="button"
+                    className="btn btn-info"
+                    title="Tambah Member"
+                    aria-label="Tambah Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={addMember}
+                  >
+                    +
                   </button>
-                  <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={removeLastMember} disabled={form.members.length === 0}>
-                    − Reduce
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    title="Kurangi Member"
+                    aria-label="Kurangi Member"
+                    style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
+                    onClick={removeLastMember}
+                    disabled={form.members.length === 0}
+                  >
+                    −
                   </button>
                 </div>
               </ExcelRow>

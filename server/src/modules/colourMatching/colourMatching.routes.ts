@@ -78,52 +78,67 @@ colourMatchingRouter.get(
 );
 
 /**
- * "Aftermix - DN" -- syarat lengkap tahap terakhir Aftermix (Finish, Start,
- * Form Received, Leader, Member, Qty/Man semua terisi) -- SAMA PERSIS dgn
- * premixOrAftermixProcessLabel di dashboard.routes.ts, tapi cuma butuh
- * boolean "sudah selesai atau belum" (bukan label lengkap 3 tahap) utk
- * keperluan queue di bawah.
+ * "Aftermix - DN" -- DISEDERHANAKAN 2026-07-29 sesuai instruksi eksplisit
+ * user (revisi aturan Aftermix), SAMA PERSIS dgn aftermixProcessLabel di
+ * dashboard.routes.ts: cuma Finish/Start/Form Received (Leader/Member/Qty per
+ * Man TIDAK lagi disyaratkan) -- supaya definisi "Aftermix - DN" konsisten
+ * antara kolom "Proses" dashboard & syarat masuk antrian ini (kalau beda,
+ * bisa kejadian lagi spt bug List Antrian Approval sebelumnya: dashboard
+ * bilang sudah selesai tapi menu antrian tidak menganggap demikian).
  */
-function isAftermixDone(r: {
-  formReceived: Date | null;
-  start: Date | null;
-  finish: Date | null;
-  leader: string | null;
-  qtyPerMan: string | null;
-  members: unknown;
-}): boolean {
-  const hasLeader = Boolean(r.leader && r.leader.trim());
-  const hasMembers = Array.isArray(r.members) && r.members.length > 0;
-  const hasQtyPerMan = Boolean(r.qtyPerMan && r.qtyPerMan.trim());
-  return Boolean(r.finish && r.start && r.formReceived && hasLeader && hasMembers && hasQtyPerMan);
+function isAftermixDone(r: { formReceived: Date | null; start: Date | null; finish: Date | null }): boolean {
+  return Boolean(r.finish && r.start && r.formReceived);
 }
 
 /**
  * "PWO Schedule & Queue" -- daftar PWO (Order) yang sudah "Aftermix - DN" dan
- * SEDANG MENUNGGU dikerjakan Colour Matching (belum ada input Colour Matching
- * utk Order itu), sesuai instruksi eksplisit user (2026-07-26) -- pola sama
- * persis dgn /milling/pwo-queue & /premix-aftermix/aftermix-pwo-queue. Order
- * yang sudah masuk Colour Matching sendiri ATAU tahap manapun setelahnya
- * (Approval, Packing) JUGA dikeluarkan dari antrian. Diurutkan Finish
- * Aftermix paling awal duluan (FIFO).
+ * SEDANG MENUNGGU dikerjakan Colour Matching, DIREVISI TOTAL 2026-07-29
+ * sesuai instruksi eksplisit user (dari versi 2026-07-26):
+ * 1) Order Aftermix - DN SEKARANG juga wajib Material Number-nya PERNAH py
+ *    histori Colour Matching (lintas Order/Batch manapun) -- Material yg
+ *    memang tidak pernah lewat Colour Matching (bukan bagian rangkaian
+ *    proses material itu) tidak lagi otomatis nyangkut di antrian ini.
+ * 2) Order yg SUDAH py baris ColourMatchingLog tapi Start-nya BELUM terisi
+ *    (baru Form Received) TETAP di antrian ini -- SEBELUMNYA begitu ADA
+ *    baris ColourMatchingLog sama sekali langsung dikeluarkan; sekarang baru
+ *    dikeluarkan begitu Start-nya terisi (kerjanya beneran sudah mulai).
+ * Order yg sudah masuk tahap manapun SETELAH Colour Matching (Approval,
+ * Packing) tetap dikeluarkan dari antrian spt sebelumnya. Diurutkan Finish
+ * Aftermix paling awal duluan (FIFO). Pola dasarnya sama dgn
+ * /milling/pwo-queue & /premix-aftermix/aftermix-pwo-queue.
  */
 colourMatchingRouter.get(
   "/pwo-queue",
   asyncRoute(async (_req, res) => {
-    const [aftermixLogs, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
+    const [aftermixLogs, colourMatchingLogs, approvalOrders, packingOrders] = await Promise.all([
       prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX" }, orderBy: { timestamp: "desc" } }),
-      prisma.colourMatchingLog.findMany({ select: { order: true } }),
+      prisma.colourMatchingLog.findMany({ orderBy: { timestamp: "desc" } }),
       prisma.approvalSchedule.findMany({ select: { order: true } }),
       prisma.packingLog.findMany({ select: { order: true } }),
     ]);
 
-    // Order yg sudah masuk Colour Matching sendiri ATAU tahap manapun
-    // setelahnya -- dianggap sudah "lewat" dari antrian menunggu Colour Matching.
-    const pastColourMatchingOrderSet = new Set([
-      ...colourMatchingOrders.map((r) => r.order),
-      ...approvalOrders.map((r) => r.order),
-      ...packingOrders.map((r) => r.order),
-    ]);
+    // Material Number yg PERNAH py histori Colour Matching (lintas Order
+    // manapun) -- syarat #1 di atas.
+    const colourMatchingMaterialSet = new Set(
+      colourMatchingLogs.filter((r): r is typeof r & { materialNumber: string } => r.materialNumber != null).map((r) => r.materialNumber)
+    );
+
+    // Dedupe ke baris ColourMatchingLog PALING TERAKHIR per Order, lalu ambil
+    // yg Start-nya SUDAH terisi -- syarat #2 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun).
+    const latestColourMatchingByOrder = new Map<string, (typeof colourMatchingLogs)[number]>();
+    for (const r of colourMatchingLogs) {
+      if (!latestColourMatchingByOrder.has(r.order)) latestColourMatchingByOrder.set(r.order, r);
+    }
+    const startedColourMatchingOrderSet = new Set(
+      Array.from(latestColourMatchingByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
+
+    // Order yg sudah masuk tahap manapun SETELAH Colour Matching -- dianggap
+    // sudah "lewat" dari antrian menunggu Colour Matching.
+    const pastColourMatchingOrderSet = new Set([...approvalOrders.map((r) => r.order), ...packingOrders.map((r) => r.order)]);
 
     // Dedupe ke status PALING TERAKHIR per Order (baris pertama yg ditemui,
     // krn aftermixLogs sudah diurutkan timestamp desc) -- konsisten dgn pola
@@ -134,7 +149,12 @@ colourMatchingRouter.get(
     }
 
     const queueRows = Array.from(latestByOrder.values()).filter(
-      (r) => isAftermixDone(r) && !pastColourMatchingOrderSet.has(r.order)
+      (r) =>
+        isAftermixDone(r) &&
+        r.materialNumber != null &&
+        colourMatchingMaterialSet.has(r.materialNumber) &&
+        !startedColourMatchingOrderSet.has(r.order) &&
+        !pastColourMatchingOrderSet.has(r.order)
     );
     queueRows.sort((a, b) => a.finish!.getTime() - b.finish!.getTime());
 

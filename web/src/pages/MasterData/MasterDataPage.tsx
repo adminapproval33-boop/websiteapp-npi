@@ -78,9 +78,38 @@ interface MasterEmployeeRow {
   organization: string | null;
   jobPosition: string | null;
   departemen: string | null;
+  plant: string | null;
 }
 
-type Tab = "cooispi" | "tanki" | "employee";
+interface MaterialFlowRow {
+  materialNumber: string;
+  materialDescription: string | null;
+  premixRequired: boolean;
+  millingRequired: boolean;
+  aftermixRequired: boolean;
+  colourMatchingRequired: boolean;
+  qcRequired: boolean;
+  approvalRequired: boolean;
+  packingRequired: boolean;
+}
+
+function FlowBadge({ on }: { on: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 22,
+        textAlign: "center",
+        fontWeight: 700,
+        color: on ? "var(--success)" : "var(--text-muted)",
+      }}
+    >
+      {on ? "✓" : "-"}
+    </span>
+  );
+}
+
+type Tab = "cooispi" | "tanki" | "employee" | "flow";
 
 function ImportCard({
   title,
@@ -150,6 +179,9 @@ export default function MasterDataPage() {
   const [employeeResult, setEmployeeResult] = useState("");
   const [employeeError, setEmployeeError] = useState("");
   const [employeeSearch, setEmployeeSearch] = useState("");
+  const [flowResult, setFlowResult] = useState("");
+  const [flowError, setFlowError] = useState("");
+  const [flowSearch, setFlowSearch] = useState("");
 
   const ordersQuery = useQuery({
     queryKey: ["master-orders", orderSearch],
@@ -212,6 +244,14 @@ export default function MasterDataPage() {
     },
   });
 
+  const flowQuery = useQuery({
+    queryKey: ["master-material-flow", flowSearch],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: MaterialFlowRow[] }>(`/master-data/material-flow?search=${encodeURIComponent(flowSearch)}`)
+        .then((r) => r.data),
+  });
+
   const importEmployees = useMutation({
     mutationFn: (payload: { file: File; mode: string }) => {
       const formData = new FormData();
@@ -230,6 +270,24 @@ export default function MasterDataPage() {
     },
   });
 
+  const importFlow = useMutation({
+    mutationFn: (payload: { file: File; mode: string }) => {
+      const formData = new FormData();
+      formData.append("file", payload.file);
+      formData.append("mode", payload.mode);
+      return api.post<{ message: string }>("/master-data/material-flow/import", formData);
+    },
+    onSuccess: (res) => {
+      setFlowResult(res.message);
+      setFlowError("");
+      queryClient.invalidateQueries({ queryKey: ["master-material-flow"] });
+    },
+    onError: (err) => {
+      setFlowError(err instanceof ApiError ? err.message : "Gagal mengimpor Material Flow.");
+      setFlowResult("");
+    },
+  });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -241,6 +299,9 @@ export default function MasterDataPage() {
         </button>
         <button className={`btn ${tab === "employee" ? "" : "btn-outline"}`} onClick={() => setTab("employee")}>
           Employee Data
+        </button>
+        <button className={`btn ${tab === "flow" ? "" : "btn-outline"}`} onClick={() => setTab("flow")}>
+          Material Flow Proses
         </button>
       </div>
 
@@ -321,7 +382,7 @@ export default function MasterDataPage() {
         <>
           <ImportCard
             title="Data Karyawan"
-            description='File wajib punya kolom header "Employee ID" dan "Full Name" (boleh juga Organization, Job Position, Departemen) -- format export HR standar, tinggal export CSV/Excel lalu upload di sini.'
+            description='File wajib punya kolom header "Employee ID" dan "Full Name" (boleh juga Organization, Job Position, Departemen, Plant) -- format export HR standar, tinggal export CSV/Excel lalu upload di sini.'
             onImport={(file, mode) => importEmployees.mutate({ file, mode })}
             isPending={importEmployees.isPending}
             result={employeeResult}
@@ -349,6 +410,55 @@ export default function MasterDataPage() {
                   { key: "organization", label: "Organization", render: (r) => r.organization ?? "-" },
                   { key: "jobPosition", label: "Job Position", render: (r) => r.jobPosition ?? "-" },
                   { key: "departemen", label: "Departemen", render: (r) => r.departemen ?? "-" },
+                  { key: "plant", label: "Plant", render: (r) => r.plant ?? "-" },
+                ]}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "flow" && (
+        <>
+          <ImportCard
+            title="Material Flow Proses"
+            description='File wajib punya kolom header "Material Code" (boleh juga Material, Premix, Milling, Aftermix, Colour Matching, QC, Approval, Packing). Menentukan tahap mana yang WAJIB dilalui tiap Material -- dipakai sistem utk mengunci urutan input Proses.'
+            onImport={(file, mode) => importFlow.mutate({ file, mode })}
+            isPending={importFlow.isPending}
+            result={flowResult}
+            error={flowError}
+          />
+
+          <div className="panel">
+            <div className="panel-header">Material Flow Saat Ini ({flowQuery.data?.length ?? 0} ditampilkan)</div>
+            <div className="panel-body">
+              <input
+                placeholder="Cari Material Number / Description..."
+                value={flowSearch}
+                onChange={(e) => setFlowSearch(e.target.value)}
+                style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+              <DataTable
+                rowKey={(r: MaterialFlowRow) => r.materialNumber}
+                exportFileName="master-material-flow"
+                storageKey="master-material-flow"
+                rows={flowQuery.data ?? []}
+                freezeFirstColumn
+                columns={[
+                  { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
+                  { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription ?? "-" },
+                  { key: "premixRequired", label: "Premix", render: (r) => <FlowBadge on={r.premixRequired} />, csvValue: (r) => (r.premixRequired ? "1" : "0") },
+                  { key: "millingRequired", label: "Milling", render: (r) => <FlowBadge on={r.millingRequired} />, csvValue: (r) => (r.millingRequired ? "1" : "0") },
+                  { key: "aftermixRequired", label: "Aftermix", render: (r) => <FlowBadge on={r.aftermixRequired} />, csvValue: (r) => (r.aftermixRequired ? "1" : "0") },
+                  {
+                    key: "colourMatchingRequired",
+                    label: "Colour Matching",
+                    render: (r) => <FlowBadge on={r.colourMatchingRequired} />,
+                    csvValue: (r) => (r.colourMatchingRequired ? "1" : "0"),
+                  },
+                  { key: "qcRequired", label: "QC", render: (r) => <FlowBadge on={r.qcRequired} />, csvValue: (r) => (r.qcRequired ? "1" : "0") },
+                  { key: "approvalRequired", label: "Approval", render: (r) => <FlowBadge on={r.approvalRequired} />, csvValue: (r) => (r.approvalRequired ? "1" : "0") },
+                  { key: "packingRequired", label: "Packing", render: (r) => <FlowBadge on={r.packingRequired} />, csvValue: (r) => (r.packingRequired ? "1" : "0") },
                 ]}
               />
             </div>

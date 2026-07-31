@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { checkQcGate } from "../../lib/stageGate";
 
 export const checkResultsRouter = Router();
 checkResultsRouter.use(requireAuth);
@@ -138,6 +139,20 @@ checkResultsRouter.post(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): QC wajib
+    // dilalui SEMUA proses, tidak ada pengecualian -- baru boleh diinput
+    // kalau tahap produksi terakhir yg relevan utk Material ini (Colour
+    // Matching / Aftermix / Milling / Premix, menurut MaterialFlow) sudah
+    // "-DN" (lihat checkQcGate di lib/stageGate.ts). Baris BARU saja
+    // (PUT/Edit tetap bebas).
+    const priorCheck = await checkQcGate(parsed.data.order, parsed.data.materialNumber);
+    if (!priorCheck.ok) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum menyelesaikan ${priorCheck.missingStage} (${priorCheck.missingStage} - DN) -- tidak bisa diinput ke QC dulu.`,
+      });
       return;
     }
     const { parameters, ...header } = parsed.data;

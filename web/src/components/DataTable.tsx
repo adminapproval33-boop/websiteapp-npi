@@ -1,4 +1,4 @@
-import { CSSProperties, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -12,6 +12,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { CsvColumn, exportToCsv } from "../lib/csv";
 
 export interface DataTableColumn<T> {
@@ -163,6 +164,29 @@ export default function DataTable<T>({
 
   const visibleCount = table.getVisibleLeafColumns().length;
 
+  // Virtualisasi baris -- cuma <tr> yg kelihatan (+ overscan) yg benar2
+  // dirender ke DOM, sisanya diwakili 2 baris "spacer" (padding atas/bawah)
+  // supaya browser tidak perlu bikin ribuan elemen sekaligus utk tabel History
+  // yg baris-nya bisa ratusan-ribuan (hasil import CSV) -- sebelumnya SEMUA
+  // baris langsung dirender, bikin lemot. Teknik spacer-row dipilih (bukan
+  // absolute-position per baris) supaya <table> asli + sticky header + freeze
+  // kolom pertama + resize/drag kolom yg sudah ada TETAP jalan apa adanya.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const tableRows = table.getRowModel().rows;
+  const rowVirtualizer = useVirtualizer({
+    count: tableRows.length,
+    getScrollElement: () => scrollRef.current,
+    // Tinggi baris bisa beda2 (mis. Remark panjang yg wrap ke beberapa baris,
+    // lihat `word-break`/`overflow-wrap` di table.data-table td pada
+    // app.css) -- estimateSize cuma tebakan awal, tinggi asli tiap baris
+    // diukur ulang via `measureElement` (ref di setiap <tr>) di bawah.
+    estimateSize: () => 37,
+    overscan: 10,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+  const paddingBottom = virtualRows.length > 0 ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0;
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -215,7 +239,7 @@ export default function DataTable<T>({
         Header dibuat sticky (position: sticky di tiap <th>) supaya ikut
         nempel di atas saat scroll vertikal.
       */}
-      <div className="overflow-auto rounded-lg border border-slate-200 max-h-[70vh]">
+      <div ref={scrollRef} className="overflow-auto rounded-lg border border-slate-200 max-h-[70vh]">
         <table className="data-table" style={{ width: table.getTotalSize(), tableLayout: "fixed" }}>
           <thead>
             <tr>
@@ -279,11 +303,22 @@ export default function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row, rowIdx) => {
+            {paddingTop > 0 && (
+              <tr aria-hidden style={{ height: paddingTop }}>
+                <td colSpan={visibleCount} style={{ padding: 0, border: "none" }} />
+              </tr>
+            )}
+            {virtualRows.map((virtualRow) => {
+              const row = tableRows[virtualRow.index];
               const explicitBg = rowStyle?.(row.original)?.background as string | undefined;
-              const zebraBg = rowIdx % 2 === 1 ? "#f8fafc" : "#ffffff";
+              const zebraBg = virtualRow.index % 2 === 1 ? "#f8fafc" : "#ffffff";
               return (
-                <tr key={rowKey(row.original)} style={rowStyle?.(row.original)}>
+                <tr
+                  key={rowKey(row.original)}
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={rowStyle?.(row.original)}
+                >
                   {row.getVisibleCells().map((cell, cellIdx) => {
                     const isFrozen = freezeFirstColumn && cellIdx === 0;
                     return (
@@ -311,6 +346,11 @@ export default function DataTable<T>({
                 </tr>
               );
             })}
+            {paddingBottom > 0 && (
+              <tr aria-hidden style={{ height: paddingBottom }}>
+                <td colSpan={visibleCount} style={{ padding: 0, border: "none" }} />
+              </tr>
+            )}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={visibleCount} className="py-8 text-center text-slate-400">

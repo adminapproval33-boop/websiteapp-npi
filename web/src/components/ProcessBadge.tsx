@@ -14,6 +14,9 @@ export const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
   Approval: { bg: "#808000", fg: "#ffffff" },
   Packing: { bg: "#00FF00", fg: "#000000" },
   Done: { bg: "#008000", fg: "#ffffff" },
+  /** %GR=9999% (sentinel TECO SAP) utk Order yg pernah jalan -- badge merah,
+   * beda dari "Done" (hijau tua), sesuai instruksi eksplisit user (2026-07-31). */
+  Teco: { bg: "#FF0000", fg: "#ffffff" },
 };
 
 /** Label Proses Approval (lihat finishBasedLabel di dashboard.routes.ts,

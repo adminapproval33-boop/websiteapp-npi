@@ -433,6 +433,176 @@ masterDataRouter.post(
   })
 );
 
+// ===================== Material Flow Proses =====================
+// Rute proses baku per Material Number, sumbernya file "ALL FLOW PROSES.xlsx"
+// (2026-07-31, instruksi eksplisit user) -- dipakai lib/stageGate.ts sbg
+// sumber kebenaran resmi utk penguncian urutan tahap Input Proses.
+
+masterDataRouter.get(
+  "/material-flow",
+  asyncRoute(async (req, res) => {
+    const search = String(req.query.search ?? "").trim();
+    const rows = await prisma.materialFlow.findMany({
+      where: search
+        ? {
+            OR: [
+              { materialNumber: { contains: search, mode: "insensitive" } },
+              { materialDescription: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : undefined,
+      orderBy: { materialNumber: "asc" },
+      take: 5000,
+    });
+    res.json({ success: true, data: rows });
+  })
+);
+
+masterDataRouter.post(
+  "/material-flow/import",
+  requireFullAccess,
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: "File wajib diunggah." });
+      return;
+    }
+    const mode = req.body.mode === "append" ? "append" : "replace";
+
+    const rows = await parseWorkbook(req.file.buffer, req.file.originalname);
+    if (rows.length < 2) {
+      res.status(400).json({ success: false, message: "File kosong atau tidak berisi data." });
+      return;
+    }
+
+    const headers = rows[0].map(normalizeHeader);
+    const col = {
+      materialNumber: findColumn(headers, "material code", "material number", "no material"),
+      materialDescription: findColumn(headers, "material", "material description", "description"),
+      premix: findColumn(headers, "premix"),
+      milling: findColumn(headers, "milling"),
+      aftermix: findColumn(headers, "aftermix"),
+      colourMatching: findColumn(headers, "colour matching", "color matching"),
+      qc: findColumn(headers, "qc"),
+      approval: findColumn(headers, "approval"),
+      packing: findColumn(headers, "packing"),
+    };
+
+    if (col.materialNumber === -1) {
+      res.status(400).json({
+        success: false,
+        message: 'Kolom "Material Code" tidak ditemukan di baris header file. Pastikan ada kolom bernama "Material Code".',
+      });
+      return;
+    }
+
+    const filled = (v: unknown) => String(v ?? "").trim().length > 0;
+
+    const rawRecords = rows
+      .slice(1)
+      .map((row) => ({
+        materialNumber: String(row[col.materialNumber] ?? "").trim(),
+        materialDescription: col.materialDescription !== -1 ? String(row[col.materialDescription] ?? "").trim() || null : null,
+        premixRequired: col.premix !== -1 && filled(row[col.premix]),
+        millingRequired: col.milling !== -1 && filled(row[col.milling]),
+        aftermixRequired: col.aftermix !== -1 && filled(row[col.aftermix]),
+        colourMatchingRequired: col.colourMatching !== -1 && filled(row[col.colourMatching]),
+        qcRequired: col.qc !== -1 && filled(row[col.qc]),
+        approvalRequired: col.approval !== -1 && filled(row[col.approval]),
+        packingRequired: col.packing !== -1 && filled(row[col.packing]),
+      }))
+      .filter((r) => r.materialNumber.length > 0);
+
+    if (rawRecords.length === 0) {
+      res.status(400).json({ success: false, message: "Tidak ada baris Material Flow yang valid pada file." });
+      return;
+    }
+
+    const dedupMap = new Map<string, (typeof rawRecords)[number]>();
+    for (const record of rawRecords) dedupMap.set(record.materialNumber, record);
+    const records = Array.from(dedupMap.values());
+
+    if (mode === "replace") {
+      await prisma.materialFlow.deleteMany({});
+      for (const batch of chunk(records, 5000)) {
+        await prisma.materialFlow.createMany({ data: batch, skipDuplicates: true });
+      }
+    } else {
+      for (const batch of chunk(records, 200)) {
+        await Promise.all(
+          batch.map((record) =>
+            prisma.materialFlow.upsert({ where: { materialNumber: record.materialNumber }, create: record, update: record })
+          )
+        );
+      }
+    }
+
+    res.json({ success: true, message: `${records.length} Material Flow berhasil diimpor (mode: ${mode}).` });
+  })
+);
+
+/// 1 record Material Flow (dipakai panel "Info Proses Material" di pop-up
+/// "Tahap Selanjutnya" Production Order Monitoring, 2026-07-31, instruksi
+/// eksplisit user) -- `null` kalau Material ini belum terdaftar sama sekali.
+masterDataRouter.get(
+  "/material-flow/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const row = await prisma.materialFlow.findUnique({ where: { materialNumber: req.params.materialNumber } });
+    res.json({ success: true, data: row });
+  })
+);
+
+const MATERIAL_FLOW_BOOL_FIELDS = [
+  "premixRequired",
+  "millingRequired",
+  "aftermixRequired",
+  "colourMatchingRequired",
+  "qcRequired",
+  "approvalRequired",
+  "packingRequired",
+] as const;
+
+/// Edit 7 tahap wajib/tidak utk 1 Material dari panel "Info Proses Material"
+/// (2026-07-31, instruksi eksplisit user: "kolom edit yang terkoneksi dgn
+/// master datanya") -- upsert (Material yg belum terdaftar di MaterialFlow
+/// otomatis dibuatkan barunya, bukan ditolak). requireFullAccess krn ini
+/// data resmi yg dipakai penguncian urutan tahap seluruh sistem
+/// (lib/stageGate.ts), bukan sekadar preferensi tampilan.
+masterDataRouter.put(
+  "/material-flow/:materialNumber",
+  requireFullAccess,
+  asyncRoute(async (req, res) => {
+    const materialNumber = req.params.materialNumber.trim();
+    if (!materialNumber) {
+      res.status(400).json({ success: false, message: "Material Number wajib diisi." });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const data: Record<string, boolean> = {};
+    for (const field of MATERIAL_FLOW_BOOL_FIELDS) {
+      if (field in body) data[field] = Boolean(body[field]);
+    }
+
+    const existing = await prisma.materialFlow.findUnique({ where: { materialNumber } });
+    const row = existing
+      ? await prisma.materialFlow.update({ where: { materialNumber }, data })
+      : await prisma.materialFlow.create({
+          data: {
+            materialNumber,
+            premixRequired: false,
+            millingRequired: false,
+            aftermixRequired: false,
+            colourMatchingRequired: false,
+            qcRequired: false,
+            approvalRequired: false,
+            packingRequired: false,
+            ...data,
+          },
+        });
+    res.json({ success: true, message: "Material Flow berhasil diperbarui.", data: row });
+  })
+);
+
 // ===================== Data Karyawan =====================
 
 masterDataRouter.get(
@@ -479,6 +649,7 @@ masterDataRouter.post(
       organization: findColumn(headers, "organization", "organisasi"),
       jobPosition: findColumn(headers, "job position", "jabatan", "posisi", "position"),
       departemen: findColumn(headers, "departemen", "department", "dept"),
+      plant: findColumn(headers, "plant"),
     };
 
     if (col.employeeId === -1) {
@@ -504,6 +675,7 @@ masterDataRouter.post(
         organization: col.organization !== -1 ? String(row[col.organization] ?? "").trim() : null,
         jobPosition: col.jobPosition !== -1 ? String(row[col.jobPosition] ?? "").trim() : null,
         departemen: col.departemen !== -1 ? String(row[col.departemen] ?? "").trim() : null,
+        plant: col.plant !== -1 ? String(row[col.plant] ?? "").trim() : null,
       }))
       .filter((r) => r.employeeId.length > 0);
 

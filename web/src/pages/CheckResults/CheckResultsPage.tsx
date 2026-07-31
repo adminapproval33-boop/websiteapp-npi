@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -196,7 +196,18 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
   );
 }
 
-export default function CheckResultsPage() {
+export default function CheckResultsPage({
+  embedded = false,
+  initialOrder,
+  onSaved,
+}: {
+  /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
+   * Monitoring (2026-07-31, instruksi eksplisit user) -- lihat komentar sama
+   * di PremixAftermixPage.tsx. */
+  embedded?: boolean;
+  initialOrder?: string;
+  onSaved?: () => void;
+} = {}) {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
@@ -235,6 +246,9 @@ export default function CheckResultsPage() {
       const qs = new URLSearchParams(filters as Record<string, string>).toString();
       return api.get<{ success: boolean; data: CheckRow[] }>(`/check-results?${qs}`).then((r) => r.data);
     },
+    // Mode "embedded" (pop-up "Tahap Selanjutnya", 2026-07-31) cuma
+    // nampilin form Input -- lihat komentar sama di PremixAftermixPage.tsx.
+    enabled: !embedded,
   });
 
   const historyRows = useMemo(() => flattenHistoryRows(historyQuery.data ?? []), [historyQuery.data]);
@@ -252,6 +266,7 @@ export default function CheckResultsPage() {
       setLastSavedCheckId(res.data.checkId);
       resetForm();
       queryClient.invalidateQueries({ queryKey: ["check-results-history"] });
+      onSaved?.();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
   });
@@ -360,6 +375,20 @@ export default function CheckResultsPage() {
     }
   }
 
+  // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
+  // sama di PremixAftermixPage.tsx.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setForm((f) => ({ ...f, order: initialOrder }));
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() => {
+        /* Order tidak ditemukan di Master Data -- biarkan kosong, user isi manual */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
+
   function resetForm() {
     setForm(emptyForm);
     setParams([]);
@@ -450,16 +479,18 @@ export default function CheckResultsPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          {editingCheckId ? "Edit Check Results" : "Input Check Results"}
-        </button>
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          History
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            {editingCheckId ? "Edit Check Results" : "Input Check Results"}
+          </button>
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            History
+          </button>
+        </div>
+      )}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <form className="panel" onSubmit={handleSubmit}>
           <div className="panel-header">{editingCheckId ? `Edit Check Results — ${editingCheckId}` : "Input Check Results"}</div>
           <div className="panel-body">

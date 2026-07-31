@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -156,7 +156,18 @@ const APPROVAL_COL_ROWS: string[][] = [
   ["submitTech", "submitCust", "customer", "custSegmen", "techName", "finishApp"],
 ];
 
-export default function ApprovalPage() {
+export default function ApprovalPage({
+  embedded = false,
+  initialOrder,
+  onSaved,
+}: {
+  /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
+   * Monitoring (2026-07-31, instruksi eksplisit user) -- lihat komentar sama
+   * di PremixAftermixPage.tsx. */
+  embedded?: boolean;
+  initialOrder?: string;
+  onSaved?: () => void;
+} = {}) {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
@@ -185,6 +196,9 @@ export default function ApprovalPage() {
       const qs = new URLSearchParams({ status: statusFilter, filterCol, filterValue }).toString();
       return api.get<{ success: boolean; data: LotHistoryRow[] }>(`/approvals/lot-history?${qs}`).then((r) => r.data);
     },
+    // Mode "embedded" (pop-up "Tahap Selanjutnya", 2026-07-31) cuma
+    // nampilin form Input -- lihat komentar sama di PremixAftermixPage.tsx.
+    enabled: !embedded,
   });
 
   const attachmentsQuery = useQuery({
@@ -196,6 +210,7 @@ export default function ApprovalPage() {
   const queueQuery = useQuery({
     queryKey: ["approval-queue"],
     queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/approvals/queue").then((r) => r.data),
+    enabled: !embedded,
   });
 
   const saveMutation = useMutation({
@@ -215,6 +230,7 @@ export default function ApprovalPage() {
       } else {
         setMessage(wasEditing ? "Data Approval berhasil diperbarui." : "Data Approval berhasil disimpan.");
       }
+      onSaved?.();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
   });
@@ -303,6 +319,20 @@ export default function ApprovalPage() {
          dari order-context lintas modul -- kalau gagal, biarkan user isi manual */
     }
   }
+
+  // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
+  // sama di PremixAftermixPage.tsx.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setForm((f) => ({ ...f, order: initialOrder }));
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() => {
+        /* Order tidak ditemukan di Master Data -- biarkan kosong, user isi manual */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
 
   /** Isi Order dari List Antrian Approval ke form Input Approval (lewat alur
    * handleOrderFound yg sama dgn ketik manual di OrderLookup), supaya
@@ -398,19 +428,21 @@ export default function ApprovalPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Input Approval
-        </button>
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          Lot History
-        </button>
-        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
-          List Antrian Approval
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Input Approval
+          </button>
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            Lot History
+          </button>
+          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+            List Antrian Approval
+          </button>
+        </div>
+      )}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <form className="panel" onSubmit={handleSubmit}>
           <div className="panel-body">
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>

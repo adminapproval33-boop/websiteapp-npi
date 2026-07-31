@@ -81,6 +81,7 @@ model MasterOrder {
   abcIndicator            String?
   updatedAt               DateTime @updatedAt
 
+  @@index([materialNumber])
   @@map("master_orders")
 }
 
@@ -100,6 +101,55 @@ model MasterTank {
   @@map("master_tanks")
 }
 
+/// Master rute proses per Material Number (menu Master Data > Material Flow
+/// Proses, sumbernya file "ALL FLOW PROSES.xlsx" -- 2026-07-31, instruksi
+/// eksplisit user). Menjawab "tahap mana saja yg WAJIB dilalui Material ini"
+/// -- TIDAK semua Material lewat ketujuh tahap (Premix/Milling/Aftermix
+/// bahkan sering di-skip sama sekali, cuma QC & Packing yg selalu wajib di
+/// SEMUA Material). Dipakai sbg sumber kebenaran resmi utk penguncian urutan
+/// tahap di lib/stageGate.ts, menggantikan heuristik "pernah ada histori log
+/// di tahap itu" yg dipakai sementara sebelum file ini ada.
+model MaterialFlow {
+  id                     Int      @id @default(autoincrement())
+  materialNumber         String   @unique
+  materialDescription    String?
+  premixRequired         Boolean  @default(false)
+  millingRequired        Boolean  @default(false)
+  aftermixRequired       Boolean  @default(false)
+  colourMatchingRequired Boolean  @default(false)
+  qcRequired             Boolean  @default(false)
+  approvalRequired       Boolean  @default(false)
+  packingRequired        Boolean  @default(false)
+  updatedAt              DateTime @updatedAt
+
+  @@map("material_flows")
+}
+
+/// Tab "Input Manual" di Dashboard > Tank Monitoring (2026-07-31, instruksi
+/// eksplisit user). Status okupansi Tank di tab "Monitoring Tanki" dihitung
+/// OTOMATIS dari histori Premix/Milling/Aftermix/Colour Matching -- kadang
+/// selisih dari kondisi fisik sebenarnya (mis. Order sudah "Done"/"Teco"
+/// menurut sistem, tapi tanki-nya aktualnya masih terisi). Model ini murni
+/// catatan manual TERPISAH dari perhitungan otomatis itu -- tidak
+/// memengaruhi/menimpa status Tank Monitoring otomatis sama sekali, cuma
+/// daftar sendiri di tab "Input Manual" supaya kondisi aktual itu tetap
+/// tercatat & terlihat.
+model TankManualInput {
+  id                  String   @id @default(uuid())
+  timestamp           DateTime @default(now())
+  codeTanki           String
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  orderQty            String?
+  remark              String?
+  inputBy             String
+
+  @@index([codeTanki])
+  @@map("tank_manual_inputs")
+}
+
 /// Data karyawan (menu Master Data > Employee Data). Diisi lewat import
 /// CSV/Excel (Full Access), format export HR: Employee ID, Full Name,
 /// Organization, Job Position, Departemen.
@@ -110,6 +160,7 @@ model MasterEmployee {
   organization String?
   jobPosition  String?
   departemen   String?
+  plant        String?
   updatedAt    DateTime @updatedAt
 
   @@map("master_employees")

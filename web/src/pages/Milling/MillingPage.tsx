@@ -1,4 +1,4 @@
-import { CSSProperties, Fragment, FormEvent, MouseEvent as ReactMouseEvent, useRef, useState } from "react";
+import { CSSProperties, Fragment, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -294,7 +294,18 @@ function PassReadingsTable({
   );
 }
 
-export default function MillingPage() {
+export default function MillingPage({
+  embedded = false,
+  initialOrder,
+  onSaved,
+}: {
+  /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
+   * Monitoring (2026-07-31, instruksi eksplisit user) -- lihat komentar sama
+   * di PremixAftermixPage.tsx. */
+  embedded?: boolean;
+  initialOrder?: string;
+  onSaved?: () => void;
+} = {}) {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
@@ -317,11 +328,15 @@ export default function MillingPage() {
   const historyQuery = useQuery({
     queryKey: ["milling-history"],
     queryFn: () => api.get<{ success: boolean; data: LogRow[] }>("/milling/history").then((r) => r.data),
+    // Mode "embedded" (pop-up "Tahap Selanjutnya", 2026-07-31) cuma
+    // nampilin form Input -- lihat komentar sama di PremixAftermixPage.tsx.
+    enabled: !embedded,
   });
 
   const queueQuery = useQuery({
     queryKey: ["milling-pwo-queue"],
     queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/milling/pwo-queue").then((r) => r.data),
+    enabled: !embedded,
   });
 
   const saveMutation = useMutation({
@@ -340,6 +355,7 @@ export default function MillingPage() {
       } else {
         setMessage(wasEditing ? "Data Milling berhasil diperbarui." : "Data Milling berhasil disimpan.");
       }
+      onSaved?.();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
   });
@@ -439,6 +455,20 @@ export default function MillingPage() {
       /* belum ada input sebelumnya untuk Order ini -- biarkan kosong */
     }
   }
+
+  // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
+  // sama di PremixAftermixPage.tsx.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setForm((f) => ({ ...f, order: initialOrder }));
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() => {
+        /* Order tidak ditemukan di Master Data -- biarkan kosong, user isi manual */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
 
   /** Dipanggil saat user selesai mengetik/mengganti Code Mesin (blur) -- cek
    * ulang apakah kombinasi Order + Code Mesin ini SUDAH pernah diinput
@@ -620,19 +650,21 @@ export default function MillingPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Input Milling
-        </button>
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          History
-        </button>
-        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
-          PWO Schedule &amp; Queue
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Input Milling
+          </button>
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            History
+          </button>
+          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+            PWO Schedule &amp; Queue
+          </button>
+        </div>
+      )}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <div className="panel">
           <form className="panel-body" onSubmit={handleSubmit}>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
@@ -824,14 +856,15 @@ export default function MillingPage() {
                   csvValue: (r) => toExcelDateTimeString(r.log.timestamp),
                 },
                 { key: "order", label: "Order", render: (r) => r.log.order },
-                { key: "batch", label: "Batch", render: (r) => r.log.batch },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.log.materialNumber },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.log.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.log.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.log.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.log.plant },
                 { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.log.spvProduksi },
                 { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.log.spvProduksi)?.employeeId },
-                { key: "spvDepartemen", label: "SPV Departemen", render: (r) => findEmployee(r.log.spvProduksi)?.departemen },
                 { key: "leader", label: "Leader", render: (r) => r.log.leader },
                 { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.log.leader)?.employeeId },
-                { key: "leaderDepartemen", label: "Leader Departemen", render: (r) => findEmployee(r.log.leader)?.departemen },
                 { key: "qtyAct", label: "Qty Act", render: (r) => r.log.qtyAct },
                 {
                   key: "members",
@@ -840,7 +873,7 @@ export default function MillingPage() {
                     const members = r.log.members ?? [];
                     const list = members.map((m) => {
                       const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId} · ${emp.departemen ?? "-"})` : m;
+                      return emp ? `${m} (${emp.employeeId})` : m;
                     });
                     return [String(members.length), ...list].join(" | ");
                   },

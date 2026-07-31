@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { hasAdminQcQcPassed } from "../../lib/stageGate";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
@@ -136,6 +137,17 @@ packingRouter.post(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Packing
+    // wajib utk semua proses -- baru boleh diinput kalau Order ini sudah
+    // py QC Passed di Admin QC (sama syarat dgn "List Antrian Packing").
+    // Baris BARU saja (PUT/Edit tetap bebas).
+    if (!(await hasAdminQcQcPassed(parsed.data.order))) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum QC Passed di Admin QC -- tidak bisa diinput ke Packing dulu.`,
+      });
       return;
     }
     const created = await prisma.packingLog.create({

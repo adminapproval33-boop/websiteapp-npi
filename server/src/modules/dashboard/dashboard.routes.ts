@@ -13,10 +13,17 @@ interface ProductionOrderRow {
   materialDescription: string | null;
   batch: string | null;
   orderQty: string | null;
+  pctGR: string | null;
   process: string;
   start: Date | null;
   finish: Date | null;
   remark: string | null;
+  /** Code Tanki dari baris "Proses" terakhir (touch paling baru) Order ini --
+   * Milling py 2 slot (Couple/Moving), digabung "A (Couple) / B (Moving)"
+   * kalau dua-duanya keisi. Kalau touch terakhir Packing, dioverride oleh
+   * Code Tanki Packing sama spt Start/Finish/Remark (lihat packingRow di
+   * bawah). 2026-07-31, instruksi eksplisit user. */
+  codeTanki: string | null;
   timestamp: Date;
   leadTimeProses: number;
   stages: { name: string; done: boolean }[];
@@ -58,17 +65,32 @@ function toWibDateOnly(d: Date): Date {
  * modul manapun -- Premix/Aftermix/Milling/Colour Matching/Packing/QC)
  * sampai hari ini. Hari Order itu sendiri dibuat belum dihitung (baru mulai
  * berjalan besoknya) -- kalau baru dibuat hari ini, Lead Time = 0.
+ *
+ * Dihitung pakai rumus langsung (BUKAN loop hari-per-hari spt sebelumnya) --
+ * versi loop jadi bottleneck fatal (2026-07-31, ~50 detik dari total ~52
+ * detik /production-orders) begitu dipanggil ribuan kali dgn `from` yg jauh
+ * di masa lalu (lihat pemanggil di /production-orders: Order yg belum
+ * pernah tersentuh modul manapun sempat jatuh fallback ke epoch 1970, jadi
+ * loopnya muter puluhan ribu iterasi PER baris). Rumus ini hasilnya identik
+ * dgn versi loop (diverifikasi manual utk beberapa rentang), tinggal O(1).
  */
 function countBusinessDaysElapsed(from: Date, to: Date): number {
   const start = toWibDateOnly(from);
   const end = toWibDateOnly(to);
-  let count = 0;
-  const cursor = new Date(start);
-  cursor.setUTCDate(cursor.getUTCDate() + 1);
-  while (cursor.getTime() <= end.getTime()) {
-    const day = cursor.getUTCDay(); // 0 = Minggu, 6 = Sabtu
-    if (day !== 0 && day !== 6) count++;
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  // Rentang yg dihitung: (start, end] -- persis spt versi loop (mulai dari
+  // start+1 hari, sampai DAN termasuk end).
+  const fromDay = start.getTime() / 86_400_000 + 1;
+  const toDay = end.getTime() / 86_400_000;
+  if (toDay < fromDay) return 0;
+  const totalDays = toDay - fromDay + 1;
+  const fullWeeks = Math.floor(totalDays / 7);
+  let count = fullWeeks * 5;
+  // Epoch hari-ke-0 (1 Jan 1970) jatuh hari Kamis -- day-of-week (0=Minggu)
+  // dari hari-ke-N sejak epoch = (N + 4) % 7.
+  const remainder = totalDays - fullWeeks * 7;
+  for (let i = 0; i < remainder; i++) {
+    const dow = (fromDay + i + 4) % 7;
+    if (dow !== 0 && dow !== 6) count++;
   }
   return count;
 }
@@ -332,6 +354,7 @@ dashboardRouter.get(
           members: true,
           remark: true,
           timestamp: true,
+          codeTanki: true,
         },
         orderBy: { timestamp: "desc" },
         take: 500,
@@ -346,6 +369,7 @@ dashboardRouter.get(
           finish: true,
           leader: true,
           codeTanki1: true,
+          codeTanki2: true,
           codeMesin: true,
           qtyAct: true,
           members: true,
@@ -371,6 +395,7 @@ dashboardRouter.get(
           formPerMan: true,
           remark: true,
           timestamp: true,
+          codeTanki: true,
         },
         orderBy: { timestamp: "desc" },
         take: 500,
@@ -405,6 +430,7 @@ dashboardRouter.get(
           materialNumber: true,
           remark: true,
           timestamp: true,
+          codeTanki: true,
           parameters: {
             orderBy: { no: "asc" },
             select: { parameter: true, standard: true, result: true, start: true, finish: true },
@@ -423,6 +449,7 @@ dashboardRouter.get(
           technicalDateReceiving: true,
           submitToCustomer: true,
           finishApp: true,
+          codeTanki: true,
           remark: true,
           timestamp: true,
         },
@@ -471,28 +498,62 @@ dashboardRouter.get(
     const approvalMaterials = materialSet(approvals);
 
     /**
-     * Daftar tahap yg ditampilkan utk 1 Order = tahap yg PERNAH ada histori
-     * Material Number-nya (lintas Order/Batch manapun) -- `done` per tahap
-     * tetap dicek dari Order ybs SENDIRI. Jadi kalau Material X pernah
-     * melalui Premix+QC (di Order lain/Batch lain), Order Y dgn Material X
-     * yg baru sampai Aftermix akan tetap menampilkan label Premix & QC
-     * (abu-abu, belum done) selain Aftermix (berwarna, done) -- supaya
-     * tim MRP tahu keseluruhan rangkaian proses material ini, bukan cuma
-     * progres Order ybs. Kalau materialNumber tidak diketahui (jarang
-     * terjadi), fallback ke 7 tahap universal spy tetap ada acuan.
+     * Daftar tahap yg ditampilkan utk 1 Order = tahap yg WAJIB utk Material
+     * Number-nya menurut MaterialFlow (Master Data resmi, lihat fetch di
+     * atas) -- `done` per tahap tetap dicek dari Order ybs SENDIRI. Jadi
+     * kalau Material X wajib py Premix+QC (menurut MaterialFlow), Order Y
+     * dgn Material X yg baru sampai Aftermix akan tetap menampilkan label
+     * Premix & QC (abu-abu, belum done) selain Aftermix (berwarna, done) --
+     * supaya tim MRP tahu keseluruhan rangkaian proses material ini, bukan
+     * cuma progres Order ybs.
+     *
+     * REVISI 2026-07-31 (instruksi eksplisit user, menyusul file resmi "ALL
+     * FLOW PROSES.xlsx"): sebelumnya "relevan atau tidak" ditebak dari
+     * histori log (materialSet di atas, premixMaterials dkk) -- SEKARANG
+     * pakai MaterialFlow sbg sumber utama, materialSet cuma jadi fallback
+     * kalau Material-nya belum terdaftar di MaterialFlow sama sekali (mis.
+     * Material baru yg belum sempat diimpor).
      */
     function computeStages(order: string, materialNumber: string | null): { name: string; done: boolean }[] {
+      const doneSets: Record<string, Set<string>> = {
+        Premix: premixOrders,
+        Milling: millingOrders,
+        Aftermix: aftermixOrders,
+        "Colour Matching": colourMatchingOrders,
+        QC: checkResultOrders,
+        Approval: approvalOrders,
+        Packing: packingOrders,
+      };
+
+      const flow = materialNumber ? materialFlowByNumber.get(materialNumber) : undefined;
+      if (flow) {
+        const stages = [
+          { name: "Premix", required: flow.premixRequired },
+          { name: "Milling", required: flow.millingRequired },
+          { name: "Aftermix", required: flow.aftermixRequired },
+          { name: "Colour Matching", required: flow.colourMatchingRequired },
+          { name: "QC", required: flow.qcRequired },
+          { name: "Approval", required: flow.approvalRequired },
+          { name: "Packing", required: flow.packingRequired },
+        ];
+        return stages.filter((s) => s.required).map((s) => ({ name: s.name, done: doneSets[s.name].has(order) }));
+      }
+
+      // Fallback: Material belum terdaftar di MaterialFlow -- pakai heuristik
+      // lama (pernah ada histori log di tahap itu, lintas Order/Batch
+      // manapun). Kalau materialNumber tidak diketahui sama sekali, fallback
+      // ke 7 tahap universal spy tetap ada acuan.
       const defs = [
-        { name: "Premix", doneSet: premixOrders, materialSet: premixMaterials },
-        { name: "Milling", doneSet: millingOrders, materialSet: millingMaterials },
-        { name: "Aftermix", doneSet: aftermixOrders, materialSet: aftermixMaterials },
-        { name: "Colour Matching", doneSet: colourMatchingOrders, materialSet: colourMatchingMaterials },
-        { name: "QC", doneSet: checkResultOrders, materialSet: checkResultMaterials },
-        { name: "Approval", doneSet: approvalOrders, materialSet: approvalMaterials },
-        { name: "Packing", doneSet: packingOrders, materialSet: packingMaterials },
+        { name: "Premix", materialSet: premixMaterials },
+        { name: "Milling", materialSet: millingMaterials },
+        { name: "Aftermix", materialSet: aftermixMaterials },
+        { name: "Colour Matching", materialSet: colourMatchingMaterials },
+        { name: "QC", materialSet: checkResultMaterials },
+        { name: "Approval", materialSet: approvalMaterials },
+        { name: "Packing", materialSet: packingMaterials },
       ];
       const relevant = materialNumber ? defs.filter((d) => d.materialSet.has(materialNumber)) : defs;
-      return relevant.map((d) => ({ name: d.name, done: d.doneSet.has(order) }));
+      return relevant.map((d) => ({ name: d.name, done: doneSets[d.name].has(order) }));
     }
 
     // Label Packing per Order utk kolom "Production Actions" -- mulai dari
@@ -525,6 +586,7 @@ dashboardRouter.get(
         start: a.qcToApproval,
         finish: null as Date | null,
         remark: a.remark,
+        codeTanki: null as string | null,
         timestamp: a.qcToApproval ?? a.timestamp,
       }));
 
@@ -569,6 +631,7 @@ dashboardRouter.get(
         start: null as Date | null,
         finish: null as Date | null,
         remark: null as string | null,
+        codeTanki: null as string | null,
         // Master Data tidak py timestamp yg bisa diandalkan (lihat komentar
         // panjang di /premix-aftermix/premix-pwo-queue) -- SENGAJA pakai
         // epoch (paling lama) supaya baris ini HANYA menang kalau memang
@@ -609,6 +672,7 @@ dashboardRouter.get(
         start: null as Date | null,
         finish: null as Date | null,
         remark: r.remark,
+        codeTanki: null as string | null,
         // +1ms drpd Finish Premix -- SENGAJA supaya "QU - Milling" menang
         // tie-break drpd "Premix - DN" (baris Premix sendiri pakai timestamp
         // Finish yg SAMA persis), sama pola dgn queueAftermixRows/
@@ -648,6 +712,7 @@ dashboardRouter.get(
         start: null as Date | null,
         finish: null as Date | null,
         remark: r.remark,
+        codeTanki: null as string | null,
         // +1ms drpd Finish Milling -- SENGAJA supaya "QU - Aftermix" menang
         // tie-break drpd "Milling - DN" (baris Milling sendiri pakai
         // timestamp Finish yg SAMA persis), sama pola dgn queueColourMatchingRows.
@@ -681,6 +746,7 @@ dashboardRouter.get(
         start: null as Date | null,
         finish: null as Date | null,
         remark: r.remark,
+        codeTanki: null as string | null,
         // +1ms drpd Finish Aftermix -- SENGAJA supaya "QU - Colour Matching"
         // menang tie-break drpd "Aftermix - DN" (baris Aftermix di bawah
         // pakai timestamp Finish yg SAMA persis) saat diurutkan "paling baru
@@ -691,7 +757,7 @@ dashboardRouter.get(
 
     const rows: Omit<
       ProductionOrderRow,
-      "materialNumber" | "materialDescription" | "batch" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
+      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -700,6 +766,7 @@ dashboardRouter.get(
         start: r.start,
         finish: r.finish,
         remark: r.remark,
+        codeTanki: r.codeTanki,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
       ...queuePremixRows,
@@ -712,6 +779,13 @@ dashboardRouter.get(
         start: r.start,
         finish: r.finish,
         remark: r.remark,
+        // Milling py 2 slot tanki (Couple & Moving) -- gabung keduanya kalau
+        // dua-duanya keisi, sama pola label dgn buildTankStatusMap/Monitoring
+        // Tanki.
+        codeTanki:
+          [r.codeTanki1 ? `${r.codeTanki1} (Couple)` : null, r.codeTanki2 ? `${r.codeTanki2} (Moving)` : null]
+            .filter((v): v is string => v != null)
+            .join(" / ") || null,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
       ...colourMatching.map((r) => ({
@@ -721,6 +795,7 @@ dashboardRouter.get(
         start: r.start,
         finish: r.finish,
         remark: r.remark,
+        codeTanki: r.codeTanki,
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
       ...queueColourMatchingRows,
@@ -741,6 +816,7 @@ dashboardRouter.get(
           start: rep?.start ?? null,
           finish: rep?.finish ?? null,
           remark: r.remark,
+          codeTanki: r.codeTanki,
           // Beda dengan modul lain (pakai latestMoment/Finish-lalu-Start): QC
           // SENGAJA cuma pakai kolom Start Item Check terwakil saja (bukan Finish,
           // bukan timestamp Save header) -- sesuai instruksi eksplisit utk QC.
@@ -761,6 +837,7 @@ dashboardRouter.get(
           start: adminQc?.qcToApproval ?? null,
           finish: r.finishApp,
           remark: r.remark,
+          codeTanki: r.codeTanki,
           timestamp: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
         };
       }),
@@ -797,9 +874,23 @@ dashboardRouter.get(
     const uniqueOrders = Array.from(latestByOrder.keys());
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: uniqueOrders } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    // Rute proses resmi per Material Number (menu Master Data > Material
+    // Flow Proses, file "ALL FLOW PROSES.xlsx" -- 2026-07-31, instruksi
+    // eksplisit user) -- dipakai `computeStages` sbg sumber utama "Proses
+    // Bar" GANTI heuristik histori log (premixMaterials dkk di atas), yg
+    // sekarang cuma fallback kalau Material-nya belum terdaftar di sana.
+    const materialNumbersForFlow = Array.from(
+      new Set(masterOrders.map((m) => m.materialNumber).filter((v): v is string => v != null))
+    );
+    const materialFlows =
+      materialNumbersForFlow.length > 0
+        ? await prisma.materialFlow.findMany({ where: { materialNumber: { in: materialNumbersForFlow } } })
+        : [];
+    const materialFlowByNumber = new Map(materialFlows.map((f) => [f.materialNumber, f]));
 
     const now = new Date();
     // Filter teks pencarian (dulu di query, dipindah ke sini) diterapkan ke
@@ -807,9 +898,40 @@ dashboardRouter.get(
     // Number di atas) tetap dihitung dari histori LENGKAP tanpa filter ini.
     const searchLower = search.toLowerCase();
     const filteredDeduped = search ? deduped.filter((r) => r.order.toLowerCase().includes(searchLower)) : deduped;
-    const result: ProductionOrderRow[] = filteredDeduped.map((r) => {
+    // %GR "9999%" di Master Data Cooispi = kode sentinel SAP (order status
+    // TECO -- Technically Complete -- BUKAN persentase asli) buat Order yg
+    // administrasinya ditutup tanpa pernah benar2 diproduksi. Aturan
+    // (2026-07-31, instruksi eksplisit user): kalau %GR=9999% DAN Order itu
+    // TIDAK PERNAH punya histori nyata di modul manapun (murni nongol dari
+    // Master Data lewat queuePremixRows) -> keluarkan dari dashboard sama
+    // sekali. Kalau %GR=9999% TAPI Order itu PERNAH tercatat di histori
+    // proses manapun (berarti sempat jalan) -> tetap tampil, tapi kolom
+    // "Production Actions" dipaksa jadi "Teco" (badge merah di frontend),
+    // menang drpd aturan "%GR>95 -> Done" yg sudah ada.
+    const hasAnyHistory = (order: string) =>
+      premixOrders.has(order) ||
+      aftermixOrders.has(order) ||
+      millingOrders.has(order) ||
+      colourMatchingOrders.has(order) ||
+      checkResultOrders.has(order) ||
+      approvalOrders.has(order) ||
+      packingOrders.has(order);
+
+    const result: ProductionOrderRow[] = filteredDeduped
+      .filter((r) => {
+        const pctGRValue = parsePctGR(masterByOrder.get(r.order)?.pctGR);
+        return !(pctGRValue !== null && pctGRValue >= 9999 && !hasAnyHistory(r.order));
+      })
+      .map((r) => {
       const master = masterByOrder.get(r.order);
-      const firstSeen = firstSeenByOrder.get(r.order) ?? r.timestamp;
+      // `firstSeenByOrder` cuma keisi dari histori NYATA (Premix/Milling/dst,
+      // lihat createdAtEntries) -- Order yg baru sekedar "PWO Schedule &
+      // Queue" (queuePremixRows dkk, belum PERNAH disentuh modul manapun)
+      // tidak py entri di sana, jadi SENGAJA tidak fallback ke `r.timestamp`
+      // (dulu bisa jadi epoch 1970 utk queuePremixRows -> Lead Time nongol
+      // puluhan ribu hari kerja, nonsense krn prosesnya memang belum mulai
+      // sama sekali) -- Lead Time utk kasus ini = 0.
+      const firstSeen = firstSeenByOrder.get(r.order);
       const stages = computeStages(r.order, master?.materialNumber ?? null);
       const progressPercent = stages.length === 0 ? 0 : Math.round((stages.filter((s) => s.done).length / stages.length) * 100);
       // Begitu Order ybs SUDAH py baris nyata di History Packing, kolom Start
@@ -825,13 +947,23 @@ dashboardRouter.get(
         materialNumber: master?.materialNumber ?? null,
         materialDescription: master?.materialDescription ?? null,
         batch: master?.batch ?? null,
+        pctGR: master?.pctGR ?? null,
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
-        leadTimeProses: countBusinessDaysElapsed(firstSeen, now),
+        codeTanki: packingRow ? packingRow.codeTanki : r.codeTanki,
+        leadTimeProses: firstSeen ? countBusinessDaysElapsed(firstSeen, now) : 0,
         stages,
         progressPercent,
-        productionActions: packingActionsByOrder.get(r.order) ?? null,
+        // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
+        // filter di atas jadi PASTI py histori nyata) -> "Teco", baru kalau
+        // bukan itu, %GR>95% -> "Done", baru fallback ke status Packing biasa.
+        productionActions: (() => {
+          const pctGRValue = parsePctGR(master?.pctGR);
+          if (pctGRValue !== null && pctGRValue >= 9999) return "Teco";
+          if ((pctGRValue ?? 0) > 95) return "Done";
+          return packingActionsByOrder.get(r.order) ?? null;
+        })(),
       };
     });
 
@@ -866,6 +998,7 @@ export interface TankStatusInfo {
     materialDescription: string | null;
     batch: string | null;
     orderQty: string | null;
+    pctGR: string | null;
     remark: string | null;
     process: string;
     start: Date | null;
@@ -875,6 +1008,12 @@ export interface TankStatusInfo {
      * `process` -- sesuai instruksi eksplisit user (2026-07-28). Lihat
      * latestPackingLabelByOrder. */
     productionActions: string | null;
+    /** "Input Admin" = okupansi tank ini hasil hitungan otomatis (histori
+     * proses biasa). "Manual" = okupansi ini ditimpa dari tab "Input Manual"
+     * (2026-07-31, instruksi eksplisit user) -- kolom "Proses"/
+     * "Production Actions" TETAP pakai logika otomatis Order ybs walau
+     * `source`-nya "Manual", cuma kolom baru INI yg beda. */
+    source: "Input Admin" | "Manual";
   } | null;
 }
 
@@ -893,19 +1032,29 @@ export interface TankStatusInfo {
  * Order Monitoring -- lihat menu.tsx & ProductionOrderDashboardPage) --
  * begitu Packing utk Order itu sudah diinput, tank dianggap sudah
  * dikosongkan/dibersihkan lagi ("Kosong"). Tank yg belum pernah tersentuh
- * modul manapun juga dianggap "Kosong".
+ * modul manapun juga dianggap "Kosong". Aturan tambahan (2026-07-30, sesuai
+ * instruksi eksplisit user): kalau %GR (Master Data Cooispi) Order yg lagi
+ * megang tank itu SUDAH >95%, tank ITU JUGA langsung dianggap "Kosong" --
+ * walau Order-nya sendiri belum py entri Packing -- krn %GR tinggi berarti
+ * isi tanki itu sendiri sudah nyaris habis diambil/di-deliver.
  */
+function parsePctGR(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const n = Number(raw.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
 async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
-  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults] = await Promise.all([
+  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults, manualInputs] = await Promise.all([
     prisma.masterTank.findMany({ orderBy: { code: "asc" } }),
     prisma.premixAftermixLog.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, start: true, finish: true, timestamp: true },
+      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
     }),
     prisma.millingLog.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki1: true, codeTanki2: true, start: true, finish: true, timestamp: true },
+      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki1: true, codeTanki2: true, formReceived: true, start: true, finish: true, timestamp: true },
     }),
     prisma.colourMatchingLog.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, start: true, finish: true, timestamp: true },
+      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
     }),
     prisma.packingLog.findMany({
       select: {
@@ -971,9 +1120,21 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
         },
       },
     }),
+    prisma.tankManualInput.findMany({ orderBy: { timestamp: "desc" } }),
   ]);
 
   const packingOrders = new Set(packing.map((r) => r.order));
+
+  // Data "Input Manual" (tab terpisah di Dashboard > Tank Monitoring) MENANG
+  // drpd hasil hitungan otomatis (touches) -- sesuai instruksi eksplisit user
+  // (2026-07-31): dipakai justru utk kasus perhitungan otomatis KELIRU (mis.
+  // Order sudah "Done"/"Teco" jadi otomatis dianggap kosong, padahal aktualnya
+  // masih terisi), jadi manual harus bisa menimpa. Ambil PALING BARU per Code
+  // Tanki (manualInputs sudah diurutkan timestamp desc).
+  const latestManualByTank = new Map<string, (typeof manualInputs)[number]>();
+  for (const m of manualInputs) {
+    if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
+  }
 
   const touches: TankTouch[] = [];
   for (const r of premixAftermix) {
@@ -985,7 +1146,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       batch: r.batch,
       orderQty: r.orderQty,
       remark: r.remark,
-      process: r.section === "PREMIX" ? "Premix" : "Aftermix",
+      process: r.section === "PREMIX" ? premixProcessLabel(r) : aftermixProcessLabel(r),
       start: r.start,
       finish: r.finish,
       moment: latestMoment(r.start, r.finish, r.timestamp),
@@ -993,11 +1154,12 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   }
   for (const r of milling) {
     const moment = latestMoment(r.start, r.finish, r.timestamp);
+    const label = millingProcessLabel(r);
     if (r.codeTanki1) {
-      touches.push({ code: r.codeTanki1, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: "Milling (Couple)", start: r.start, finish: r.finish, moment });
+      touches.push({ code: r.codeTanki1, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: `${label} (Couple)`, start: r.start, finish: r.finish, moment });
     }
     if (r.codeTanki2) {
-      touches.push({ code: r.codeTanki2, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: "Milling (Moving)", start: r.start, finish: r.finish, moment });
+      touches.push({ code: r.codeTanki2, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: `${label} (Moving)`, start: r.start, finish: r.finish, moment });
     }
   }
   for (const r of colourMatching) {
@@ -1009,7 +1171,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       batch: r.batch,
       orderQty: r.orderQty,
       remark: r.remark,
-      process: "Colour Matching",
+      process: colourMatchingProcessLabel(r),
       start: r.start,
       finish: r.finish,
       moment: latestMoment(r.start, r.finish, r.timestamp),
@@ -1070,20 +1232,90 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     if (!existing || t.moment.getTime() > existing.moment.getTime()) latestByTank.set(t.code, t);
   }
 
+  // Sama spt latestByTank, tapi di-dedupe PER ORDER (bukan per Code Tanki) --
+  // dipakai KHUSUS utk baris "Input Manual" (2026-07-31, instruksi eksplisit
+  // user): kolom "Proses"/"Production Actions" tetap harus pakai logika
+  // OTOMATIS (dari histori proses Order itu sendiri), BUKAN label "Manual" --
+  // "Manual" cuma dipindah ke kolom baru terpisah ("Sumber Data").
+  const latestTouchByOrder = new Map<string, TankTouch>();
+  for (const t of touches) {
+    const existing = latestTouchByOrder.get(t.order);
+    if (!existing || t.moment.getTime() > existing.moment.getTime()) latestTouchByOrder.set(t.order, t);
+  }
+
   // Material Description SENGAJA di-lookup ulang dari Master Data Cooispi
   // (bukan snapshot History) -- sama alasannya dgn /production-orders.
-  const orderNumbers = Array.from(new Set(Array.from(latestByTank.values()).map((t) => t.order)));
+  const orderNumbers = Array.from(
+    new Set([...Array.from(latestByTank.values()).map((t) => t.order), ...Array.from(latestManualByTank.values()).map((m) => m.order)])
+  );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
-    select: { order: true, materialDescription: true },
+    select: { order: true, materialDescription: true, pctGR: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
+  const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
+
+  // Dipakai BERSAMA oleh baris otomatis & baris "Input Manual" -- supaya
+  // kolom "Production Actions" konsisten sama logikanya (%GR sentinel TECO /
+  // >95% Done / status Packing biasa) di keduanya, cuma bedanya baris manual
+  // butuh dipanggil eksplisit per-Order (bukan per-touch tank spt biasa).
+  function productionActionsFor(order: string): string | null {
+    const pctGRValue = parsePctGR(pctGRByOrder.get(order));
+    if (pctGRValue !== null && pctGRValue >= 9999) return "Teco";
+    if (pctGRValue !== null && pctGRValue > 95) return "Done";
+    return packingActionsByOrder.get(order) ?? null;
+  }
 
   const map = new Map<string, TankStatusInfo>();
   for (const tank of tanks) {
+    const manual = latestManualByTank.get(tank.code);
+    if (manual) {
+      // Manual MENANG mutlak -- tank ini langsung "Terisi" pakai data manual,
+      // tidak perlu cek touch/pctGR/Teco otomatis sama sekali (lihat komentar
+      // di atas Promise.all).
+      map.set(tank.code, {
+        code: tank.code,
+        taTb: tank.taTb,
+        tankCapacity: tank.tankCapacity,
+        newNumber: tank.newNumber,
+        locationPlant: tank.locationPlant,
+        typeTanki: tank.typeTanki,
+        status: "occupied",
+        occupant: {
+          order: manual.order,
+          materialNumber: manual.materialNumber,
+          materialDescription: manual.materialDescription,
+          batch: manual.batch,
+          orderQty: manual.orderQty,
+          pctGR: pctGRByOrder.get(manual.order) ?? null,
+          remark: manual.remark,
+          // "Proses"/"Production Actions" TETAP logika otomatis Order ybs
+          // (2026-07-31, instruksi eksplisit user) -- "Manual" cuma nongol di
+          // kolom `source` terpisah, bukan menimpa 2 kolom ini.
+          process: latestTouchByOrder.get(manual.order)?.process ?? "-",
+          start: latestTouchByOrder.get(manual.order)?.start ?? null,
+          finish: latestTouchByOrder.get(manual.order)?.finish ?? null,
+          since: manual.timestamp,
+          productionActions: productionActionsFor(manual.order),
+          source: "Manual",
+        },
+      });
+      continue;
+    }
+
     const touch = latestByTank.get(tank.code);
-    const orderDone = touch ? packingOrders.has(touch.order) : true;
+    const pctGRValue = touch ? parsePctGR(pctGRByOrder.get(touch.order)) : null;
+    // %GR>95% (TERMASUK sentinel TECO 9999%, lihat komentar panjang di
+    // /production-orders di atas) -> tank otomatis "Kosong" (data occupant
+    // dikosongkan). DIREVISI 2026-07-31 (instruksi eksplisit user): Teco
+    // SEBELUMNYA sengaja dikecualikan dari aturan ini supaya tetap tampil,
+    // tapi sekarang instruksinya dibalik -- Production Actions = "Teco" HARUS
+    // langsung bikin tank kosong juga, sama spt >95% biasa. Ini CUMA berlaku
+    // di baris otomatis (branch ini) -- baris "Input Manual" di atas TETAP
+    // menang mutlak terlepas dari %GR-nya, krn justru itu fungsinya (lihat
+    // komentar di branch `manual`).
+    const orderDone = touch ? packingOrders.has(touch.order) || (pctGRValue !== null && pctGRValue > 95) : true;
     const occupied = Boolean(touch) && !orderDone;
     map.set(tank.code, {
       code: tank.code,
@@ -1101,12 +1333,14 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
               materialDescription: descByOrder.get(touch.order) ?? null,
               batch: touch.batch,
               orderQty: touch.orderQty,
+              pctGR: pctGRByOrder.get(touch.order) ?? null,
               remark: touch.remark,
               process: touch.process,
               start: touch.start,
               finish: touch.finish,
               since: touch.moment,
-              productionActions: packingActionsByOrder.get(touch.order) ?? null,
+              productionActions: productionActionsFor(touch.order),
+              source: "Input Admin",
             }
           : null,
     });

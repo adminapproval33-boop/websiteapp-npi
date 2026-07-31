@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import * as stageGate from "../../lib/stageGate";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -348,6 +349,21 @@ premixAftermixRouter.post(
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Aftermix
+    // baru boleh diinput kalau prasyaratnya (Milling, atau Premix kalau
+    // Milling di-skip utk Material ini menurut MaterialFlow) sudah "-DN".
+    // Premix (tahap pertama, section berbeda) TIDAK dicek apa-apa. Baris
+    // BARU saja (PUT/Edit tetap bebas).
+    if (parsed.data.section === "AFTERMIX") {
+      const gate = await stageGate.checkAftermixGate(parsed.data.order, parsed.data.materialNumber);
+      if (!gate.ok) {
+        res.status(400).json({
+          success: false,
+          message: `Order ${parsed.data.order} belum menyelesaikan ${gate.missingStage} (${gate.missingStage} - DN) -- tidak bisa diinput ke Aftermix dulu.`,
+        });
+        return;
+      }
     }
     const created = await prisma.premixAftermixLog.create({
       data: { ...parsed.data, inputBy: req.auth!.nik },

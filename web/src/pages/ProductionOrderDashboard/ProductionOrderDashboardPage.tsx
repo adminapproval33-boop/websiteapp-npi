@@ -5,6 +5,13 @@ import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
+import PremixAftermixPage from "../PremixAftermix/PremixAftermixPage";
+import MillingPage from "../Milling/MillingPage";
+import ColourMatchingPage from "../ColourMatching/ColourMatchingPage";
+import CheckResultsPage from "../CheckResults/CheckResultsPage";
+import ApprovalPage from "../Approval/ApprovalPage";
+import PackingPage from "../Packing/PackingPage";
+import MaterialFlowPanel from "./MaterialFlowPanel";
 
 interface ProductionOrderRow {
   order: string;
@@ -12,10 +19,12 @@ interface ProductionOrderRow {
   materialDescription: string | null;
   batch: string | null;
   orderQty: string | null;
+  pctGR: string | null;
   process: string;
   start: string | null;
   finish: string | null;
   remark: string | null;
+  codeTanki: string | null;
   leadTimeProses: number;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
@@ -83,6 +92,9 @@ const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
   Approval: { bg: "#808000", fg: "#ffffff" },
   Packing: { bg: "#00FF00", fg: "#000000" },
   Done: { bg: "#008000", fg: "#ffffff" },
+  /** %GR=9999% (sentinel TECO SAP) utk Order yg pernah jalan -- badge merah,
+   * beda dari "Done" (hijau tua), sesuai instruksi eksplisit user (2026-07-31). */
+  Teco: { bg: "#FF0000", fg: "#ffffff" },
 };
 
 /** Urutan tahap kerja tetap (7 tahap, sama dgn yg dihitung backend utk Proses Bar). */
@@ -319,6 +331,21 @@ export default function ProductionOrderDashboardPage() {
   const [leadTimeDetailOrder, setLeadTimeDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
   const [millingDetailOrder, setMillingDetailOrder] = useState<string | null>(null);
+  // Pop-up "Tahap Selanjutnya" (2026-07-31, instruksi eksplisit user): klik
+  // tombol di kolom Proses Bar -> buka Modal INFO ("Info Proses Material" +
+  // tombol "Buka Input" per tahap) DAN Modal FORM (form Input tahap PERTAMA
+  // yg belum "done") SEKALIGUS, sbg 2 pop-up terpisah (bukan numpuk 1 modal
+  // panjang) -- direvisi 2026-07-31 (instruksi eksplisit user): form Input
+  // HARUS pop-up sendiri, bukan ditempel di bawah panel info. Modal FORM
+  // rendernya di ATAS Modal INFO (backdrop-nya nutupin), jadi begitu Modal
+  // FORM ditutup, Modal INFO kelihatan lagi -- dari situ bisa lompat ke
+  // tahap lain lewat tombol per-baris (buka Modal FORM baru lagi).
+  const [infoTarget, setInfoTarget] = useState<{
+    order: string;
+    materialNumber: string | null;
+    stages: { name: string; done: boolean }[];
+  } | null>(null);
+  const [inputTarget, setInputTarget] = useState<{ order: string; stage: string } | null>(null);
 
   const rowsQuery = useQuery({
     queryKey: ["dashboard-production-orders", search],
@@ -404,11 +431,60 @@ export default function ProductionOrderDashboardPage() {
             { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
             { key: "batch", label: "Batch", render: (r) => r.batch },
             { key: "orderQty", label: "Qty/Liter", render: (r) => r.orderQty },
+            { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki ?? "-" },
+            { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
             {
               key: "progressBar",
               label: "Proses Bar",
-              defaultWidth: 260,
-              render: (r) => <ProgressBarCell stages={r.stages} percent={r.progressPercent} />,
+              // +30px drpd lebar asli (260) supaya tombol muat di sisi kiri
+              // TANPA bikin bar progress-nya sendiri kepotong/ke-hidden oleh
+              // batas lebar kolom (ProgressBarCell py minWidth 260 sendiri).
+              defaultWidth: 290,
+              render: (r) => {
+                // Order yg SEMUA tahapnya sudah done -> tombol tetap aktif,
+                // arahkan ke tahap TERAKHIR (biasanya Packing) supaya tetap
+                // bisa dibuka/direview -- form-nya otomatis masuk mode Edit
+                // krn datanya sudah ada (lihat handleOrderFound tiap
+                // halaman). Cuma beneran nonaktif kalau Order ini tidak py
+                // tahap relevan sama sekali (kasus langka, MaterialFlow-nya
+                // kosong semua).
+                const target = r.stages.find((s) => !s.done) ?? r.stages[r.stages.length - 1];
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <button
+                      type="button"
+                      disabled={!target}
+                      title={target ? `Buka Input ${target.name}` : "Order ini belum punya tahap yg relevan"}
+                      onClick={() => {
+                        if (!target) return;
+                        // Direvisi 2026-07-31 (instruksi eksplisit user): cuma buka
+                        // pop-up Info dulu -- pop-up Input form BARU muncul kalau
+                        // admin klik "Buka Input" dari dalam pop-up Info (lihat
+                        // MaterialFlowPanel/onOpenStage), bukan otomatis sekaligus.
+                        setInfoTarget({ order: r.order, materialNumber: r.materialNumber, stages: r.stages });
+                      }}
+                      style={{
+                        flexShrink: 0,
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        border: `1px solid ${target ? "var(--navy-light)" : "var(--border)"}`,
+                        background: "#fff",
+                        color: target ? "var(--navy)" : "var(--text-muted)",
+                        cursor: target ? "pointer" : "not-allowed",
+                        opacity: target ? 1 : 0.5,
+                        fontSize: "0.8rem",
+                        lineHeight: 1,
+                        display: "grid",
+                        placeItems: "center",
+                      }}
+                    >
+                      ➜
+                    </button>
+                    <ProgressBarCell stages={r.stages} percent={r.progressPercent} />
+                  </div>
+                );
+              },
               csvValue: (r) => `${r.progressPercent}% (${r.stages.filter((s) => s.done).map((s) => s.name).join(", ")})`,
             },
             {
@@ -446,7 +522,7 @@ export default function ProductionOrderDashboardPage() {
             },
             {
               key: "start",
-              label: "Start Proses",
+              label: "Start",
               render: (r) => (
                 <span
                   onClick={() => setLeadTimeDetailOrder(r.order)}
@@ -460,7 +536,7 @@ export default function ProductionOrderDashboardPage() {
             },
             {
               key: "finish",
-              label: "Finish Proses",
+              label: "Finish",
               render: (r) => (
                 <span
                   onClick={() => setLeadTimeDetailOrder(r.order)}
@@ -629,6 +705,63 @@ export default function ProductionOrderDashboardPage() {
             <p style={{ color: "var(--text-muted)" }}>Belum ada data Milling untuk Order ini.</p>
           )}
           {millingDetailQuery.data && <MillingDetailTable detail={millingDetailQuery.data} />}
+        </Modal>
+      )}
+
+      {infoTarget && (
+        <Modal title={`Info Proses — Order ${infoTarget.order}`} onClose={() => setInfoTarget(null)} width={860}>
+          <MaterialFlowPanel
+            materialNumber={infoTarget.materialNumber}
+            stages={infoTarget.stages}
+            onFlowSaved={() => rowsQuery.refetch()}
+            onOpenStage={(stage) => setInputTarget({ order: infoTarget.order, stage })}
+          />
+        </Modal>
+      )}
+
+      {inputTarget && (
+        <Modal title={`Input ${inputTarget.stage} — Order ${inputTarget.order}`} onClose={() => setInputTarget(null)} width={980}>
+          {(() => {
+            const closeAndRefresh = () => {
+              setInputTarget(null);
+              setInfoTarget(null);
+              rowsQuery.refetch();
+            };
+            switch (inputTarget.stage) {
+              case "Premix":
+                return (
+                  <PremixAftermixPage
+                    section="PREMIX"
+                    title="Premix"
+                    embedded
+                    initialOrder={inputTarget.order}
+                    onSaved={closeAndRefresh}
+                  />
+                );
+              case "Milling":
+                return <MillingPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "Aftermix":
+                return (
+                  <PremixAftermixPage
+                    section="AFTERMIX"
+                    title="Aftermix"
+                    embedded
+                    initialOrder={inputTarget.order}
+                    onSaved={closeAndRefresh}
+                  />
+                );
+              case "Colour Matching":
+                return <ColourMatchingPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "QC":
+                return <CheckResultsPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "Approval":
+                return <ApprovalPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "Packing":
+                return <PackingPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              default:
+                return <p style={{ color: "var(--text-muted)" }}>Tahap tidak dikenali.</p>;
+            }
+          })()}
         </Modal>
       )}
     </div>

@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { hasAdminQcApprovalType } from "../../lib/stageGate";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -332,6 +333,18 @@ approvalRouter.post(
     const parsed = await saveSchema.safeParseAsync(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Approval
+    // baru boleh diinput kalau Order ini sudah masuk "List Antrian Approval"
+    // (Admin QC Stage terbaru = Approval/Joint Lot) -- gerbang BARU ini
+    // terpisah dari tier-validation internal (QC to App dkk) yg sudah ada di
+    // atas. Baris BARU saja (PUT/Edit tetap bebas).
+    if (!(await hasAdminQcApprovalType(parsed.data.order))) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum masuk Antrian Approval (Admin QC Stage belum "Approval"/"Joint Lot") -- tidak bisa diinput ke Approval dulu.`,
+      });
       return;
     }
     const created = await prisma.approvalSchedule.create({

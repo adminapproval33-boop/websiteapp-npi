@@ -14,6 +14,7 @@ import { checkResultsRouter } from "./modules/checkResults/checkResults.routes";
 import { approvalRouter } from "./modules/approval/approval.routes";
 import { adminQcRouter } from "./modules/adminQc/adminQc.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
+import { tankManualInputRouter } from "./modules/tankManualInput/tankManualInput.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -39,6 +40,7 @@ export function createApp() {
   app.use("/api/approvals", approvalRouter);
   app.use("/api/admin-qc", adminQcRouter);
   app.use("/api/dashboard", dashboardRouter);
+  app.use("/api/tank-manual-input", tankManualInputRouter);
 
   app.use(errorHandler);
 

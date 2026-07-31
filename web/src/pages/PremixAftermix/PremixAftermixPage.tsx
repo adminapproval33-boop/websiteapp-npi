@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -128,7 +128,29 @@ const emptyForm = {
   remark: "",
 };
 
-export default function PremixAftermixPage({ section, title }: { section: Section; title: string }) {
+export default function PremixAftermixPage({
+  section,
+  title,
+  embedded = false,
+  initialOrder,
+  onSaved,
+}: {
+  section: Section;
+  title: string;
+  /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
+   * Monitoring (2026-07-31, instruksi eksplisit user) -- sembunyikan
+   * tab-switcher History/PWO Queue, cuma tampilkan form Input. Halaman biasa
+   * (/planning/premix, /planning/aftermix) TIDAK pakai prop ini sama sekali,
+   * jadi perilakunya tidak berubah. */
+  embedded?: boolean;
+  /** Order yg langsung di-lookup otomatis begitu komponen ini mount --
+   * dipakai bareng `embedded`, meniru persis apa yg terjadi kalau user
+   * ngetik Order lalu Enter/blur di OrderLookup biasa. */
+  initialOrder?: string;
+  /** Dipanggil SETELAH save sukses (di luar behavior normal spt setMessage) --
+   * dipakai pop-up utk nutup diri sendiri & refresh Dashboard. */
+  onSaved?: () => void;
+}) {
   const { user } = useAuth();
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
@@ -152,6 +174,10 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
     queryKey: ["premix-aftermix-history", section],
     queryFn: () =>
       api.get<{ success: boolean; data: LogRow[] }>(`/premix-aftermix/history?section=${section}`).then((r) => r.data),
+    // Mode "embedded" (pop-up "Tahap Selanjutnya", 2026-07-31) cuma
+    // nampilin form Input, History/Queue tidak pernah dirender -- jadi tidak
+    // perlu ikut fetch percuma di background.
+    enabled: !embedded,
   });
 
   // Antrian "PWO Schedule & Queue" AFTERMIX (sumbernya History Milling) --
@@ -160,7 +186,7 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
   const queueQuery = useQuery({
     queryKey: ["aftermix-pwo-queue"],
     queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/premix-aftermix/aftermix-pwo-queue").then((r) => r.data),
-    enabled: section === "AFTERMIX",
+    enabled: !embedded && section === "AFTERMIX",
   });
 
   // Antrian "PWO Schedule & Queue" PREMIX (sumbernya Master Data Cooispi,
@@ -170,7 +196,7 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
   const premixQueueQuery = useQuery({
     queryKey: ["premix-pwo-queue"],
     queryFn: () => api.get<{ success: boolean; data: PremixQueueRow[] }>("/premix-aftermix/premix-pwo-queue").then((r) => r.data),
-    enabled: section === "PREMIX",
+    enabled: !embedded && section === "PREMIX",
   });
 
   const saveMutation = useMutation({
@@ -191,6 +217,7 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
       } else {
         setMessage(wasEditing ? "Data berhasil diperbarui." : "Data berhasil disimpan.");
       }
+      onSaved?.();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
   });
@@ -280,6 +307,21 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
       /* belum ada input sebelumnya untuk Order ini -- biarkan kosong */
     }
   }
+
+  // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- meniru PERSIS
+  // apa yg terjadi kalau user ngetik Order lalu Enter/blur di OrderLookup
+  // biasa, supaya tidak perlu ngetik ulang Order-nya.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setForm((f) => ({ ...f, order: initialOrder }));
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() => {
+        /* Order tidak ditemukan di Master Data -- biarkan kosong, user isi manual */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
 
   function handleOrderQtyChange(orderQty: string) {
     setForm((f) => ({ ...f, orderQty, qtyPerMan: computeQtyPerMan(orderQty, f.members.length) }));
@@ -406,19 +448,21 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Input {title}
-        </button>
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          History
-        </button>
-        <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
-          PWO Schedule &amp; Queue
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Input {title}
+          </button>
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            History
+          </button>
+          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+            PWO Schedule &amp; Queue
+          </button>
+        </div>
+      )}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <div className="panel">
           <form className="panel-body" onSubmit={handleSubmit}>
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
@@ -596,14 +640,15 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                   csvValue: (r) => toExcelDateTimeString(r.timestamp),
                 },
                 { key: "order", label: "Order", render: (r) => r.order },
-                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
+                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+                { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.spvProduksi },
                 { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvProduksi)?.employeeId },
-                { key: "spvDepartemen", label: "SPV Departemen", render: (r) => findEmployee(r.spvProduksi)?.departemen },
                 { key: "leader", label: "Leader", render: (r) => r.leader },
                 { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leader)?.employeeId },
-                { key: "leaderDepartemen", label: "Leader Departemen", render: (r) => findEmployee(r.leader)?.departemen },
                 {
                   key: "members",
                   label: "Member",
@@ -611,7 +656,7 @@ export default function PremixAftermixPage({ section, title }: { section: Sectio
                     const members = r.members ?? [];
                     const list = members.map((m) => {
                       const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId} · ${emp.departemen ?? "-"})` : m;
+                      return emp ? `${m} (${emp.employeeId})` : m;
                     });
                     return [String(members.length), ...list].join(" | ");
                   },

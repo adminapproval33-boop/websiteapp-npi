@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import * as stageGate from "../../lib/stageGate";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
@@ -227,6 +228,18 @@ millingRouter.post(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Milling
+    // baru boleh diinput kalau prasyaratnya (Premix, kalau wajib utk Material
+    // ini menurut MaterialFlow) sudah "-DN". Baris BARU saja yg dicek
+    // (PUT/Edit row yg sudah ada tetap bebas).
+    const gate = await stageGate.checkMillingGate(parsed.data.order, parsed.data.materialNumber);
+    if (!gate.ok) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum menyelesaikan ${gate.missingStage} (${gate.missingStage} - DN) -- tidak bisa diinput ke Milling dulu.`,
+      });
       return;
     }
     const created = await prisma.millingLog.create({ data: { ...parsed.data, inputBy: req.auth!.nik } });

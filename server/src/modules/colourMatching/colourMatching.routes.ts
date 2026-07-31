@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import * as stageGate from "../../lib/stageGate";
 
 export const colourMatchingRouter = Router();
 colourMatchingRouter.use(requireAuth);
@@ -210,6 +211,18 @@ colourMatchingRouter.post(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Colour
+    // Matching baru boleh diinput kalau prasyaratnya (Aftermix, turun ke
+    // Milling/Premix kalau di-skip utk Material ini menurut MaterialFlow)
+    // sudah "-DN". Baris BARU saja (PUT/Edit tetap bebas).
+    const gate = await stageGate.checkColourMatchingGate(parsed.data.order, parsed.data.materialNumber);
+    if (!gate.ok) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum menyelesaikan ${gate.missingStage} (${gate.missingStage} - DN) -- tidak bisa diinput ke Colour Matching dulu.`,
+      });
       return;
     }
     const created = await prisma.colourMatchingLog.create({

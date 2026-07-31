@@ -6,6 +6,7 @@ import Modal from "../../components/Modal";
 import ProcessBadge from "../../components/ProcessBadge";
 import { formatDateTime } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
+import TankManualInputTab from "./TankManualInputTab";
 
 interface TankOccupant {
   order: string;
@@ -13,6 +14,7 @@ interface TankOccupant {
   materialDescription: string | null;
   batch: string | null;
   orderQty: string | null;
+  pctGR: string | null;
   remark: string | null;
   process: string;
   start: string | null;
@@ -21,6 +23,11 @@ interface TankOccupant {
   /** Label Proses Packing, TERPISAH dari `process` -- sesuai instruksi
    * eksplisit user (2026-07-28). */
   productionActions: string | null;
+  /** "Input Admin" = okupansi dihitung otomatis dari histori proses biasa.
+   * "Manual" = okupansi ini dari tab "Input Manual" -- `process`/
+   * `productionActions` di atas TETAP logika otomatis Order ybs walau
+   * sumbernya manual (2026-07-31, instruksi eksplisit user). */
+  source: "Input Admin" | "Manual";
 }
 
 interface TankRow {
@@ -84,6 +91,7 @@ function formatDuration(since: string): string {
 }
 
 export default function TankDashboardPage() {
+  const [tab, setTab] = useState<"monitoring" | "manual">("monitoring");
   const [search, setSearch] = useState("");
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
@@ -147,6 +155,19 @@ export default function TankDashboardPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className={`btn ${tab === "monitoring" ? "" : "btn-outline"}`} onClick={() => setTab("monitoring")}>
+          Monitoring Tanki
+        </button>
+        <button className={`btn ${tab === "manual" ? "" : "btn-outline"}`} onClick={() => setTab("manual")}>
+          Input Manual
+        </button>
+      </div>
+
+      {tab === "manual" && <TankManualInputTab />}
+
+      {tab === "monitoring" && (
+        <>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <KpiCard label="Total Tank" value={rows.length} color="var(--navy-light)" />
         <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
@@ -204,11 +225,35 @@ export default function TankDashboardPage() {
                 ),
                 csvValue: (r) => (r.status === "occupied" ? "Terisi" : "Kosong"),
               },
+              {
+                key: "source",
+                label: "Sumber Data",
+                render: (r) =>
+                  r.occupant ? (
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "2px 10px",
+                        borderRadius: 999,
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        background: r.occupant.source === "Manual" ? "#f3e8ff" : "#dbeafe",
+                        color: r.occupant.source === "Manual" ? "#6b21a8" : "#1e40af",
+                      }}
+                    >
+                      {r.occupant.source}
+                    </span>
+                  ) : (
+                    "-"
+                  ),
+                csvValue: (r) => r.occupant?.source ?? "-",
+              },
               { key: "order", label: "Order", render: (r) => r.occupant?.order || "-" },
               { key: "materialNumber", label: "Material Number", render: (r) => r.occupant?.materialNumber || "-" },
               { key: "materialDescription", label: "Material Description", render: (r) => r.occupant?.materialDescription || "-" },
               { key: "batch", label: "Batch", render: (r) => r.occupant?.batch || "-" },
               { key: "orderQty", label: "Qty/Liter", render: (r) => r.occupant?.orderQty || "-" },
+              { key: "pctGR", label: "% GR", render: (r) => r.occupant?.pctGR || "-" },
               {
                 key: "process",
                 label: "Proses",
@@ -291,6 +336,8 @@ export default function TankDashboardPage() {
           />
         </div>
       </div>
+        </>
+      )}
 
       {qcDetailOrder && (
         <Modal title={`Detail QC — Order ${qcDetailOrder}`} onClose={() => setQcDetailOrder(null)} width={720}>

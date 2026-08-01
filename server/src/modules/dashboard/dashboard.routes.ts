@@ -14,6 +14,7 @@ interface ProductionOrderRow {
   batch: string | null;
   orderQty: string | null;
   pctGR: string | null;
+  orderType: string | null;
   process: string;
   start: Date | null;
   finish: Date | null;
@@ -757,7 +758,7 @@ dashboardRouter.get(
 
     const rows: Omit<
       ProductionOrderRow,
-      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
+      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "orderType" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -874,7 +875,7 @@ dashboardRouter.get(
     const uniqueOrders = Array.from(latestByOrder.keys());
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: uniqueOrders } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true, orderType: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
@@ -948,6 +949,7 @@ dashboardRouter.get(
         materialDescription: master?.materialDescription ?? null,
         batch: master?.batch ?? null,
         pctGR: master?.pctGR ?? null,
+        orderType: master?.orderType ?? null,
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
@@ -999,6 +1001,7 @@ export interface TankStatusInfo {
     batch: string | null;
     orderQty: string | null;
     pctGR: string | null;
+    orderType: string | null;
     remark: string | null;
     process: string;
     start: Date | null;
@@ -1250,10 +1253,11 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
-    select: { order: true, materialDescription: true, pctGR: true },
+    select: { order: true, materialDescription: true, pctGR: true, orderType: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
   const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
+  const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
 
   // Dipakai BERSAMA oleh baris otomatis & baris "Input Manual" -- supaya
@@ -1289,6 +1293,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
           batch: manual.batch,
           orderQty: manual.orderQty,
           pctGR: pctGRByOrder.get(manual.order) ?? null,
+          orderType: orderTypeByOrder.get(manual.order) ?? null,
           remark: manual.remark,
           // "Proses"/"Production Actions" TETAP logika otomatis Order ybs
           // (2026-07-31, instruksi eksplisit user) -- "Manual" cuma nongol di
@@ -1334,6 +1339,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
               batch: touch.batch,
               orderQty: touch.orderQty,
               pctGR: pctGRByOrder.get(touch.order) ?? null,
+              orderType: orderTypeByOrder.get(touch.order) ?? null,
               remark: touch.remark,
               process: touch.process,
               start: touch.start,

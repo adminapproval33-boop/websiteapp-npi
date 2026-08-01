@@ -270,7 +270,17 @@ approvalRouter.get(
       take: 500,
     });
 
-    res.json({ success: true, data: rows });
+    // Order Type tidak disimpan di ApprovalSchedule (kolom ini baru ada di
+    // Master Data Cooispi) -- diambil live dari MasterOrder, sama pola dgn
+    // /queue di atas, supaya ikut ter-update kalau Master Data di-refresh.
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: rows.map((r) => r.order) } },
+      select: { order: true, orderType: true },
+    });
+    const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
+    const data = rows.map((r) => ({ ...r, orderType: orderTypeByOrder.get(r.order) ?? null }));
+
+    res.json({ success: true, data });
   })
 );
 

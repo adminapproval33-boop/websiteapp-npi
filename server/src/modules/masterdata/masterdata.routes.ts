@@ -253,6 +253,7 @@ masterDataRouter.post(
       warnaDasar: findColumn(headers, "warna dasar"),
       documentHeaderText: findColumn(headers, "document header text"),
       abcIndicator: findColumn(headers, "abc indicator"),
+      orderType: findColumn(headers, "order type"),
     };
 
     if (col.order === -1) {
@@ -292,6 +293,7 @@ masterDataRouter.post(
         warnaDasar: cell(row, col.warnaDasar),
         documentHeaderText: cell(row, col.documentHeaderText),
         abcIndicator: cell(row, col.abcIndicator),
+        orderType: cell(row, col.orderType),
       }))
       .filter((r) => r.order.length > 0);
 

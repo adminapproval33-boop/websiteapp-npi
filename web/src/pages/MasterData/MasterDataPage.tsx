@@ -28,6 +28,7 @@ interface MasterOrderRow {
   warnaDasar: string | null;
   documentHeaderText: string | null;
   abcIndicator: string | null;
+  orderType: string | null;
 }
 
 const ORDER_COLUMN_DEFS: { key: keyof MasterOrderRow; label: string }[] = [
@@ -55,6 +56,7 @@ const ORDER_COLUMN_DEFS: { key: keyof MasterOrderRow; label: string }[] = [
   { key: "warnaDasar", label: "WARNA DASAR" },
   { key: "documentHeaderText", label: "Document Header Text" },
   { key: "abcIndicator", label: "ABC Indicator" },
+  { key: "orderType", label: "Order Type" },
 ];
 
 const ORDER_COLUMNS = ORDER_COLUMN_DEFS.map((c) => ({

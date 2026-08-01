@@ -17,6 +17,7 @@ interface OpenApprovalRow {
   customer: string | null;
   custSegmen: string | null;
   techName: string | null;
+  orderType: string | null;
 }
 
 interface WorklistItem {
@@ -24,6 +25,7 @@ interface WorklistItem {
   order: string;
   batch: string;
   plant: string;
+  orderType: string;
   customer: string;
   sku: string;
   segment: string;
@@ -80,7 +82,7 @@ function fmt(n: number) {
 type ViewMode = "tech" | "sales" | "customer" | "segment";
 type ReadyFilter = "ALL" | "ready" | "wip" | "noown";
 type OwnerFilter = { role: "tech" | "sales"; name: string } | null;
-type SortKey = "plant" | "customer" | "order" | "batch" | "sku" | "qty" | "tech" | "sales" | "days" | "ready";
+type SortKey = "plant" | "customer" | "order" | "batch" | "orderType" | "sku" | "qty" | "tech" | "sales" | "days" | "ready";
 
 const LIST_VIEWS: ViewMode[] = ["customer", "segment"];
 const VIEW_LABEL: Record<ViewMode, string> = { tech: "Tech PIC", sales: "Sales PIC", customer: "Customer", segment: "Cust Segmen" };
@@ -89,6 +91,7 @@ const TABLE_COLS: { key: SortKey; label: string }[] = [
   { key: "customer", label: "Customer" },
   { key: "order", label: "Order" },
   { key: "batch", label: "Batch" },
+  { key: "orderType", label: "Order Type" },
   { key: "sku", label: "SKU / Colour" },
   { key: "qty", label: "Qty L" },
   { key: "tech", label: "Tech PIC" },
@@ -114,6 +117,7 @@ export default function OpenApprovalWorklist() {
         order: r.order,
         batch: r.batch?.trim() || "-",
         plant: r.plant?.trim() || "-",
+        orderType: r.orderType?.trim() || "-",
         customer: r.customer?.trim() || "UNKNOWN",
         sku: r.materialDescription?.trim() || r.materialNumber?.trim() || "-",
         segment: r.custSegmen?.trim() || "",
@@ -482,6 +486,7 @@ export default function OpenApprovalWorklist() {
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.order}</td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.batch}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.orderType}</td>
                     <td className="max-w-[280px] px-3 py-2">
                       <div className="truncate font-semibold text-slate-700">{d.sku}</div>
                       {d.segment && <small className="font-mono text-[0.65rem] text-slate-400">{d.segment}</small>}

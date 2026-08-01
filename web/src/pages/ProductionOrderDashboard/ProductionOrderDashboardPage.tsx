@@ -20,6 +20,7 @@ interface ProductionOrderRow {
   batch: string | null;
   orderQty: string | null;
   pctGR: string | null;
+  orderType: string | null;
   process: string;
   start: string | null;
   finish: string | null;
@@ -430,6 +431,7 @@ export default function ProductionOrderDashboardPage() {
             { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
             { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
             { key: "batch", label: "Batch", render: (r) => r.batch },
+            { key: "orderType", label: "Order Type", render: (r) => r.orderType ?? "-" },
             { key: "orderQty", label: "Qty/Liter", render: (r) => r.orderQty },
             { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki ?? "-" },
             { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },

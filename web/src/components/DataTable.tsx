@@ -143,6 +143,54 @@ export default function DataTable<T>({
     setSorting([]);
   }
 
+  // Kanvas offscreen dipakai cuma utk `measureText` (bukan ditampilkan) --
+  // dibuat sekali & disimpan di ref supaya double-click autofit berikutnya
+  // tidak bikin elemen baru tiap kali.
+  const measureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Tabel History/Master Data bisa berisi ratusan-ribuan baris (hasil import
+  // CSV) -- autofit tetap akurat utk mayoritas kasus walau cuma mengukur N
+  // baris pertama (variasi panjang teks per kolom biasanya kecil), jauh lebih
+  // cepat drpd mengukur semua baris sekaligus.
+  const AUTOFIT_SAMPLE_LIMIT = 3000;
+  const AUTOFIT_PADDING = 32;
+
+  /** Lebar kolom "pas isi" (dobel klik strip resize) -- mirip autofit lebar
+   * kolom di Excel. Dihitung dari lebar teks TERPANJANG (label header +
+   * isi kolom, pakai csvValue kalau ada spy konsisten dgn kolom yg cell-nya
+   * JSX/badge, sama pola dgn accessorFn di atas) via Canvas measureText,
+   * bukan dari DOM langsung -- supaya baris yg lagi di luar viewport
+   * (virtualized, belum ke-render ke DOM) tetap ikut terhitung. */
+  function autoFitColumn(columnId: string) {
+    const original = columns.find((c) => c.key === columnId);
+    if (!original) return;
+    if (!measureCanvasRef.current) measureCanvasRef.current = document.createElement("canvas");
+    const ctx = measureCanvasRef.current.getContext("2d");
+    if (!ctx) return;
+    const sampleCell = scrollRef.current?.querySelector("td, th");
+    ctx.font = sampleCell ? getComputedStyle(sampleCell).font : "13px sans-serif";
+
+    let maxWidth = ctx.measureText(original.label).width;
+    const sample = rows.length > AUTOFIT_SAMPLE_LIMIT ? rows.slice(0, AUTOFIT_SAMPLE_LIMIT) : rows;
+    for (const row of sample) {
+      let value: unknown;
+      if (original.csvValue) {
+        value = original.csvValue(row);
+      } else {
+        const rendered = original.render(row);
+        value = typeof rendered === "string" || typeof rendered === "number" ? rendered : "";
+      }
+      if (value == null || value === "") continue;
+      const w = ctx.measureText(String(value)).width;
+      if (w > maxWidth) maxWidth = w;
+    }
+
+    const columnDef = table.getColumn(columnId)?.columnDef;
+    const minSize = columnDef?.minSize ?? 60;
+    const maxSize = columnDef?.maxSize ?? 640;
+    const fitted = Math.min(maxSize, Math.max(minSize, Math.ceil(maxWidth + AUTOFIT_PADDING)));
+    setColumnSizing((old) => ({ ...old, [columnId]: fitted }));
+  }
+
   function handleDrop(targetColId: string) {
     if (!draggedCol || draggedCol === targetColId) return;
     setColumnOrder((old) => {
@@ -286,6 +334,11 @@ export default function DataTable<T>({
                   <div
                     onMouseDown={header.getResizeHandler()}
                     onTouchStart={header.getResizeHandler()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      autoFitColumn(header.column.id);
+                    }}
+                    title="Drag utk ubah lebar, dobel klik utk pas-kan otomatis ke isi kolom"
                     style={{
                       position: "absolute",
                       right: 0,

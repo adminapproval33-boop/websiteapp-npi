@@ -15,6 +15,7 @@ interface TankOccupant {
   batch: string | null;
   orderQty: string | null;
   pctGR: string | null;
+  orderType: string | null;
   remark: string | null;
   process: string;
   start: string | null;
@@ -252,6 +253,7 @@ export default function TankDashboardPage() {
               { key: "materialNumber", label: "Material Number", render: (r) => r.occupant?.materialNumber || "-" },
               { key: "materialDescription", label: "Material Description", render: (r) => r.occupant?.materialDescription || "-" },
               { key: "batch", label: "Batch", render: (r) => r.occupant?.batch || "-" },
+              { key: "orderType", label: "Order Type", render: (r) => r.occupant?.orderType || "-" },
               { key: "orderQty", label: "Qty/Liter", render: (r) => r.occupant?.orderQty || "-" },
               { key: "pctGR", label: "% GR", render: (r) => r.occupant?.pctGR || "-" },
               {

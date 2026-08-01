@@ -79,6 +79,7 @@ model MasterOrder {
   warnaDasar              String?
   documentHeaderText      String?
   abcIndicator            String?
+  orderType               String?
   updatedAt               DateTime @updatedAt
 
   @@index([materialNumber])

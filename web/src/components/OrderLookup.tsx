@@ -14,6 +14,10 @@ export interface OrderRefData {
   warnaDasar: string | null;
   /// Kolom "Volume" di Referensi Order/PO (SAP-COOISPI) -- dipakai utk saran "Volume" di Packing.
   volume: string | null;
+  /// Kolom "Order Type" di Referensi Order/PO (SAP-COOISPI) -- dipakai MaterialFlowPanel utk mengunci Simpan
+  /// Wajib/Tidak saat Order Type-nya RF01/RF02 (2026-08-03, instruksi eksplisit user). Optional (bukan semua
+  /// pemanggil OrderLookup.onFound peduli field ini, mis. loadIntoInput di halaman lain yg bikin objek manual).
+  orderType?: string | null;
 }
 
 /** Sel kosong di source SAP-COOISPI (setelah diproses macro Excel/VBA) sering

@@ -60,6 +60,25 @@ function toWibDateOnly(d: Date): Date {
   return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate()));
 }
 
+type ProduktivitasPeriod = "today" | "week" | "month" | "all";
+
+/** Batas awal periode (instant absolut), dihitung dari kalender WIB (Senin
+ * sbg awal minggu) -- dipakai utk filter `finish >= X` di Dashboard
+ * Produktivitas. `null` = "all" (tanpa batas bawah). */
+function periodStartInstant(period: ProduktivitasPeriod, now: Date): Date | null {
+  if (period === "all") return null;
+  const wib = new Date(now.getTime() + WIB_OFFSET_MS);
+  if (period === "today") {
+    return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate()) - WIB_OFFSET_MS);
+  }
+  if (period === "week") {
+    const dow = wib.getUTCDay(); // 0=Minggu
+    const diffToMonday = dow === 0 ? 6 : dow - 1;
+    return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate() - diffToMonday) - WIB_OFFSET_MS);
+  }
+  return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), 1) - WIB_OFFSET_MS);
+}
+
 /**
  * "Lead Time Proses": jumlah HARI KERJA (Senin-Jumat, Sabtu/Minggu TIDAK
  * dihitung) sejak Order ini PERTAMA KALI muncul di sistem (baris tercepat di
@@ -117,6 +136,24 @@ function colourMatchingProcessLabel(r: ColourMatchingStageFields): string {
   if (r.start && r.formReceived) return "Colour Matching";
   if (r.formReceived) return "QU - Colour Matching";
   return "-";
+}
+
+/**
+ * Label Proses Bongkaran (2026-08-03, instruksi eksplisit user) -- tahap ini
+ * SENGAJA TIDAK punya Start/Finish seperti tahap lain, cuma 2 milestone: Form
+ * Received (ditambahkan belakangan) & "Send To PQE" (datetime, kriteria
+ * "Selesai"). 3 state:
+ * - Belum ada Form Received -> "Bongkaran".
+ * - Form Received terisi, Send To PQE belum -> "QU - Bongkaran".
+ * - Send To PQE terisi -> "Produksi - PQE".
+ * Beda dari tahap lain, Bongkaran TIDAK ikut computeStages/"Proses Bar" (lihat
+ * catatan schema.prisma) -- fungsi ini HANYA dipakai utk kolom "Proses" (label
+ * status "sentuhan" paling akhir), bukan progres tahap resmi Material.
+ */
+function bongkaranProcessLabel(r: { formReceived: Date | null; sendToPqe: Date | null }): string {
+  if (r.sendToPqe) return "Produksi - PQE";
+  if (r.formReceived) return "QU - Bongkaran";
+  return "Bongkaran";
 }
 
 interface PremixStageFields {
@@ -340,7 +377,7 @@ dashboardRouter.get(
     // nyari 1 Order spesifik, supaya tahu SELURUH tahap yg pernah dikerjakan
     // utk Material Number Order itu, bukan cuma yg match teks pencarian.
     // Filter `search` dipindah ke Array.filter di `result` paling akhir.
-    const [premixAftermix, milling, colourMatching, packing, checkResults, approvals] = await Promise.all([
+    const [premixAftermix, milling, colourMatching, bongkaran, packing, checkResults, approvals] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         select: {
           order: true,
@@ -397,6 +434,19 @@ dashboardRouter.get(
           remark: true,
           timestamp: true,
           codeTanki: true,
+        },
+        orderBy: { timestamp: "desc" },
+        take: 500,
+      }),
+      prisma.bongkaranLog.findMany({
+        select: {
+          order: true,
+          orderQty: true,
+          materialNumber: true,
+          formReceived: true,
+          sendToPqe: true,
+          remark: true,
+          timestamp: true,
         },
         orderBy: { timestamp: "desc" },
         take: 500,
@@ -597,27 +647,96 @@ dashboardRouter.get(
       if (!latestAftermixByOrder.has(r.order)) latestAftermixByOrder.set(r.order, r);
     }
 
-    // Order yg ADA di Master Data Cooispi, Material Number-nya PERNAH py
-    // histori Premix, tapi BELUM PERNAH diinput ke Premix maupun tahap
-    // manapun setelahnya -- "PWO Schedule & Queue" Premix (lihat GET
-    // /premix-aftermix/premix-pwo-queue, filter-nya disamakan persis).
-    // Dipakai utk baris "QU - Premix" kolom "Proses" (2026-07-30, instruksi
-    // eksplisit user). BEDA dari queueMillingRows/dst -- sumbernya Master
-    // Data langsung (Premix tahap pertama, tidak py tahap sebelumnya), jadi
-    // perlu fetch TERSENDIRI di luar Promise.all utama -- SENGAJA difilter
-    // `materialNumber IN (...)` di level DB (bukan fetch semua ~500rb baris
-    // Master Data ke memory) supaya tetap ringan.
-    const allMasterOrders =
-      premixMaterials.size > 0
-        ? await prisma.masterOrder.findMany({
-            where: { materialNumber: { in: Array.from(premixMaterials) } },
-            select: { order: true, orderQty: true, materialNumber: true },
-          })
+    // Order yg ADA di Master Data Cooispi (bukan TECO/cancel, lihat filter
+    // %GR di bawah) tapi BELUM PERNAH diinput ke tahap manapun sama sekali --
+    // entry point umum dashboard ini ("QU - <Tahap>"). Ditambahkan 2026-08-02
+    // (instruksi eksplisit user) menyusul insiden histori dikosongkan total --
+    // sebelum ini titik masuk cuma menangani Premix dgn heuristik histori
+    // lama, jadi macet total begitu histori kosong DAN tidak pernah bisa
+    // menjangkau Material yg skip Premix & Milling (~55% menurut file resmi
+    // "ALL FLOW PROSES.xlsx", lihat queueMillingRows/dst yg semuanya rantai
+    // berurutan, butuh tahap sebelumnya SUDAH py baris log, bukan entry
+    // point). Tahap AWAL per Order dicari dari MaterialFlow (Premix ->
+    // Milling -> Aftermix -> Colour Matching, urutan resmi) lewat
+    // firstEntryStage di bawah -- Material yg TIDAK terdaftar di MaterialFlow
+    // DIKECUALIKAN total dari antrian ini (bukan ditebak "Premix" -- direvisi
+    // 2026-08-02, instruksi eksplisit user: menebak tahap Material yg
+    // sebenarnya tidak diketahui lebih menyesatkan drpd tidak ditampilkan).
+    //
+    // Filter %GR (2026-08-02, instruksi eksplisit user, DIREVISI dari versi
+    // pertama yg exclude semua %GR>95): SEKARANG %GR>95% (termasuk 100%,
+    // Order yg sudah selesai produksinya di SAP) TETAP ditampilkan -- HANYA
+    // sentinel TECO/cancel (%GR persis 9999%) yg dikecualikan, krn Order
+    // TECO/cancel itu bukan pekerjaan yg perlu diproses. %GR disimpan String
+    // (bukan numeric) di MasterOrder, tabelnya besar (~500rb baris) -- filter
+    // numeric HARUS di level DB lewat raw SQL (regexp_replace + cast), BUKAN
+    // fetch semua baris ke Node lalu filter di JS.
+    //
+    // Filter Basic Finish Date +/-90 hari dari hari ini (2026-08-02, instruksi
+    // eksplisit user, respons atas laporan dashboard jadi 50 ribu baris/~20
+    // detik begitu %GR>95% ikut ditampilkan): tanpa batas ini, ~475rb dari
+    // 531rb baris Master Data Basic Finish Date-nya SUDAH LEBIH dari 90 hari
+    // yg lalu (Order lama yg sudah tidak relevan lagi buat kerja harian) --
+    // dites beberapa lebar window (30/45/60/90 hari), +/-90 hari menghasilkan
+    // ~7rb baris (gabungan dgn filter %GR & MaterialFlow di atas), seimbang
+    // antara cakupan & performa. Basic Finish Date disimpan String format
+    // SAP "D-Mon-YY" (mis. "13-Nov-24") -- format-nya SUDAH divalidasi
+    // konsisten di seluruh 531rb baris (tidak ada NULL/format lain), tapi
+    // regex guard tetap dipasang spy import COOISPI di masa depan yg formatnya
+    // beda tidak bikin query ini error 500 (baris yg formatnya tidak
+    // dikenali otomatis dikecualikan, bukan bikin crash).
+    const activeMasterOrders = await prisma.$queryRaw<
+      { order: string; materialNumber: string | null; orderQty: string | null }[]
+    >`
+      SELECT "order", "materialNumber", "orderQty"
+      FROM "master_orders"
+      WHERE (regexp_replace(COALESCE("pctGR", ''), '[^0-9.]', '', 'g') = ''
+             OR regexp_replace("pctGR", '[^0-9.]', '', 'g')::numeric != 9999)
+        AND "basicFinishDate" ~ '^[0-9]{1,2}-[A-Za-z]{3}-[0-9]{2}$'
+        AND to_date("basicFinishDate", 'DD-Mon-YY')
+            BETWEEN CURRENT_DATE - INTERVAL '90 days' AND CURRENT_DATE + INTERVAL '90 days'
+    `;
+
+    const queueEntryMaterialNumbers = Array.from(
+      new Set(activeMasterOrders.map((r) => r.materialNumber).filter((v): v is string => v != null))
+    );
+    const queueEntryFlows =
+      queueEntryMaterialNumbers.length > 0
+        ? await prisma.materialFlow.findMany({ where: { materialNumber: { in: queueEntryMaterialNumbers } } })
         : [];
-    const queuePremixRows = allMasterOrders
+    const queueEntryFlowByNumber = new Map(queueEntryFlows.map((f) => [f.materialNumber, f]));
+
+    const ENTRY_STAGE_SEQUENCE = [
+      { key: "premixRequired" as const, label: "Premix" },
+      { key: "millingRequired" as const, label: "Milling" },
+      { key: "aftermixRequired" as const, label: "Aftermix" },
+      { key: "colourMatchingRequired" as const, label: "Colour Matching" },
+    ];
+
+    // `null` = Material belum terdaftar di MaterialFlow SAMA SEKALI --
+    // REVISI 2026-08-02 (instruksi eksplisit user, laporan Order dgn Material
+    // "6518TOSOVWHT" ikut nongol padahal tidak ada di Material Flow Proses):
+    // SEBELUMNYA fallback-nya "anggap saja Premix" (konservatif, niru pola
+    // fallback isStageRequiredForMaterial di stageGate.ts) -- TERNYATA itu
+    // salah utk kegunaan INI. Fallback stageGate.ts itu utk GERBANG (blokir
+    // input kalau prasyarat blm -DN, aman default ke "wajib"), sedangkan di
+    // SINI cuma utk kandidat visibilitas dashboard (bukan gerbang apa pun) --
+    // menampilkan tahap yg TIDAK PASTI kebenarannya (nebak "Premix" padahal
+    // sebenarnya tidak tahu apa2 soal Material ini) lebih menyesatkan drpd
+    // cuma tidak ditampilkan. Jadi SEKARANG: Material yg belum terdaftar =
+    // DIKECUALIKAN total dari antrian ini, BUKAN ditebak.
+    function firstEntryStage(materialNumber: string | null): string | null {
+      const flow = materialNumber ? queueEntryFlowByNumber.get(materialNumber) : undefined;
+      if (!flow) return null;
+      const found = ENTRY_STAGE_SEQUENCE.find((s) => flow[s.key]);
+      return found?.label ?? "QC";
+    }
+
+    const queuePremixRows = activeMasterOrders
+      .map((r) => ({ ...r, entryStage: firstEntryStage(r.materialNumber) }))
       .filter(
         (r) =>
-          r.materialNumber != null &&
+          r.entryStage !== null &&
           !premixOrders.has(r.order) &&
           !millingOrders.has(r.order) &&
           !aftermixOrders.has(r.order) &&
@@ -628,13 +747,12 @@ dashboardRouter.get(
       .map((r) => ({
         order: r.order,
         orderQty: r.orderQty,
-        process: "QU - Premix",
+        process: `QU - ${r.entryStage}`,
         start: null as Date | null,
         finish: null as Date | null,
         remark: null as string | null,
         codeTanki: null as string | null,
-        // Master Data tidak py timestamp yg bisa diandalkan (lihat komentar
-        // panjang di /premix-aftermix/premix-pwo-queue) -- SENGAJA pakai
+        // Master Data tidak py timestamp yg bisa diandalkan -- SENGAJA pakai
         // epoch (paling lama) supaya baris ini HANYA menang kalau memang
         // tidak ada histori produksi apa pun lagi utk Order ini (fallback
         // paling rendah prioritasnya, bukan yg paling baru).
@@ -800,6 +918,16 @@ dashboardRouter.get(
         timestamp: latestMoment(r.start, r.finish, r.timestamp),
       })),
       ...queueColourMatchingRows,
+      ...bongkaran.map((r) => ({
+        order: r.order,
+        orderQty: r.orderQty,
+        process: bongkaranProcessLabel(r),
+        start: r.formReceived,
+        finish: r.sendToPqe,
+        remark: r.remark,
+        codeTanki: null as string | null,
+        timestamp: latestMoment(r.formReceived, r.sendToPqe, r.timestamp),
+      })),
       ...checkResults.map((r) => {
         const rep = qcRepresentativeParam(r.parameters);
         // Label Proses QC direvisi TOTAL 2026-07-29 sesuai instruksi eksplisit
@@ -852,6 +980,7 @@ dashboardRouter.get(
       ...premixAftermix.map((r) => ({ order: r.order, createdAt: r.timestamp })),
       ...milling.map((r) => ({ order: r.order, createdAt: r.timestamp })),
       ...colourMatching.map((r) => ({ order: r.order, createdAt: r.timestamp })),
+      ...bongkaran.map((r) => ({ order: r.order, createdAt: r.timestamp })),
       ...packing.map((r) => ({ order: r.order, createdAt: r.timestamp })),
       ...checkResults.map((r) => ({ order: r.order, createdAt: r.timestamp })),
     ];
@@ -1048,7 +1177,7 @@ function parsePctGR(raw: string | null | undefined): number | null {
 }
 
 async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
-  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults, manualInputs] = await Promise.all([
+  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults, tankManualInputs, productionOrderManualInputs] = await Promise.all([
     prisma.masterTank.findMany({ orderBy: { code: "asc" } }),
     prisma.premixAftermixLog.findMany({
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
@@ -1124,18 +1253,60 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       },
     }),
     prisma.tankManualInput.findMany({ orderBy: { timestamp: "desc" } }),
+    // Code Tanki dari tombol "+Input Manual" (Dashboard > Production Order
+    // Monitoring, 2026-08-03, instruksi eksplisit user) -- disatukan ke Set
+    // "menang mutlak" yg SAMA dgn Input Manual Tank di bawah, supaya 1 input
+    // di modal itu otomatis ikut menandai tanki-nya "Terisi" di sini juga,
+    // tanpa perlu diisi 2x.
+    prisma.productionOrderManualInput.findMany({ where: { codeTanki: { not: null } }, orderBy: { timestamp: "desc" } }),
   ]);
 
   const packingOrders = new Set(packing.map((r) => r.order));
 
-  // Data "Input Manual" (tab terpisah di Dashboard > Tank Monitoring) MENANG
-  // drpd hasil hitungan otomatis (touches) -- sesuai instruksi eksplisit user
-  // (2026-07-31): dipakai justru utk kasus perhitungan otomatis KELIRU (mis.
-  // Order sudah "Done"/"Teco" jadi otomatis dianggap kosong, padahal aktualnya
-  // masih terisi), jadi manual harus bisa menimpa. Ambil PALING BARU per Code
-  // Tanki (manualInputs sudah diurutkan timestamp desc).
-  const latestManualByTank = new Map<string, (typeof manualInputs)[number]>();
-  for (const m of manualInputs) {
+  interface ManualTankEntry {
+    codeTanki: string;
+    order: string;
+    materialNumber: string | null;
+    materialDescription: string | null;
+    batch: string | null;
+    orderQty: string | null;
+    remark: string | null;
+    timestamp: Date;
+  }
+
+  // Data "Input Manual" Tank Monitoring DAN Code Tanki dari "+Input Manual"
+  // Production Order Monitoring -- KEDUANYA MENANG mutlak drpd hasil hitungan
+  // otomatis (touches), sesuai instruksi eksplisit user (2026-07-31 utk Tank,
+  // disatukan 2026-08-03): dipakai justru utk kasus perhitungan otomatis
+  // KELIRU (mis. Order sudah "Done"/"Teco" jadi otomatis dianggap kosong,
+  // padahal aktualnya masih terisi), jadi manual harus bisa menimpa. Kalau
+  // kedua sumber py entri utk Code Tanki yg sama, yg PALING BARU (timestamp)
+  // menang, lintas kedua sumber -- bukan salah satu sumber otomatis diprioritaskan.
+  const unifiedManualEntries: ManualTankEntry[] = [
+    ...tankManualInputs.map((m) => ({
+      codeTanki: m.codeTanki,
+      order: m.order,
+      materialNumber: m.materialNumber,
+      materialDescription: m.materialDescription,
+      batch: m.batch,
+      orderQty: m.orderQty,
+      remark: m.remark,
+      timestamp: m.timestamp,
+    })),
+    ...productionOrderManualInputs.map((m) => ({
+      codeTanki: m.codeTanki as string,
+      order: m.order,
+      materialNumber: m.materialNumber,
+      materialDescription: m.materialDescription,
+      batch: null as string | null,
+      orderQty: m.orderQty,
+      remark: null as string | null,
+      timestamp: m.timestamp,
+    })),
+  ];
+  unifiedManualEntries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  const latestManualByTank = new Map<string, ManualTankEntry>();
+  for (const m of unifiedManualEntries) {
     if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
   }
 
@@ -1359,6 +1530,205 @@ dashboardRouter.get(
   asyncRoute(async (req, res) => {
     const map = await buildTankStatusMap();
     res.json({ success: true, data: Array.from(map.values()) });
+  })
+);
+
+export interface MesinStatusInfo {
+  code: string;
+  lokasi: string | null;
+  status: "occupied" | "idle";
+  occupant: {
+    order: string;
+    materialNumber: string | null;
+    materialDescription: string | null;
+    batch: string | null;
+    orderQty: string | null;
+    start: Date | null;
+    finish: Date | null;
+    since: Date;
+  } | null;
+}
+
+/**
+ * Status okupansi tiap Code Mesin (Dashboard > Mesin Monitoring, 2026-08-02,
+ * instruksi eksplisit user) -- sumbernya `codeMesin` di MillingLog (SATU2NYA
+ * modul yg py field ini), beda dari buildTankStatusMap yg lintas banyak
+ * modul. Per Code Mesin, ambil baris MillingLog PALING BARU (moment =
+ * finish ?? start ?? timestamp) -- mesin dianggap "occupied" SELAMA baris
+ * itu belum py Finish (masih berjalan), "idle" kalau Finish sudah terisi
+ * atau mesin itu belum pernah tersentuh sama sekali. Versi pertama sengaja
+ * disederhanakan (tidak ikut aturan %GR/Packing-freeing spt Tank) krn siklus
+ * pakai 1 mesin Milling jauh lebih pendek/lokal drpd siklus 1 Order lintas
+ * banyak tahap.
+ */
+async function buildMesinStatusMap(): Promise<Map<string, MesinStatusInfo>> {
+  const [mesinList, millingRows] = await Promise.all([
+    prisma.masterMesin.findMany({ orderBy: { code: "asc" } }),
+    prisma.millingLog.findMany({
+      select: {
+        order: true,
+        materialNumber: true,
+        materialDescription: true,
+        batch: true,
+        orderQty: true,
+        codeMesin: true,
+        start: true,
+        finish: true,
+        timestamp: true,
+      },
+    }),
+  ]);
+
+  const latestByMesin = new Map<string, (typeof millingRows)[number] & { moment: Date }>();
+  for (const r of millingRows) {
+    if (!r.codeMesin) continue;
+    const moment = latestMoment(r.start, r.finish, r.timestamp);
+    const existing = latestByMesin.get(r.codeMesin);
+    if (!existing || moment.getTime() > existing.moment.getTime()) latestByMesin.set(r.codeMesin, { ...r, moment });
+  }
+
+  const map = new Map<string, MesinStatusInfo>();
+  for (const mesin of mesinList) {
+    const touch = latestByMesin.get(mesin.code);
+    const occupied = Boolean(touch) && !touch!.finish;
+    map.set(mesin.code, {
+      code: mesin.code,
+      lokasi: mesin.lokasi,
+      status: occupied ? "occupied" : "idle",
+      occupant:
+        occupied && touch
+          ? {
+              order: touch.order,
+              materialNumber: touch.materialNumber,
+              materialDescription: touch.materialDescription,
+              batch: touch.batch,
+              orderQty: touch.orderQty,
+              start: touch.start,
+              finish: touch.finish,
+              since: touch.moment,
+            }
+          : null,
+    });
+  }
+  return map;
+}
+
+dashboardRouter.get(
+  "/mesin-status",
+  asyncRoute(async (req, res) => {
+    const map = await buildMesinStatusMap();
+    res.json({ success: true, data: Array.from(map.values()) });
+  })
+);
+
+const UNKNOWN_PLANT_LABEL = "Tidak Diketahui";
+
+/** Dashboard > Dashboard Produktivitas (2026-08-02, instruksi eksplisit
+ * user, versi pertama "sesuai dengan data yang sudah ada sekarang"):
+ * 1) Produktivitas tim per IU Plant -- dihitung dari JUMLAH BARIS yg SUDAH
+ *    py Finish di tiap tabel modul (Premix/Aftermix dibedakan dari
+ *    `section`), difilter periode (Hari Ini/Minggu Ini/Bulan Ini/Semua)
+ *    berdasar tanggal Finish, dikelompokkan per IU Plant. SATUANNYA JUMLAH
+ *    ORDER/BATCH SELESAI, BUKAN Kg/Liter -- tiap modul input (Premix/
+ *    Aftermix/Milling/Colour Matching/Packing) otomatis masuk mode Edit
+ *    (timpa baris lama, bukan bikin baris baru) begitu Order yg sama
+ *    diketik ulang (lihat POST/PUT di masing2 *.routes.ts), jadi pada
+ *    praktiknya 1 baris = 1 Order, BUKAN 1 Order bisa py banyak baris.
+ * 2) Okupansi Tanki per Plant -- reuse buildTankStatusMap() (sumber SAMA dgn
+ *    Dashboard > Tank Monitoring), dikelompokkan per `locationPlant` Master
+ *    Data Tanki, dihitung Kosong/Terisi/% Terisi.
+ * IU Plant/Plant kosong ("" atau null) dikelompokkan ke "Tidak Diketahui"
+ * (BUKAN dibuang), supaya total baris tetap cocok dgn jumlah data aslinya.
+ */
+async function buildProduktivitasData(period: ProduktivitasPeriod) {
+  const periodStart = periodStartInstant(period, new Date());
+  const finishWhere = periodStart ? { finish: { not: null, gte: periodStart } } : { finish: { not: null } };
+
+  const [premixRows, aftermixRows, millingRows, colourRows, packingRows, tankMap] = await Promise.all([
+    prisma.premixAftermixLog.groupBy({ by: ["iuPlant"], where: { section: "PREMIX", ...finishWhere }, _count: { _all: true } }),
+    prisma.premixAftermixLog.groupBy({ by: ["iuPlant"], where: { section: "AFTERMIX", ...finishWhere }, _count: { _all: true } }),
+    prisma.millingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
+    prisma.colourMatchingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
+    prisma.packingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
+    buildTankStatusMap(),
+  ]);
+
+  // Normalisasi kapitalisasi ("IU Plant 1" vs "IU PLANT 1") -- data iuPlant
+  // hasil ketik manual di modul2 produksi TIDAK konsisten huruf besar/kecil,
+  // kalau tidak dinormalisasi Plant yg sama pecah jadi >1 baris di tabel
+  // (ditemukan saat verifikasi 2026-08-02: "IU Plant 1" & "IU PLANT 1" jadi
+  // baris terpisah). Master Data Tanki (locationPlant) sudah konsisten
+  // UPPERCASE, jadi normalisasi ini aman dipakai bareng utk keduanya.
+  const plantKey = (v: string | null | undefined) => (v && v.trim() ? v.trim().toUpperCase() : UNKNOWN_PLANT_LABEL);
+
+  interface ProduktivitasRow {
+    iuPlant: string;
+    premix: number;
+    milling: number;
+    aftermix: number;
+    colourMatching: number;
+    packing: number;
+  }
+  const byPlant = new Map<string, ProduktivitasRow>();
+  function ensure(plant: string): ProduktivitasRow {
+    let row = byPlant.get(plant);
+    if (!row) {
+      row = { iuPlant: plant, premix: 0, milling: 0, aftermix: 0, colourMatching: 0, packing: 0 };
+      byPlant.set(plant, row);
+    }
+    return row;
+  }
+  for (const r of premixRows) ensure(plantKey(r.iuPlant)).premix += r._count._all;
+  for (const r of aftermixRows) ensure(plantKey(r.iuPlant)).aftermix += r._count._all;
+  for (const r of millingRows) ensure(plantKey(r.iuPlant)).milling += r._count._all;
+  for (const r of colourRows) ensure(plantKey(r.iuPlant)).colourMatching += r._count._all;
+  for (const r of packingRows) ensure(plantKey(r.iuPlant)).packing += r._count._all;
+
+  const productivity = Array.from(byPlant.values())
+    .map((r) => ({ ...r, total: r.premix + r.milling + r.aftermix + r.colourMatching + r.packing }))
+    .sort((a, b) => b.total - a.total);
+
+  // Label "Tanki Atas"/"Tanki Bawah" (2026-08-02, instruksi eksplisit user):
+  // sebelumnya digabung 1 baris per Plant, tapi Tanki Atas & Tanki Bawah itu
+  // dua populasi tanki yg beda (IU PLANT 2 py 320 TB + 150 TA se-DB), jadi
+  // qty-nya kelihatan kebesaran/menyesatkan kalau dicampur -- dipisah jadi 1
+  // baris per (Plant, TA/TB) di sini.
+  const TA_TB_LABEL: Record<string, string> = { TA: "Tanki Atas", TB: "Tanki Bawah" };
+  const taTbLabel = (v: string | null) => TA_TB_LABEL[(v ?? "").trim().toUpperCase()] ?? "Tidak Diketahui";
+
+  const tankByPlant = new Map<string, { plant: string; tipeTanki: string; total: number; terisi: number }>();
+  for (const t of tankMap.values()) {
+    const plant = plantKey(t.locationPlant);
+    const tipeTanki = taTbLabel(t.taTb);
+    const key = `${plant}|${tipeTanki}`;
+    const row = tankByPlant.get(key) ?? { plant, tipeTanki, total: 0, terisi: 0 };
+    row.total += 1;
+    if (t.status === "occupied") row.terisi += 1;
+    tankByPlant.set(key, row);
+  }
+  const tankOccupancy = Array.from(tankByPlant.values())
+    .map((r) => ({
+      plant: r.plant,
+      tipeTanki: r.tipeTanki,
+      total: r.total,
+      terisi: r.terisi,
+      kosong: r.total - r.terisi,
+      percentTerisi: r.total > 0 ? Math.round((r.terisi / r.total) * 100) : 0,
+    }))
+    .sort((a, b) => a.plant.localeCompare(b.plant) || a.tipeTanki.localeCompare(b.tipeTanki));
+
+  return { productivity, tankOccupancy };
+}
+
+dashboardRouter.get(
+  "/produktivitas",
+  asyncRoute(async (req, res) => {
+    const raw = String(req.query.period ?? "month");
+    const period: ProduktivitasPeriod = (["today", "week", "month", "all"] as const).includes(raw as ProduktivitasPeriod)
+      ? (raw as ProduktivitasPeriod)
+      : "month";
+    const data = await buildProduktivitasData(period);
+    res.json({ success: true, data: { period, ...data } });
   })
 );
 

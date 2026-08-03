@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
+import MesinSelect from "../../components/MesinSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
@@ -10,6 +11,7 @@ import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 /** Lebar kolom label "Pass N" di tabel Fineness/Visco/Suhu -- TIDAK resizable
  * oleh user (tetap konstan), tapi didaftarkan sbg entry biasa di
@@ -307,9 +309,10 @@ export default function MillingPage({
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "milling") === "VIEW";
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
@@ -652,9 +655,11 @@ export default function MillingPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            Input Milling
-          </button>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              Input Milling
+            </button>
+          )}
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             History
           </button>
@@ -705,7 +710,14 @@ export default function MillingPage({
                   <TankSelect bare id="milling-tank-2" value={form.codeTanki2} onChange={(v) => setForm({ ...form, codeTanki2: v })} required={false} />
                 </ExcelField>
                 <ExcelField label="Code Mesin" widthPx={colWidths.codeMesin} onResizeStart={beginResize("codeMesin")}>
-                  <input value={form.codeMesin} onChange={(e) => setForm({ ...form, codeMesin: e.target.value })} onBlur={checkMachineRecord} />
+                  <MesinSelect
+                    bare
+                    id="milling-mesin"
+                    value={form.codeMesin}
+                    onChange={(v) => setForm({ ...form, codeMesin: v })}
+                    onBlur={checkMachineRecord}
+                    required={false}
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>

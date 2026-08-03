@@ -7,6 +7,7 @@ interface AuthContextValue {
   login: (nik: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   markPasswordResetDone: () => void;
+  updateAvatar: (avatarPath: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -41,7 +42,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: res.name,
       department: res.department,
       access: res.access,
+      hiddenMenus: res.hiddenMenus,
+      viewOnlyMenus: res.viewOnlyMenus,
       mustResetPassword: res.mustResetPassword,
+      avatarPath: res.avatarPath,
     };
     saveSession(session);
     setUser(session);
@@ -65,9 +69,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const updateAvatar = useCallback((avatarPath: string | null) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, avatarPath };
+      saveSession(next);
+      return next;
+    });
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, login, logout, markPasswordResetDone }),
-    [user, loading, login, logout, markPasswordResetDone]
+    () => ({ user, loading, login, logout, markPasswordResetDone, updateAvatar }),
+    [user, loading, login, logout, markPasswordResetDone, updateAvatar]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

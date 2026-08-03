@@ -11,6 +11,7 @@ import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 /** Portal Quality Control > Input Admin QC (2026-07-28) -- header administratif
  * tahap QC (Admin QC Stage/Lot Passed/QC to App/QC Passed) disimpan di tabel
@@ -172,8 +173,9 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
 
 export default function AdminQcPage() {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "adminQc") === "VIEW";
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [params, setParams] = useState<ParamRow[]>([]);
   const [checkPassthrough, setCheckPassthrough] = useState<CheckPassthrough>(emptyCheckPassthrough);
@@ -430,9 +432,11 @@ export default function AdminQcPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Input Admin QC
-        </button>
+        {!isViewOnly && (
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Input Admin QC
+          </button>
+        )}
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
         </button>

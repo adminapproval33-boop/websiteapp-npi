@@ -6,7 +6,6 @@ import Modal from "../../components/Modal";
 import ProcessBadge from "../../components/ProcessBadge";
 import { formatDateTime } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
-import TankManualInputTab from "./TankManualInputTab";
 
 interface TankOccupant {
   order: string;
@@ -92,7 +91,6 @@ function formatDuration(since: string): string {
 }
 
 export default function TankDashboardPage() {
-  const [tab, setTab] = useState<"monitoring" | "manual">("monitoring");
   const [search, setSearch] = useState("");
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
@@ -156,19 +154,6 @@ export default function TankDashboardPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "monitoring" ? "" : "btn-outline"}`} onClick={() => setTab("monitoring")}>
-          Monitoring Tanki
-        </button>
-        <button className={`btn ${tab === "manual" ? "" : "btn-outline"}`} onClick={() => setTab("manual")}>
-          Input Manual
-        </button>
-      </div>
-
-      {tab === "manual" && <TankManualInputTab />}
-
-      {tab === "monitoring" && (
-        <>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <KpiCard label="Total Tank" value={rows.length} color="var(--navy-light)" />
         <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
@@ -338,8 +323,6 @@ export default function TankDashboardPage() {
           />
         </div>
       </div>
-        </>
-      )}
 
       {qcDetailOrder && (
         <Modal title={`Detail QC — Order ${qcDetailOrder}`} onClose={() => setQcDetailOrder(null)} width={720}>

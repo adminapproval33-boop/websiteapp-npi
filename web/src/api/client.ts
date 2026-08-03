@@ -9,7 +9,15 @@ export interface StoredSession {
   name: string;
   department: string;
   access: "INPUT" | "VIEW" | "FULL_ACCESS";
+  /** Key menu (lihat lib/menuAccess.ts di server) yg user ini TIDAK PUNYA
+   * akses SAMA SEKALI -- dipakai utk sembunyikan item menu dari sidebar
+   * (2026-08-03, instruksi eksplisit user). */
+  hiddenMenus: string[];
+  /** Key menu yg user ini cuma bisa lihat History/Queue (tab Input
+   * disembunyikan di halaman terkait) -- lihat lib/menuAccess.ts. */
+  viewOnlyMenus: string[];
   mustResetPassword: boolean;
+  avatarPath?: string | null;
 }
 
 export function loadSession(): StoredSession | null {

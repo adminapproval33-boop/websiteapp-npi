@@ -13,6 +13,7 @@ import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/
 import { openCheckSheetPrintWindow } from "../../lib/printCheckSheet";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 interface ParamRow {
   no: number;
@@ -209,9 +210,10 @@ export default function CheckResultsPage({
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "checkResults") === "VIEW";
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [params, setParams] = useState<ParamRow[]>([]);
   const [specStatus, setSpecStatus] = useState<"idle" | "loading" | "found" | "not-found">("idle");
@@ -481,9 +483,11 @@ export default function CheckResultsPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            {editingCheckId ? "Edit Check Results" : "Input Check Results"}
-          </button>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              {editingCheckId ? "Edit Check Results" : "Input Check Results"}
+            </button>
+          )}
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             History
           </button>

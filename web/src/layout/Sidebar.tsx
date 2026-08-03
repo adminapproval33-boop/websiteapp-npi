@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { MenuNode, menuTree } from "./menu";
+import { MenuNode, menuTree, filterHiddenMenus } from "./menu";
 
 function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => void }) {
   if (node.type === "leaf") {
@@ -24,7 +24,10 @@ function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => v
  * sidebar selalu tampil sbg rail statis (lihat class `.sidebar` di app.css). */
 export default function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const { user } = useAuth();
-  const visibleNodes = menuTree.filter((node) => !(node.type === "group" && node.fullAccessOnly) || user?.access === "FULL_ACCESS");
+  const visibleNodes = filterHiddenMenus(
+    menuTree.filter((node) => !(node.type === "group" && node.fullAccessOnly) || user?.access === "FULL_ACCESS"),
+    user
+  );
 
   return (
     <nav className={"sidebar" + (open ? " open" : "")}>

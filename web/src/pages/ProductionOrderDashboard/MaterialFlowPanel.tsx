@@ -50,6 +50,8 @@ const STAGE_ROWS: { name: string; field: FlowField; mandatory?: boolean }[] = [
 export default function MaterialFlowPanel({
   materialNumber,
   stages,
+  orderType,
+  order,
   onFlowSaved,
   onOpenStage,
 }: {
@@ -57,6 +59,22 @@ export default function MaterialFlowPanel({
   /** Dari `r.stages` baris Dashboard -- HANYA berisi tahap yg SAAT INI
    * wajib (hasil MaterialFlow terkini), dipakai utk status Selesai/Belum. */
   stages: { name: string; done: boolean }[];
+  /** Kolom "Order Type" Order ini dari Referensi Order/PO (SAP-COOISPI)
+   * (2026-08-03, instruksi eksplisit user) -- Order dgn Order Type RF01/RF02
+   * TIDAK BOLEH mengubah Master Data Material Flow Proses dari popup ini
+   * (checkbox "Wajib?" tetap bisa dicentang utk lihat tampilan, tapi tombol
+   * Simpan dikunci) krn Master Data Material Flow berlaku global utk SEMUA
+   * Order dgn Material Number yg sama, sedangkan RF01/RF02 adalah kasus
+   * khusus per-Order (rework/return) yg tidak boleh ikut mengubah baku utk
+   * Order normal lain. */
+  orderType?: string | null;
+  /** Nomor Order (2026-08-03, instruksi eksplisit user: tampilkan baris
+   * "Bongkaran" di tabel ini) -- HANYA dipakai utk lookup status Bongkaran
+   * Order ini sendiri (GET /bongkaran/latest-by-order), TIDAK dipakai field
+   * lain di panel ini. Optional krn 1 pemanggil (preview Material Number di
+   * ManualInputModal) belum py Order spesifik -- baris Bongkaran otomatis
+   * disembunyikan kalau prop ini kosong. */
+  order?: string | null;
   /** Dipanggil setelah edit "Wajib?" berhasil disimpan -- dipakai pemanggil
    * utk refresh data Dashboard (Proses Bar bisa berubah). */
   onFlowSaved?: () => void;
@@ -68,6 +86,7 @@ export default function MaterialFlowPanel({
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const canEdit = user?.access === "FULL_ACCESS";
+  const isRfOrder = orderType === "RF01" || orderType === "RF02";
   const [checked, setChecked] = useState<Record<FlowField, boolean> | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -79,6 +98,20 @@ export default function MaterialFlowPanel({
         .get<{ success: boolean; data: MaterialFlowRow | null }>(`/master-data/material-flow/${encodeURIComponent(materialNumber!)}`)
         .then((r) => r.data),
     enabled: !!materialNumber,
+  });
+
+  /// Status "Bongkaran" Order ini sendiri -- BEDA dari `stages` prop (yg
+  /// datang dari MaterialFlow/Proses Bar), krn Bongkaran sengaja tidak ikut
+  /// sistem itu (lihat catatan `order` prop di atas).
+  const bongkaranQuery = useQuery({
+    queryKey: ["bongkaran-latest-by-order", order],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { sendToPqe: string | null } | null }>(
+          `/bongkaran/latest-by-order/${encodeURIComponent(order!)}`
+        )
+        .then((r) => r.data),
+    enabled: !!order,
   });
 
   useEffect(() => {
@@ -125,13 +158,127 @@ export default function MaterialFlowPanel({
     return blocking?.name ?? null;
   }
 
+  function renderStageRow(s: (typeof STAGE_ROWS)[number]) {
+    const isRequired = checked![s.field];
+    const done = statusByName.get(s.name);
+    return (
+      <tr key={s.field}>
+        <td>{s.name}</td>
+        <td>
+          <input
+            type="checkbox"
+            checked={isRequired}
+            disabled={!canEdit || s.mandatory || !materialNumber}
+            title={
+              s.mandatory
+                ? "Wajib mutlak utk semua Material, tidak bisa diubah"
+                : !materialNumber
+                ? "Material Number belum diketahui, tidak bisa disimpan"
+                : undefined
+            }
+            onChange={(e) => setChecked((c) => (c ? { ...c, [s.field]: e.target.checked } : c))}
+          />
+        </td>
+        <td>
+          {!isRequired ? (
+            <span style={{ color: "var(--text-muted)" }}>Tidak Wajib</span>
+          ) : done === undefined ? (
+            <span style={{ color: "var(--text-muted)" }}>—</span>
+          ) : done ? (
+            <span className="status-text">Selesai</span>
+          ) : (
+            <span className="error-text">Belum</span>
+          )}
+        </td>
+        <td>
+          {onOpenStage && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+              title={`Buka Input ${s.name}`}
+              onClick={() => {
+                const blocking = findBlockingStage(s.name);
+                if (blocking) {
+                  window.alert(`Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa input ${s.name}.`);
+                  return;
+                }
+                onOpenStage(s.name);
+              }}
+            >
+              Buka Input ➜
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
+  /** Baris "Bongkaran" (2026-08-03, instruksi eksplisit user) -- SENGAJA
+   * TIDAK pakai renderStageRow di atas (beda struktur total: tidak ada
+   * checkbox Wajib/Tidak krn tidak terhubung Master Data Material Flow
+   * Proses sama sekali, status Selesai/Belum-nya dari GET
+   * /bongkaran/latest-by-order, bukan dari `stages` prop). Cuma tampil kalau
+   * `order` diketahui (lihat catatan prop di atas). */
+  function renderBongkaranRow() {
+    if (!order) return null;
+    return (
+      <tr key="bongkaran">
+        <td>Bongkaran</td>
+        <td>
+          <span
+            style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}
+            title='Bongkaran tidak terhubung ke Master Data Material Flow Proses -- selalu tersedia utk Order manapun, tidak ada konsep "Wajib/Tidak" per Material.'
+          >
+            -
+          </span>
+        </td>
+        <td>
+          {bongkaranQuery.isLoading ? (
+            <span style={{ color: "var(--text-muted)" }}>—</span>
+          ) : bongkaranQuery.data?.sendToPqe ? (
+            <span className="status-text">Selesai</span>
+          ) : (
+            <span className="error-text">Belum</span>
+          )}
+        </td>
+        <td>
+          {onOpenStage && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+              title="Buka Input Bongkaran"
+              onClick={() => onOpenStage("Bongkaran")}
+            >
+              Buka Input ➜
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <div className="panel" style={{ marginBottom: 16 }}>
       <div className="panel-header">
         Info Proses Material{materialNumber ? ` — ${materialNumber}` : ""}
       </div>
       <div className="panel-body">
-        {!materialNumber && <p style={{ color: "var(--text-muted)" }}>Material Number Order ini belum diketahui.</p>}
+        {isRfOrder && (
+          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
+            Order Type Order ini <strong>{orderType}</strong> -- centang "Wajib?" di tabel ini cuma tampilan
+            sementara utk Order ini sendiri, TIDAK akan mengubah Master Data Material Flow Proses (yg berlaku utk
+            SEMUA Order dgn Material Number yang sama).
+          </p>
+        )}
+        {!materialNumber && (
+          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
+            Material Number Order ini belum diketahui (Order tidak terdaftar di Master Data Referensi Order/PO) --
+            tabel tahap di bawah tetap bisa dipakai utk buka Input tiap proses, tapi centang "Wajib?" tidak bisa
+            disimpan permanen sampai Material Number-nya diketahui.
+          </p>
+        )}
         {materialNumber && flowQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
         {materialNumber && !flowQuery.isLoading && !flowQuery.data && (
           <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
@@ -139,7 +286,7 @@ export default function MaterialFlowPanel({
             sampai dicentang &amp; disimpan di sini (kecuali QC/Packing, selalu wajib).
           </p>
         )}
-        {materialNumber && checked && (
+        {checked && (
           <>
             <div style={{ overflowX: "auto" }}>
               <table className="data-table">
@@ -152,61 +299,24 @@ export default function MaterialFlowPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {STAGE_ROWS.map((s) => {
-                    const isRequired = checked[s.field];
-                    const done = statusByName.get(s.name);
-                    return (
-                      <tr key={s.field}>
-                        <td>{s.name}</td>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={isRequired}
-                            disabled={!canEdit || s.mandatory}
-                            title={s.mandatory ? "Wajib mutlak utk semua Material, tidak bisa diubah" : undefined}
-                            onChange={(e) => setChecked((c) => (c ? { ...c, [s.field]: e.target.checked } : c))}
-                          />
-                        </td>
-                        <td>
-                          {!isRequired ? (
-                            <span style={{ color: "var(--text-muted)" }}>Tidak Wajib</span>
-                          ) : done === undefined ? (
-                            <span style={{ color: "var(--text-muted)" }}>—</span>
-                          ) : done ? (
-                            <span className="status-text">Selesai</span>
-                          ) : (
-                            <span className="error-text">Belum</span>
-                          )}
-                        </td>
-                        <td>
-                          {onOpenStage && (
-                            <button
-                              type="button"
-                              className="btn btn-outline"
-                              style={{ padding: "3px 10px", fontSize: "0.78rem" }}
-                              title={`Buka Input ${s.name}`}
-                              onClick={() => {
-                                const blocking = findBlockingStage(s.name);
-                                if (blocking) {
-                                  window.alert(
-                                    `Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa input ${s.name}.`
-                                  );
-                                  return;
-                                }
-                                onOpenStage(s.name);
-                              }}
-                            >
-                              Buka Input ➜
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {STAGE_ROWS.slice(0, 4).map(renderStageRow)}
+                  {renderBongkaranRow()}
+                  {STAGE_ROWS.slice(4).map(renderStageRow)}
                 </tbody>
               </table>
             </div>
-            {canEdit ? (
+            {isRfOrder ? (
+              <p style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                Simpan Perubahan Wajib/Tidak dikunci utk Order Type {orderType} -- pengaturan Wajib/Tidak baku utk
+                Material ini hanya bisa diubah lewat Order dgn Order Type normal, atau langsung di Master Data &gt;
+                Material Flow Proses.
+              </p>
+            ) : !materialNumber ? (
+              <p style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                Pengaturan "Wajib?" baru bisa disimpan begitu Material Number Order ini diketahui (mis. setelah
+                terisi lewat salah satu form Input di atas).
+              </p>
+            ) : canEdit ? (
               <>
                 {error && <p className="error-text">{error}</p>}
                 {message && <p className="status-text">{message}</p>}

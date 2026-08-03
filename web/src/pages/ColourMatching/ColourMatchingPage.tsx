@@ -11,6 +11,7 @@ import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../
 import { computeFormPerMan } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
  * user pernah drag-resize (lihat lib/useResizableColWidths). */
@@ -26,6 +27,7 @@ const COLOUR_MATCHING_COL_DEFAULT_WIDTHS: Record<string, number> = {
   typesOfProducts: 220,
   baseColor: 200,
   spvName: 170,
+  spvColourMatching: 170,
   leaderName: 170,
   formReceived: 190,
   start: 190,
@@ -40,7 +42,7 @@ const COLOUR_MATCHING_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription"],
   ["batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki", "typesOfProducts", "baseColor"],
-  ["spvName", "leaderName", "formReceived", "start", "finish", "formPerMan"],
+  ["spvName", "spvColourMatching", "leaderName", "formReceived", "start", "finish", "formPerMan"],
   ["member"],
 ];
 
@@ -83,6 +85,7 @@ interface HistoryRow {
   start: string | null;
   finish: string | null;
   spvName: string;
+  spvColourMatching: string | null;
   leaderName: string | null;
   members: string[] | null;
   remark: string | null;
@@ -106,6 +109,7 @@ const emptyForm = {
   start: "",
   finish: "",
   spvName: "",
+  spvColourMatching: "",
   leaderName: "",
   members: [] as string[],
   remark: "",
@@ -124,9 +128,10 @@ export default function ColourMatchingPage({
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "colourMatching") === "VIEW";
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
@@ -251,6 +256,7 @@ export default function ColourMatchingPage({
           return {
             ...f,
             spvName: f.spvName || latest.spvName || "",
+            spvColourMatching: f.spvColourMatching || latest.spvColourMatching || "",
             leaderName: f.leaderName || latest.leaderName || "",
             members,
             typesOfProducts: f.typesOfProducts || latest.typesOfProducts || "",
@@ -341,6 +347,7 @@ export default function ColourMatchingPage({
       start: row.start ?? "",
       finish: row.finish ?? "",
       spvName: row.spvName,
+      spvColourMatching: row.spvColourMatching ?? "",
       leaderName: row.leaderName ?? "",
       members: row.members ?? [],
       remark: row.remark ?? "",
@@ -386,6 +393,10 @@ export default function ColourMatchingPage({
       setError("SPV Produksi tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
     }
+    if (!isKnownEmployeeName(employees, form.spvColourMatching)) {
+      setError("SPV Colour Matching tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
     if (!isKnownEmployeeName(employees, form.leaderName)) {
       setError("Leader tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
@@ -428,9 +439,11 @@ export default function ColourMatchingPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            Input Colour Matching
-          </button>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              Input Colour Matching
+            </button>
+          )}
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             History
           </button>
@@ -489,6 +502,15 @@ export default function ColourMatchingPage({
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
                   <EmployeeNameSelect bare id="colour-matching-spv" value={form.spvName} onChange={(v) => setForm({ ...form, spvName: v })} required />
+                </ExcelField>
+                <ExcelField label="SPV Colour Matching" widthPx={colWidths.spvColourMatching} onResizeStart={beginResize("spvColourMatching")}>
+                  <EmployeeNameSelect
+                    bare
+                    id="colour-matching-spv-cm"
+                    value={form.spvColourMatching}
+                    onChange={(v) => setForm({ ...form, spvColourMatching: v })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
                   <EmployeeNameSelect bare id="colour-matching-leader" value={form.leaderName} onChange={(v) => setForm({ ...form, leaderName: v })} required />
@@ -632,6 +654,12 @@ export default function ColourMatchingPage({
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "spvName", label: "SPV Produksi", render: (r) => r.spvName },
                 { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvName)?.employeeId },
+                { key: "spvColourMatching", label: "SPV Colour Matching", render: (r) => r.spvColourMatching },
+                {
+                  key: "spvColourMatchingEmployeeId",
+                  label: "SPV Colour Matching Employee ID",
+                  render: (r) => findEmployee(r.spvColourMatching)?.employeeId,
+                },
                 { key: "leaderName", label: "Leader", render: (r) => r.leaderName },
                 { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leaderName)?.employeeId },
                 {

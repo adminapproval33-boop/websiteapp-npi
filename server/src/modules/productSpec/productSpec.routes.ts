@@ -2,10 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 
 export const productSpecRouter = Router();
 productSpecRouter.use(requireAuth);
+productSpecRouter.use(requireMenuView("productSpec"));
 
 const parameterSchema = z.object({
   no: z.number().int(),
@@ -82,6 +83,7 @@ productSpecRouter.get(
 productSpecRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("productSpec"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {

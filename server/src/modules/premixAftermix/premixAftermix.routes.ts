@@ -1,10 +1,11 @@
-import { Router } from "express";
+import { Router, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
+import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -75,9 +76,10 @@ const saveSchema = z
 /// diisi (SPV Produksi, Leader, Member, Start, Finish, dst) langsung muncul.
 premixAftermixRouter.get(
   "/latest-by-order/:order",
-  asyncRoute(async (req, res) => {
+  asyncRoute(async (req: AuthedRequest, res) => {
     const order = String(req.params.order).trim();
     const section = sectionEnum.safeParse(req.query.section);
+    if (section.success && !checkSectionMenuView(req, res, section.data)) return;
     const latest = await prisma.premixAftermixLog.findFirst({
       where: { order, ...(section.success ? { section: section.data } : {}) },
       orderBy: { timestamp: "desc" },
@@ -113,6 +115,7 @@ premixAftermixRouter.get(
  */
 premixAftermixRouter.get(
   "/premix-pwo-queue",
+  requireMenuView("premix"),
   asyncRoute(async (_req, res) => {
     const [masterOrders, premixLogs, millingOrders, aftermixOrders, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
       prisma.masterOrder.findMany({
@@ -238,6 +241,7 @@ function isMillingDone(r: {
  */
 premixAftermixRouter.get(
   "/aftermix-pwo-queue",
+  requireMenuView("aftermix"),
   asyncRoute(async (_req, res) => {
     const [millingLogs, aftermixLogs, colourMatchingOrders, approvalOrders, packingOrders] = await Promise.all([
       prisma.millingLog.findMany({ orderBy: { timestamp: "desc" } }),
@@ -329,8 +333,9 @@ premixAftermixRouter.get(
 
 premixAftermixRouter.get(
   "/history",
-  asyncRoute(async (req, res) => {
+  asyncRoute(async (req: AuthedRequest, res) => {
     const section = sectionEnum.safeParse(req.query.section);
+    if (section.success && !checkSectionMenuView(req, res, section.data)) return;
     const rows = await prisma.premixAftermixLog.findMany({
       where: section.success ? { section: section.data } : undefined,
       orderBy: { timestamp: "desc" },
@@ -341,6 +346,39 @@ premixAftermixRouter.get(
   })
 );
 
+/** Section ("PREMIX"/"AFTERMIX") -> key View/Input/Hide (2026-08-03,
+ * instruksi eksplisit user) -- router ini dipakai BERSAMA utk 2 menu
+ * berbeda, jadi key-nya tergantung `section` di body/query, bukan statis spt
+ * modul lain (tidak bisa pakai requireMenuView/requireMenuInput sbg
+ * middleware biasa KECUALI di route yg section-nya sudah pasti dari path,
+ * lihat /premix-pwo-queue & /aftermix-pwo-queue di atas). */
+function sectionMenuKey(section: "PREMIX" | "AFTERMIX") {
+  return section === "PREMIX" ? ("premix" as const) : ("aftermix" as const);
+}
+
+/** Gerbang GET (History/latest-by-order) -- blokir HANYA kalau level-nya "HIDE". */
+function checkSectionMenuView(req: AuthedRequest, res: Response, section: "PREMIX" | "AFTERMIX"): boolean {
+  const menuKey = sectionMenuKey(section);
+  if (getMenuLevel(req.auth!, menuKey) === "HIDE") {
+    res.status(403).json({ success: false, message: `Akses ditolak. Akun Anda tidak memiliki akses ke menu ${MENU_LABELS[menuKey]}.` });
+    return false;
+  }
+  return true;
+}
+
+/** Gerbang POST/PUT/attachments -- blokir kalau level-nya "VIEW" ATAU "HIDE". */
+function checkSectionMenuInput(req: AuthedRequest, res: Response, section: "PREMIX" | "AFTERMIX"): boolean {
+  const menuKey = sectionMenuKey(section);
+  if (getMenuLevel(req.auth!, menuKey) !== "INPUT") {
+    res.status(403).json({
+      success: false,
+      message: `Akses ditolak. Akun Anda dibatasi utk menu ${MENU_LABELS[menuKey]} (cuma bisa lihat, tidak bisa input).`,
+    });
+    return false;
+  }
+  return true;
+}
+
 premixAftermixRouter.post(
   "/",
   requireWrite,
@@ -350,6 +388,7 @@ premixAftermixRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
     // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Aftermix
     // baru boleh diinput kalau prasyaratnya (Milling, atau Premix kalau
     // Milling di-skip utk Material ini menurut MaterialFlow) sudah "-DN".
@@ -379,12 +418,13 @@ premixAftermixRouter.post(
 premixAftermixRouter.put(
   "/:id",
   requireWrite,
-  asyncRoute(async (req, res) => {
+  asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
     const id = Number(req.params.id);
     const existing = await prisma.premixAftermixLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");
@@ -416,6 +456,7 @@ premixAftermixRouter.post(
     const logId = Number(req.params.id);
     const log = await prisma.premixAftermixLog.findUnique({ where: { id: logId } });
     if (!log) throw new HttpError(404, "Data Premix/Aftermix tidak ditemukan.");
+    if (!checkSectionMenuInput(req, res, log.section)) return;
     if (!req.file) throw new HttpError(400, "File wajib diunggah.");
 
     const attachment = await prisma.premixAftermixAttachment.create({

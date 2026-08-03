@@ -28,7 +28,19 @@ model User {
   department        String
   passwordHash      String
   access            AccessLevel @default(INPUT)
+  /// Level akses per-menu (lihat lib/menuAccess.ts, MENU_KEYS) -- generalisasi
+  /// dari `restrictedMenus` lama, 3 level per menu (2026-08-03, instruksi
+  /// eksplisit user): default (tidak ada di kedua array ini) = INPUT (akses
+  /// penuh), ada di `viewOnlyMenus` = VIEW (cuma bisa lihat History/Queue,
+  /// tidak bisa Save), ada di `hiddenMenus` = HIDE (menu hilang dari sidebar,
+  /// GET/POST-nya ditolak total). TIDAK berlaku utk FULL_ACCESS (lihat
+  /// requireMenuView/requireMenuInput di middleware/auth.ts) -- murni utk
+  /// user INPUT/VIEW biasa.
+  hiddenMenus       String[] @default([])
+  viewOnlyMenus     String[] @default([])
   mustResetPassword Boolean  @default(false)
+  /// Pathname foto avatar di Vercel Blob (private), diisi lewat menu Settings > Profil.
+  avatarPath        String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   sessions          Session[]
@@ -102,6 +114,20 @@ model MasterTank {
   @@map("master_tanks")
 }
 
+/// Master Data > Daftar Code Mesin (2026-08-02, instruksi eksplisit user,
+/// sumber pertama file "list mesin.xlsx" -- Code Mesin Milling + Lokasi).
+/// Dipakai Dashboard > Mesin Monitoring utk daftar mesin resmi (join by
+/// `code` ke `codeMesin` di MillingLog), sama polanya dgn MasterTank utk
+/// Tank Monitoring.
+model MasterMesin {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  lokasi    String?
+  updatedAt DateTime @updatedAt
+
+  @@map("master_mesin")
+}
+
 /// Master rute proses per Material Number (menu Master Data > Material Flow
 /// Proses, sumbernya file "ALL FLOW PROSES.xlsx" -- 2026-07-31, instruksi
 /// eksplisit user). Menjawab "tahap mana saja yg WAJIB dilalui Material ini"
@@ -149,6 +175,34 @@ model TankManualInput {
 
   @@index([codeTanki])
   @@map("tank_manual_inputs")
+}
+
+/// Dashboard > Production Order Monitoring > tombol "+Input Manual" (2026-08-03,
+/// instruksi eksplisit user) -- catatan manual TERPISAH dari perhitungan otomatis
+/// tabel Production Order Monitoring, dipakai kalau ada Order yang datanya belum/
+/// tidak lengkap secara otomatis. Sama konsepnya dgn TankManualInput, tapi tampil
+/// di modal tersendiri (bukan digabung ke tabel utama, karena tabel utama dihitung
+/// dari rangkaian tahap proses yang kompleks & tidak relevan utk catatan manual ini).
+model ProductionOrderManualInput {
+  id                  String    @id @default(uuid())
+  timestamp           DateTime  @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  orderQty            String?
+  plant               String?
+  iuPlant             String?
+  codeTanki           String?
+  start               DateTime?
+  finish              DateTime?
+  spvProduksi         String
+  leader              String?
+  /// array nama anggota, mis. ["Budi","Sari"]
+  members             Json?
+  inputBy             String
+
+  @@index([order])
+  @@map("production_order_manual_inputs")
 }
 
 /// Data karyawan (menu Master Data > Employee Data). Diisi lewat import
@@ -284,6 +338,10 @@ model ColourMatchingLog {
   start               DateTime?
   finish              DateTime?
   spvName             String
+  /// SPV Colour Matching (2026-08-03, instruksi eksplisit user) -- nullable
+  /// di DB supaya baris histori lama (sebelum kolom ini ada) tidak pecah,
+  /// tapi WAJIB diisi utk save baru/edit lewat validasi Zod di route.
+  spvColourMatching   String?
   leaderName          String?
   /// array nama anggota, mis. ["Budi","Sari"] (gaya Premix/Aftermix)
   members             Json?
@@ -308,6 +366,60 @@ model ColourMatchingAttachment {
 
   @@index([order])
   @@map("colour_matching_attachments")
+}
+
+/// Production & MRP Schedule > Bongkaran (2026-08-03, instruksi eksplisit
+/// user) -- tahap ke-5 dlm urutan proses (setelah Colour Matching), TAPI
+/// SENGAJA TIDAK terhubung ke Master Data > Material Flow Proses/stageGate.ts
+/// sama sekali (bukan tahap wajib/opsional per Material, tidak ada gerbang
+/// prasyarat) -- logikanya sama spt pop-up "Input Manual": bebas diisi kapan
+/// saja, tidak mengubah/dicek dari Master Data. Field jauh lebih ringkas dari
+/// tahap lain (tanpa IU Plant/Code Tanki/Start/Finish) sesuai layout form yg
+/// diminta user -- "Send To PQE" (datetime) adalah SATU-SATUNYA milestone:
+/// begitu terisi, kolom "Proses" di Production Order Monitoring berubah jadi
+/// "Produksi - PQE" (lihat bongkaranProcessLabel di dashboard.routes.ts).
+model BongkaranLog {
+  id                  Int      @id @default(autoincrement())
+  timestamp           DateTime @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  orderQty            String?
+  plant               String?
+  spvName             String
+  leaderName          String?
+  /// array nama anggota, mis. ["Budi","Sari"] (gaya Premix/Aftermix/Colour Matching)
+  members             Json?
+  /// Milestone AWAL (2026-08-03, instruksi eksplisit user) -- ditambahkan
+  /// belakangan, menyusul field "Send To PQE" yg sudah ada duluan. TIDAK
+  /// mengubah kriteria "Selesai" Bongkaran (tetap murni dari sendToPqe, lihat
+  /// MaterialFlowPanel.tsx/bongkaranProcessLabel di dashboard.routes.ts) --
+  /// cuma milestone tambahan spy konsisten dgn pola Form Received di semua
+  /// tahap lain (Premix/Milling/Aftermix/Colour Matching).
+  formReceived        DateTime?
+  sendToPqe           DateTime?
+  remark              String?
+  inputBy             String
+  attachments         BongkaranAttachment[]
+
+  @@index([order])
+  @@map("bongkaran_logs")
+}
+
+model BongkaranAttachment {
+  id         Int           @id @default(autoincrement())
+  order      String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime      @default(now())
+  logId      Int?
+  log        BongkaranLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([order])
+  @@map("bongkaran_attachments")
 }
 
 /// Planning Schedule > Packing.

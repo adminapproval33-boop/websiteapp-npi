@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { hashPassword } from "../../lib/password";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { MENU_KEYS } from "../../lib/menuAccess";
 
 export const usersRouter = Router();
 
@@ -14,7 +15,7 @@ usersRouter.get(
   asyncRoute(async (_req, res) => {
     const users = await prisma.user.findMany({
       orderBy: { name: "asc" },
-      select: { nik: true, name: true, department: true, access: true },
+      select: { nik: true, name: true, department: true, access: true, hiddenMenus: true, viewOnlyMenus: true },
     });
     res.json({ success: true, data: users });
   })
@@ -22,13 +23,29 @@ usersRouter.get(
 
 const accessEnum = z.enum(["INPUT", "VIEW", "FULL_ACCESS"]);
 
-const createUserSchema = z.object({
-  nik: z.string().trim().min(1),
-  name: z.string().trim().min(1),
-  department: z.string().trim().min(1),
-  password: z.string().min(6, "Password minimal 6 karakter."),
-  access: accessEnum,
-});
+const menuListSchema = z.array(z.enum(MENU_KEYS)).optional();
+
+/** 1 menu tidak boleh ada di `hiddenMenus` DAN `viewOnlyMenus` sekaligus --
+ * dropdown per-menu di frontend cuma 1 pilihan jadi seharusnya tidak pernah
+ * terjadi, tapi tetap divalidasi di sini (bukan cuma dipercaya dari client). */
+function noOverlap(data: { hiddenMenus?: string[]; viewOnlyMenus?: string[] }, ctx: z.RefinementCtx) {
+  const overlap = (data.hiddenMenus ?? []).filter((k) => (data.viewOnlyMenus ?? []).includes(k));
+  if (overlap.length > 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["hiddenMenus"], message: `Menu ${overlap.join(", ")} tidak boleh Hide dan View sekaligus.` });
+  }
+}
+
+const createUserSchema = z
+  .object({
+    nik: z.string().trim().min(1),
+    name: z.string().trim().min(1),
+    department: z.string().trim().min(1),
+    password: z.string().min(6, "Password minimal 6 karakter."),
+    access: accessEnum,
+    hiddenMenus: menuListSchema,
+    viewOnlyMenus: menuListSchema,
+  })
+  .superRefine(noOverlap);
 
 usersRouter.post(
   "/",
@@ -38,7 +55,7 @@ usersRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    const { nik, name, department, password, access } = parsed.data;
+    const { nik, name, department, password, access, hiddenMenus, viewOnlyMenus } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { nik } });
     if (existing) {
@@ -47,19 +64,32 @@ usersRouter.post(
     }
 
     await prisma.user.create({
-      data: { nik, name, department, access, passwordHash: hashPassword(password), mustResetPassword: false },
+      data: {
+        nik,
+        name,
+        department,
+        access,
+        hiddenMenus: hiddenMenus ?? [],
+        viewOnlyMenus: viewOnlyMenus ?? [],
+        passwordHash: hashPassword(password),
+        mustResetPassword: false,
+      },
     });
 
     res.status(201).json({ success: true, message: "User successfully created." });
   })
 );
 
-const updateUserSchema = z.object({
-  name: z.string().trim().min(1),
-  department: z.string().trim().min(1),
-  access: accessEnum,
-  password: z.string().min(6).optional().or(z.literal("")),
-});
+const updateUserSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    department: z.string().trim().min(1),
+    access: accessEnum,
+    password: z.string().min(6).optional().or(z.literal("")),
+    hiddenMenus: menuListSchema,
+    viewOnlyMenus: menuListSchema,
+  })
+  .superRefine(noOverlap);
 
 usersRouter.put(
   "/:nik",
@@ -76,13 +106,15 @@ usersRouter.put(
       return;
     }
 
-    const { name, department, access, password } = parsed.data;
+    const { name, department, access, password, hiddenMenus, viewOnlyMenus } = parsed.data;
     await prisma.user.update({
       where: { nik },
       data: {
         name,
         department,
         access,
+        hiddenMenus: hiddenMenus ?? [],
+        viewOnlyMenus: viewOnlyMenus ?? [],
         ...(password ? { passwordHash: hashPassword(password), mustResetPassword: false } : {}),
       },
     });

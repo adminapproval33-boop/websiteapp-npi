@@ -11,6 +11,7 @@ import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 interface ApprovalRow {
   approvalId: string;
@@ -169,9 +170,10 @@ export default function ApprovalPage({
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "approval") === "VIEW";
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -430,9 +432,11 @@ export default function ApprovalPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            Input Approval
-          </button>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              Input Approval
+            </button>
+          )}
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             Lot History
           </button>

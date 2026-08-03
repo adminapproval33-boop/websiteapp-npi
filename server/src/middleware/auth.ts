@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { SessionError, validateSession } from "../lib/session";
+import { MENU_LABELS, MenuKey, getMenuLevel } from "../lib/menuAccess";
 
 export interface AuthedRequest extends Request {
   auth?: {
@@ -8,7 +9,10 @@ export interface AuthedRequest extends Request {
     name: string;
     department: string;
     access: "INPUT" | "VIEW" | "FULL_ACCESS";
+    hiddenMenus: string[];
+    viewOnlyMenus: string[];
     mustResetPassword: boolean;
+    avatarPath: string | null;
   };
 }
 
@@ -35,7 +39,10 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
       name: user.name,
       department: user.department,
       access: user.access,
+      hiddenMenus: user.hiddenMenus,
+      viewOnlyMenus: user.viewOnlyMenus,
       mustResetPassword: user.mustResetPassword,
+      avatarPath: user.avatarPath,
     };
     next();
   } catch (err) {
@@ -61,6 +68,52 @@ export function requireWrite(req: AuthedRequest, res: Response, next: NextFuncti
     return;
   }
   next();
+}
+
+/** Blokir SEMUA akses (baca & tulis) ke menu `menuKey` utk user yg level-nya
+ * "HIDE" (2026-08-03, instruksi eksplisit user: level View/Input/Hide per
+ * menu -- generalisasi dari `requireMenuAccess`/`restrictedMenus` lama).
+ * Dipasang di `router.use()` PALING ATAS tiap modul (setelah requireAuth)
+ * supaya berlaku ke SEMUA route termasuk GET (History/Queue) -- level "HIDE"
+ * artinya menu itu seolah tidak pernah ada utk user ybs, sinkron dgn menu
+ * itu yg juga disembunyikan dari sidebar (lihat frontend menu.tsx). */
+export function requireMenuView(menuKey: MenuKey) {
+  return function (req: AuthedRequest, res: Response, next: NextFunction) {
+    if (!req.auth) {
+      res.status(401).json({ success: false, message: "Sesi tidak valid." });
+      return;
+    }
+    if (getMenuLevel(req.auth, menuKey) === "HIDE") {
+      res.status(403).json({
+        success: false,
+        message: `Akses ditolak. Akun Anda tidak memiliki akses ke menu ${MENU_LABELS[menuKey]}.`,
+      });
+      return;
+    }
+    next();
+  };
+}
+
+/** Blokir INPUT (Save) ke menu `menuKey` utk user yg level-nya "VIEW" ATAU
+ * "HIDE" (level "INPUT" = satu-satunya yg lolos) -- dipasang KHUSUS di route
+ * POST/PUT/upload-attachment tiap modul (bukan GET, itu urusan
+ * requireMenuView di atas). Akses menu LAIN tetap jalan apa adanya. FULL_ACCESS
+ * SELALU lolos (lihat getMenuLevel) -- ini murni utk staf INPUT/VIEW biasa. */
+export function requireMenuInput(menuKey: MenuKey) {
+  return function (req: AuthedRequest, res: Response, next: NextFunction) {
+    if (!req.auth) {
+      res.status(401).json({ success: false, message: "Sesi tidak valid." });
+      return;
+    }
+    if (getMenuLevel(req.auth, menuKey) !== "INPUT") {
+      res.status(403).json({
+        success: false,
+        message: `Akses ditolak. Akun Anda dibatasi utk menu ${MENU_LABELS[menuKey]} (cuma bisa lihat, tidak bisa input).`,
+      });
+      return;
+    }
+    next();
+  };
 }
 
 /** Wajib Full Access (User Management, edit/hapus data master, dsb). */

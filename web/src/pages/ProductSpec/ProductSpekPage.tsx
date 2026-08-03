@@ -5,6 +5,7 @@ import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 interface SpecParameter {
   no: number;
@@ -89,8 +90,9 @@ const emptyForm = { materialNumber: "", materialDescription: "", information: ""
 
 export default function ProductSpekPage() {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "productSpec") === "VIEW";
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history">("input");
+  const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [params, setParams] = useState<SpecParameter[]>([emptyParam(1)]);
   const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
@@ -254,9 +256,11 @@ export default function ProductSpekPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          {editingSpecId ? "Edit Spec" : "Creating Product Spek"}
-        </button>
+        {!isViewOnly && (
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            {editingSpecId ? "Edit Spec" : "Creating Product Spek"}
+          </button>
+        )}
         <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
           History
         </button>

@@ -6,6 +6,8 @@ import { createSession, revokeSession } from "../../lib/session";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth, AuthedRequest } from "../../middleware/auth";
 import { clearFailures, isLocked, registerFailure } from "../../lib/loginAttempts";
+import { createImageUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { HttpError } from "../../middleware/errorHandler";
 
 export const authRouter = Router();
 
@@ -53,7 +55,10 @@ authRouter.post(
       name: user.name,
       department: user.department,
       access: user.access,
+      hiddenMenus: user.hiddenMenus,
+      viewOnlyMenus: user.viewOnlyMenus,
       mustResetPassword: user.mustResetPassword,
+      avatarPath: user.avatarPath,
     });
   })
 );
@@ -114,5 +119,19 @@ authRouter.post(
       data: { passwordHash: hashPassword(parsed.data.newPassword), mustResetPassword: false },
     });
     res.json({ success: true, message: "Password berhasil diubah." });
+  })
+);
+
+const avatarUpload = createImageUploader(3);
+
+authRouter.post(
+  "/avatar",
+  requireAuth,
+  avatarUpload.single("avatar"),
+  asyncRoute(async (req: AuthedRequest, res) => {
+    if (!req.file) throw new HttpError(400, "File foto wajib diunggah.");
+    const avatarPath = await uploadToBlob("avatars", req.file);
+    await prisma.user.update({ where: { nik: req.auth!.nik }, data: { avatarPath } });
+    res.json({ success: true, message: "Foto avatar berhasil diperbarui.", avatarPath });
   })
 );

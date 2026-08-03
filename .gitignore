@@ -5,3 +5,4 @@ server/data/uploads/*
 !server/data/uploads/.gitkeep
 .claude/
 *.tsbuildinfo
+backups/

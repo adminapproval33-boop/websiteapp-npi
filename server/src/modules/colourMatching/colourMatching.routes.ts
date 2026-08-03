@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 
 export const colourMatchingRouter = Router();
 colourMatchingRouter.use(requireAuth);
+colourMatchingRouter.use(requireMenuView("colourMatching"));
 
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database -- Prisma
@@ -41,6 +42,7 @@ const saveSchema = z
     start: optionalDate,
     finish: optionalDate,
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
+    spvColourMatching: z.string().trim().min(1, "Nama SPV Colour Matching wajib diisi."),
     leaderName: z.string().trim().min(1, "Nama Leader wajib diisi."),
     members: z.array(z.string()).optional(),
     remark: z.string().optional(),
@@ -207,6 +209,7 @@ colourMatchingRouter.get(
 colourMatchingRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("colourMatching"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -239,6 +242,7 @@ colourMatchingRouter.post(
 colourMatchingRouter.put(
   "/:id",
   requireWrite,
+  requireMenuInput("colourMatching"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -271,6 +275,7 @@ const upload = createUploader();
 colourMatchingRouter.post(
   "/:id/attachments",
   requireWrite,
+  requireMenuInput("colourMatching"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const logId = Number(req.params.id);

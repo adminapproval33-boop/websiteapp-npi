@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { checkQcGate } from "../../lib/stageGate";
 
 export const checkResultsRouter = Router();
 checkResultsRouter.use(requireAuth);
+checkResultsRouter.use(requireMenuView("checkResults"));
 
 // Transform ke `null` (bukan `undefined`) supaya Item Check yang Start/Finish-nya
 // belum diisi tetap boleh disimpan -- frontend selalu mengirim "" (bukan
@@ -135,6 +136,7 @@ checkResultsRouter.get(
 checkResultsRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("checkResults"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -171,6 +173,7 @@ checkResultsRouter.post(
 checkResultsRouter.put(
   "/:checkId",
   requireWrite,
+  requireMenuInput("checkResults"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -212,6 +215,7 @@ const upload = createUploader();
 checkResultsRouter.post(
   "/:checkId/appearance-files",
   requireWrite,
+  requireMenuInput("checkResults"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const checkId = req.params.checkId;

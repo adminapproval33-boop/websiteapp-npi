@@ -1,4 +1,6 @@
 import { ReactNode } from "react";
+import { StoredSession } from "../api/client";
+import { MENU_KEY_BY_PATH, getMenuLevel } from "../lib/menuAccess";
 import UserManagementPage from "../pages/Users/UserManagementPage";
 import MasterDataPage from "../pages/MasterData/MasterDataPage";
 import HomePage from "../pages/Home/HomePage";
@@ -6,6 +8,7 @@ import ComingSoonPage from "../pages/ComingSoon/ComingSoonPage";
 import PremixAftermixPage from "../pages/PremixAftermix/PremixAftermixPage";
 import MillingPage from "../pages/Milling/MillingPage";
 import ColourMatchingPage from "../pages/ColourMatching/ColourMatchingPage";
+import BongkaranPage from "../pages/Bongkaran/BongkaranPage";
 import PackingPage from "../pages/Packing/PackingPage";
 import ProductSpekPage from "../pages/ProductSpec/ProductSpekPage";
 import CheckResultsPage from "../pages/CheckResults/CheckResultsPage";
@@ -14,6 +17,8 @@ import ApprovalPage from "../pages/Approval/ApprovalPage";
 import ApprovalDashboardPage from "../pages/ApprovalDashboard/ApprovalDashboardPage";
 import ProductionOrderDashboardPage from "../pages/ProductionOrderDashboard/ProductionOrderDashboardPage";
 import TankDashboardPage from "../pages/TankDashboard/TankDashboardPage";
+import ProduktivitasDashboardPage from "../pages/ProduktivitasDashboard/ProduktivitasDashboardPage";
+import MesinDashboardPage from "../pages/MesinDashboard/MesinDashboardPage";
 
 export interface MenuLeaf {
   type: "leaf";
@@ -46,15 +51,18 @@ const OUT_OF_SCOPE =
 
 export const menuTree: MenuNode[] = [
   group("Dashboard", [
+    leaf("Dashboard Produktivitas", "/dashboard/produktivitas", <ProduktivitasDashboardPage />),
+    leaf("Dashboard Approval", "/dashboard/approval", <ApprovalDashboardPage />),
     leaf("Production Order Monitoring", "/dashboard/production-order", <ProductionOrderDashboardPage />),
     leaf("Tank Monitoring", "/dashboard/tank", <TankDashboardPage />),
-    leaf("Approval", "/dashboard/approval", <ApprovalDashboardPage />),
+    leaf("Mesin Monitoring", "/dashboard/mesin", <MesinDashboardPage />),
   ]),
   group("Production & MRP Schedule", [
     leaf("Premix", "/planning/premix", <PremixAftermixPage section="PREMIX" title="Premix" />),
     leaf("Milling", "/planning/milling", <MillingPage />),
     leaf("Aftermix", "/planning/aftermix", <PremixAftermixPage section="AFTERMIX" title="Aftermix" />),
     leaf("Colour Matching", "/planning/colour-matching", <ColourMatchingPage />),
+    leaf("Bongkaran", "/planning/bongkaran", <BongkaranPage />),
     leaf("Approval", "/planning/approval", <ApprovalPage />),
     leaf("Packing", "/planning/packing", <PackingPage />),
   ]),
@@ -83,6 +91,26 @@ export const menuTree: MenuNode[] = [
 ];
 
 export const homeRoute = leaf("Beranda", "/", <HomePage />);
+
+/** Hilangkan item sidebar yg level aksesnya "HIDE" utk user ybs (2026-08-03,
+ * instruksi eksplisit user) -- grup yg SEMUA child-nya ikut hilang otomatis
+ * ikut disembunyikan juga (drpd nampilin grup expandable kosong). Leaf yg
+ * path-nya tidak terdaftar di MENU_KEY_BY_PATH (Dashboard, Developer Tools,
+ * dst -- belum py konsep View/Input/Hide) selalu lolos apa adanya. */
+export function filterHiddenMenus(nodes: MenuNode[], user: StoredSession | null): MenuNode[] {
+  const result: MenuNode[] = [];
+  for (const node of nodes) {
+    if (node.type === "leaf") {
+      const key = MENU_KEY_BY_PATH[node.path];
+      if (key && getMenuLevel(user, key) === "HIDE") continue;
+      result.push(node);
+    } else {
+      const children = filterHiddenMenus(node.children, user);
+      if (children.length > 0) result.push({ ...node, children });
+    }
+  }
+  return result;
+}
 
 export function flattenLeaves(nodes: MenuNode[]): MenuLeaf[] {
   const result: MenuLeaf[] = [];

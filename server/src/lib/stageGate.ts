@@ -91,13 +91,6 @@ export async function hasAdminQcApprovalType(order: string): Promise<boolean> {
   return latest?.typeLot === "Approval" || latest?.typeLot === "Joint Lot";
 }
 
-/** Order-nya sudah py QC Passed di Admin QC -- gerbang wajib SEBELUM baris
- * Packing baru boleh dibuat (sama persis syarat "List Antrian Packing"). */
-export async function hasAdminQcQcPassed(order: string): Promise<boolean> {
-  const latest = await prisma.adminQc.findFirst({ where: { order }, orderBy: { timestamp: "desc" }, select: { qcPassed: true } });
-  return latest?.qcPassed != null;
-}
-
 type FlowStage = "premix" | "milling" | "aftermix" | "colourMatching";
 
 const STAGE_LABEL: Record<FlowStage, string> = {

@@ -8,10 +8,13 @@ import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/
 import PremixAftermixPage from "../PremixAftermix/PremixAftermixPage";
 import MillingPage from "../Milling/MillingPage";
 import ColourMatchingPage from "../ColourMatching/ColourMatchingPage";
+import BongkaranPage from "../Bongkaran/BongkaranPage";
 import CheckResultsPage from "../CheckResults/CheckResultsPage";
 import ApprovalPage from "../Approval/ApprovalPage";
 import PackingPage from "../Packing/PackingPage";
 import MaterialFlowPanel from "./MaterialFlowPanel";
+import OrderLookup from "../../components/OrderLookup";
+import ManualInputModal from "./ManualInputModal";
 
 interface ProductionOrderRow {
   order: string;
@@ -345,8 +348,30 @@ export default function ProductionOrderDashboardPage() {
     order: string;
     materialNumber: string | null;
     stages: { name: string; done: boolean }[];
+    orderType: string | null;
   } | null>(null);
   const [inputTarget, setInputTarget] = useState<{ order: string; stage: string } | null>(null);
+  // Tombol "+New PO Produk" (2026-08-02, instruksi eksplisit user): utk Order
+  // yg SUDAH ada di Master Data tapi belum muncul di dashboard ini krn
+  // Material Number-nya belum py histori tahap apa pun (jadi tidak lolos
+  // filter queuePremixRows di backend). Cari Order-nya dulu lewat modal kecil
+  // ini -> begitu ketemu di Master Data, langsung lempar ke popup "Info
+  // Proses Material" yg SUDAH ADA (infoTarget, sama persis dgn yg dibuka dari
+  // tombol ➜ baris dashboard) supaya admin set tahap wajib, baru lanjut Buka
+  // Input dari situ. `stages: []` krn Order ini belum py histori proses sama
+  // sekali -- MaterialFlowPanel aman dgn array kosong (findBlockingStage
+  // return null, semua tombol Buka Input aktif tanpa gate).
+  const [newOrderModalOpen, setNewOrderModalOpen] = useState(false);
+  const [newOrderValue, setNewOrderValue] = useState("");
+  // Tombol "+Input Manual" (2026-08-03, instruksi eksplisit user): catatan
+  // manual TERPISAH dari tabel Production Order Monitoring, fungsinya sama
+  // spt "Input Manual" di Dashboard > Tank Monitoring tapi dibuka lewat modal
+  // (konsisten dgn tombol +New PO Produk yg sudah ada), bukan tab tersendiri.
+  // SEMPAT direvisi (2026-08-03) supaya lewat popup "Info Proses Material"
+  // dulu spt "+New PO Produk" -- DIBALIKIN LAGI (2026-08-03, instruksi
+  // eksplisit user: "jangan buat aksesnya sampai ke Info Proses Material") --
+  // langsung buka form Input Manual, tanpa gate popup apa pun.
+  const [manualInputOpen, setManualInputOpen] = useState(false);
 
   const rowsQuery = useQuery({
     queryKey: ["dashboard-production-orders", search],
@@ -425,6 +450,23 @@ export default function ProductionOrderDashboardPage() {
           rowKey={(r: ProductionOrderRow) => `${r.order}-${r.process}-${r.start}`}
           exportFileName="dashboard-production-orders"
           storageKey="dashboard-production-orders"
+          toolbarExtra={
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setManualInputOpen(true)}>
+                +Input Manual
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setNewOrderValue("");
+                  setNewOrderModalOpen(true);
+                }}
+              >
+                +New PO Produk
+              </button>
+            </>
+          }
           rows={rowsQuery.data ?? []}
           columns={[
             { key: "order", label: "Order", render: (r) => r.order },
@@ -463,7 +505,7 @@ export default function ProductionOrderDashboardPage() {
                         // pop-up Info dulu -- pop-up Input form BARU muncul kalau
                         // admin klik "Buka Input" dari dalam pop-up Info (lihat
                         // MaterialFlowPanel/onOpenStage), bukan otomatis sekaligus.
-                        setInfoTarget({ order: r.order, materialNumber: r.materialNumber, stages: r.stages });
+                        setInfoTarget({ order: r.order, materialNumber: r.materialNumber, stages: r.stages, orderType: r.orderType });
                       }}
                       style={{
                         flexShrink: 0,
@@ -710,11 +752,37 @@ export default function ProductionOrderDashboardPage() {
         </Modal>
       )}
 
+      {manualInputOpen && (
+        <Modal title="Input Manual" onClose={() => setManualInputOpen(false)} width={980}>
+          <ManualInputModal />
+        </Modal>
+      )}
+
+      {newOrderModalOpen && (
+        <Modal title="New PO Produk" onClose={() => setNewOrderModalOpen(false)} width={480}>
+          <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+            Ketik nomor Order/PO yang sudah ada di Master Data (Referensi Order/PO) tapi belum muncul di dashboard
+            ini, lalu tekan Enter. Kalau ketemu, lanjut ke pengaturan tahap proses (Info Proses Material) untuk
+            Material Number-nya.
+          </p>
+          <OrderLookup
+            value={newOrderValue}
+            onChange={setNewOrderValue}
+            onFound={(data) => {
+              setNewOrderModalOpen(false);
+              setInfoTarget({ order: data.order, materialNumber: data.materialNumber, stages: [], orderType: data.orderType ?? null });
+            }}
+          />
+        </Modal>
+      )}
+
       {infoTarget && (
         <Modal title={`Info Proses — Order ${infoTarget.order}`} onClose={() => setInfoTarget(null)} width={860}>
           <MaterialFlowPanel
             materialNumber={infoTarget.materialNumber}
             stages={infoTarget.stages}
+            orderType={infoTarget.orderType}
+            order={infoTarget.order}
             onFlowSaved={() => rowsQuery.refetch()}
             onOpenStage={(stage) => setInputTarget({ order: infoTarget.order, stage })}
           />
@@ -754,6 +822,8 @@ export default function ProductionOrderDashboardPage() {
                 );
               case "Colour Matching":
                 return <ColourMatchingPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "Bongkaran":
+                return <BongkaranPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
               case "QC":
                 return <CheckResultsPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
               case "Approval":

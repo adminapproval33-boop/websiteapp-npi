@@ -5,6 +5,7 @@ import ProtectedRoute from "./auth/ProtectedRoute";
 import AppLayout from "./layout/AppLayout";
 import LoginPage from "./pages/Login/LoginPage";
 import ChangePasswordPage from "./pages/ChangePassword/ChangePasswordPage";
+import SettingsPage from "./pages/Settings/SettingsPage";
 import PrintCheckSheetPage from "./pages/Print/PrintCheckSheetPage";
 import PrintCoaPage from "./pages/Print/PrintCoaPage";
 import { flattenLeaves, homeRoute, menuTree, resolveLeafElement } from "./layout/menu";
@@ -28,6 +29,7 @@ export default function App() {
               <Route path="/print/coa/:checkId" element={<PrintCoaPage />} />
               <Route element={<AppLayout />}>
                 <Route path={homeRoute.path} element={homeRoute.element} />
+                <Route path="/settings" element={<SettingsPage />} />
                 {leaves.map((leaf) => (
                   <Route key={leaf.path} path={leaf.path} element={resolveLeafElement(leaf)} />
                 ))}

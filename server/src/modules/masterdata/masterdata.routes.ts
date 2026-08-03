@@ -5,7 +5,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../lib/env";
 import { asyncRoute } from "../../middleware/errorHandler";
-import { requireAuth, requireFullAccess } from "../../middleware/auth";
+import { requireAuth, requireFullAccess, requireWrite } from "../../middleware/auth";
 
 export const masterDataRouter = Router();
 
@@ -58,6 +58,35 @@ async function parseWorkbook(buffer: Buffer, filename: string): Promise<unknown[
   });
   return rows;
 }
+
+/// Kapan terakhir kali tiap kategori Master Data diimpor/diupdate (2026-08-03,
+/// instruksi eksplisit user: pemberitahuan tanggal+jam update terakhir di
+/// halaman Master Data). Dihitung dari MAX(updatedAt) tiap tabel -- field ini
+/// otomatis ke-refresh Prisma (`@updatedAt`) baik lewat createMany (mode
+/// replace) maupun upsert (mode append), jadi selalu mencerminkan import
+/// terakhir tanpa kolom/tabel tambahan.
+masterDataRouter.get(
+  "/last-updated",
+  asyncRoute(async (_req, res) => {
+    const [orders, tanks, mesin, employees, flow] = await Promise.all([
+      prisma.masterOrder.aggregate({ _max: { updatedAt: true } }),
+      prisma.masterTank.aggregate({ _max: { updatedAt: true } }),
+      prisma.masterMesin.aggregate({ _max: { updatedAt: true } }),
+      prisma.masterEmployee.aggregate({ _max: { updatedAt: true } }),
+      prisma.materialFlow.aggregate({ _max: { updatedAt: true } }),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        cooispi: orders._max.updatedAt,
+        tanki: tanks._max.updatedAt,
+        mesin: mesin._max.updatedAt,
+        employee: employees._max.updatedAt,
+        flow: flow._max.updatedAt,
+      },
+    });
+  })
+);
 
 // ===================== Referensi Order/PO =====================
 
@@ -432,6 +461,162 @@ masterDataRouter.post(
     }
 
     res.json({ success: true, message: `${records.length} Code Tanki berhasil diimpor (mode: ${mode}).` });
+  })
+);
+
+// ===================== Daftar Code Mesin =====================
+// Sumber pertama: file "list mesin.xlsx" (2026-08-02, instruksi eksplisit
+// user) -- kolom "No" (diabaikan), "Code Mesin Milling", "Lokasi". Dipakai
+// Dashboard > Mesin Monitoring utk join by Code Mesin ke `codeMesin` di
+// MillingLog, sama polanya dgn Master Data Tanki utk Tank Monitoring.
+
+masterDataRouter.get(
+  "/mesin",
+  asyncRoute(async (_req, res) => {
+    const mesin = await prisma.masterMesin.findMany({ orderBy: { code: "asc" } });
+    res.json({ success: true, data: mesin.map((m) => m.code) });
+  })
+);
+
+masterDataRouter.get(
+  "/mesin/full",
+  asyncRoute(async (req, res) => {
+    const search = String(req.query.search ?? "").trim();
+    const mesin = await prisma.masterMesin.findMany({
+      where: search ? { code: { contains: search, mode: "insensitive" } } : undefined,
+      orderBy: { code: "asc" },
+    });
+    res.json({ success: true, data: mesin });
+  })
+);
+
+masterDataRouter.post(
+  "/mesin/import",
+  requireFullAccess,
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: "File wajib diunggah." });
+      return;
+    }
+    const mode = req.body.mode === "append" ? "append" : "replace";
+
+    const rows = await parseWorkbook(req.file.buffer, req.file.originalname);
+    if (rows.length < 2) {
+      res.status(400).json({ success: false, message: "File kosong atau tidak berisi data." });
+      return;
+    }
+
+    const headers = rows[0].map(normalizeHeader);
+    const col = {
+      code: findColumn(headers, "code mesin milling", "code mesin", "kode mesin", "code"),
+      lokasi: findColumn(headers, "lokasi", "location", "plant"),
+    };
+    // Fallback: file 1-kolom polos tanpa header yg cocok -- anggap kolom pertama = Code Mesin
+    // (sama pola dgn fallback Code Tanki di atas).
+    const codeCol = col.code !== -1 ? col.code : 0;
+
+    const rawRecords = rows
+      .slice(1)
+      .map((row) => ({
+        code: String(row[codeCol] ?? "").trim(),
+        lokasi: col.lokasi !== -1 ? String(row[col.lokasi] ?? "").trim() || null : null,
+      }))
+      .filter((r) => r.code.length > 0);
+
+    if (rawRecords.length === 0) {
+      res.status(400).json({ success: false, message: "Tidak ada Code Mesin yang valid pada file." });
+      return;
+    }
+
+    const dedupMap = new Map<string, (typeof rawRecords)[number]>();
+    for (const record of rawRecords) dedupMap.set(record.code, record);
+    const records = Array.from(dedupMap.values());
+
+    if (mode === "replace") {
+      await prisma.masterMesin.deleteMany({});
+      for (const batch of chunk(records, 5000)) {
+        await prisma.masterMesin.createMany({ data: batch, skipDuplicates: true });
+      }
+    } else {
+      for (const batch of chunk(records, 200)) {
+        await Promise.all(
+          batch.map((record) =>
+            prisma.masterMesin.upsert({ where: { code: record.code }, create: record, update: record })
+          )
+        );
+      }
+    }
+
+    res.json({ success: true, message: `${records.length} Code Mesin berhasil diimpor (mode: ${mode}).` });
+  })
+);
+
+/// Tambah 1 Code Mesin baru (2026-08-02, instruksi eksplisit user: tombol
+/// "+Code Mesin" -- suatu saat ada mesin baru tanpa perlu re-upload seluruh
+/// file). requireFullAccess sama spt endpoint import di atas.
+masterDataRouter.post(
+  "/mesin",
+  requireFullAccess,
+  asyncRoute(async (req, res) => {
+    const code = String(req.body.code ?? "").trim();
+    const lokasi = String(req.body.lokasi ?? "").trim() || null;
+    if (!code) {
+      res.status(400).json({ success: false, message: "Code Mesin wajib diisi." });
+      return;
+    }
+    const existing = await prisma.masterMesin.findUnique({ where: { code } });
+    if (existing) {
+      res.status(400).json({ success: false, message: `Code Mesin "${code}" sudah terdaftar.` });
+      return;
+    }
+    const created = await prisma.masterMesin.create({ data: { code, lokasi } });
+    res.status(201).json({ success: true, message: "Code Mesin berhasil ditambahkan.", data: created });
+  })
+);
+
+/// Edit Lokasi 1 Code Mesin (2026-08-02, instruksi eksplisit user: tombol
+/// "Edit" di Dashboard > Mesin Monitoring -- dipakai SPV pas mesin
+/// dipindah lokasi/plant). SENGAJA cuma Lokasi yg bisa diubah (bukan Code
+/// itu sendiri) -- Code Mesin itu key yg dipakai join ke `codeMesin` histori
+/// MillingLog, ganti Code = putus keterkaitan ke histori lama. requireWrite
+/// (BUKAN requireFullAccess) krn ini koreksi rutin operasional, sama pola
+/// dgn Save Colour Matching/dll -- beda dari tambah/hapus Code Mesin
+/// (POST/DELETE di atas) yg tetap requireFullAccess krn itu perubahan
+/// administratif daftar resmi mesin.
+masterDataRouter.put(
+  "/mesin/:code",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const code = String(req.params.code ?? "").trim();
+    const lokasi = String(req.body.lokasi ?? "").trim() || null;
+    const existing = await prisma.masterMesin.findUnique({ where: { code } });
+    if (!existing) {
+      res.status(404).json({ success: false, message: "Code Mesin tidak ditemukan." });
+      return;
+    }
+    const updated = await prisma.masterMesin.update({ where: { code }, data: { lokasi } });
+    res.json({ success: true, message: `Lokasi Code Mesin "${code}" berhasil diperbarui.`, data: updated });
+  })
+);
+
+/// Hapus 1 Code Mesin (2026-08-02, instruksi eksplisit user: tombol "-Code
+/// Mesin" -- mesin rusak/tidak dipakai lagi). Hapus master data-nya SAJA --
+/// histori MillingLog yg pernah pakai Code Mesin ini TETAP tersimpan apa
+/// adanya (bukan foreign key), cuma tidak lagi muncul di daftar Mesin
+/// Monitoring.
+masterDataRouter.delete(
+  "/mesin/:code",
+  requireFullAccess,
+  asyncRoute(async (req, res) => {
+    const code = String(req.params.code ?? "").trim();
+    const existing = await prisma.masterMesin.findUnique({ where: { code } });
+    if (!existing) {
+      res.status(404).json({ success: false, message: "Code Mesin tidak ditemukan." });
+      return;
+    }
+    await prisma.masterMesin.delete({ where: { code } });
+    res.json({ success: true, message: `Code Mesin "${code}" berhasil dihapus.` });
   })
 );
 

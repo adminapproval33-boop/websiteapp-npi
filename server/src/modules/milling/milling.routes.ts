@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
+millingRouter.use(requireMenuView("milling"));
 
 /// 10 slot bacaan tetap (Fineness/Visco/Suhu); slot kosong tetap dikirim sbg string kosong.
 const readings10 = z.array(z.string()).max(10).optional();
@@ -224,6 +225,7 @@ millingRouter.get(
 millingRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("milling"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -254,6 +256,7 @@ millingRouter.post(
 millingRouter.put(
   "/:id",
   requireWrite,
+  requireMenuInput("milling"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -286,6 +289,7 @@ const upload = createUploader();
 millingRouter.post(
   "/:id/attachments",
   requireWrite,
+  requireMenuInput("milling"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const logId = Number(req.params.id);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { fileUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
 const ACCESS_LABEL: Record<string, string> = {
@@ -9,7 +10,7 @@ const ACCESS_LABEL: Record<string, string> = {
 };
 
 export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [now, setNow] = useState(new Date());
 
@@ -17,11 +18,6 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  async function handleLogout() {
-    await logout();
-    navigate("/login", { replace: true });
-  }
 
   const initials = (user?.name ?? "?")
     .split(" ")
@@ -47,9 +43,17 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         <span className="hidden text-slate-400 sm:inline">{now.toLocaleString("id-ID")}</span>
 
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
-            {initials}
-          </div>
+          {user?.avatarPath ? (
+            <img
+              src={fileUrl(user.avatarPath)}
+              alt="Avatar"
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+              {initials}
+            </div>
+          )}
           <div className="topbar-user">
             <span className="font-semibold text-slate-700">{user?.name}</span>
             <span className="access-badge">
@@ -58,8 +62,8 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         </div>
 
-        <button className="btn btn-outline" onClick={handleLogout}>
-          Logout
+        <button className="btn btn-outline" onClick={() => navigate("/settings")} title="Pengaturan">
+          ⚙️ Pengaturan
         </button>
       </div>
     </header>

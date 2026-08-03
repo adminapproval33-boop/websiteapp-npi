@@ -41,6 +41,21 @@ export function createUploader() {
   });
 }
 
+/** Sama seperti createUploader(), tapi khusus foto avatar -- hanya gambar (bukan PDF/Word/Excel), limit ukuran lebih kecil. */
+export function createImageUploader(maxMb: number) {
+  return multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxMb * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (!file.mimetype.toLowerCase().startsWith("image/")) {
+        cb(new Error(`Tipe file "${file.mimetype}" tidak diizinkan. Avatar harus berupa gambar (JPG/PNG/WebP).`));
+        return;
+      }
+      cb(null, true);
+    },
+  });
+}
+
 /** Unggah buffer file ke Vercel Blob (private) di bawah `<subfolder>/`, kembalikan pathname (disimpan sebagai filePath di DB). */
 export async function uploadToBlob(subfolder: string, file: Express.Multer.File): Promise<string> {
   const safeExt = path.extname(file.originalname).slice(0, 10);

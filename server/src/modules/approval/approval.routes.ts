@@ -2,12 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { hasAdminQcApprovalType } from "../../lib/stageGate";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
+approvalRouter.use(requireMenuView("approval"));
 
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database -- Prisma
@@ -339,6 +340,7 @@ approvalRouter.get(
 approvalRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("approval"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = await saveSchema.safeParseAsync(req.body);
     if (!parsed.success) {
@@ -412,6 +414,7 @@ approvalRouter.get(
 approvalRouter.post(
   "/:approvalId/attachments",
   requireWrite,
+  requireMenuInput("approval"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const approvalId = req.params.approvalId;

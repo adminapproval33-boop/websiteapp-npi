@@ -2,6 +2,7 @@ import { ChangeEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import { formatDateTime } from "../../lib/datetime";
 
 interface MasterOrderRow {
   order: string;
@@ -74,6 +75,11 @@ interface MasterTankRow {
   typeTanki: string | null;
 }
 
+interface MasterMesinRow {
+  code: string;
+  lokasi: string | null;
+}
+
 interface MasterEmployeeRow {
   employeeId: string;
   fullName: string;
@@ -95,6 +101,23 @@ interface MaterialFlowRow {
   packingRequired: boolean;
 }
 
+interface LastUpdated {
+  cooispi: string | null;
+  tanki: string | null;
+  mesin: string | null;
+  employee: string | null;
+  flow: string | null;
+}
+
+function LastUpdatedNote({ value }: { value: string | null | undefined }) {
+  return (
+    <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+      Terakhir diupdate:{" "}
+      <strong style={{ color: "var(--text)" }}>{value ? formatDateTime(value) : "Belum pernah diimpor"}</strong>
+    </p>
+  );
+}
+
 function FlowBadge({ on }: { on: boolean }) {
   return (
     <span
@@ -111,7 +134,7 @@ function FlowBadge({ on }: { on: boolean }) {
   );
 }
 
-type Tab = "cooispi" | "tanki" | "employee" | "flow";
+type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow";
 
 function ImportCard({
   title,
@@ -177,6 +200,9 @@ export default function MasterDataPage() {
   const [tankResult, setTankResult] = useState("");
   const [tankError, setTankError] = useState("");
   const [tankSearch, setTankSearch] = useState("");
+  const [mesinResult, setMesinResult] = useState("");
+  const [mesinError, setMesinError] = useState("");
+  const [mesinSearch, setMesinSearch] = useState("");
   const [orderSearch, setOrderSearch] = useState("");
   const [employeeResult, setEmployeeResult] = useState("");
   const [employeeError, setEmployeeError] = useState("");
@@ -184,6 +210,11 @@ export default function MasterDataPage() {
   const [flowResult, setFlowResult] = useState("");
   const [flowError, setFlowError] = useState("");
   const [flowSearch, setFlowSearch] = useState("");
+
+  const lastUpdatedQuery = useQuery({
+    queryKey: ["master-last-updated"],
+    queryFn: () => api.get<{ success: boolean; data: LastUpdated }>("/master-data/last-updated").then((r) => r.data),
+  });
 
   const ordersQuery = useQuery({
     queryKey: ["master-orders", orderSearch],
@@ -198,6 +229,14 @@ export default function MasterDataPage() {
     queryFn: () =>
       api
         .get<{ success: boolean; data: MasterTankRow[] }>(`/master-data/tanks/full?search=${encodeURIComponent(tankSearch)}`)
+        .then((r) => r.data),
+  });
+
+  const mesinQuery = useQuery({
+    queryKey: ["master-mesin-full", mesinSearch],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: MasterMesinRow[] }>(`/master-data/mesin/full?search=${encodeURIComponent(mesinSearch)}`)
         .then((r) => r.data),
   });
 
@@ -220,6 +259,7 @@ export default function MasterDataPage() {
       setOrderResult(res.message);
       setOrderError("");
       queryClient.invalidateQueries({ queryKey: ["master-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
     },
     onError: (err) => {
       setOrderError(err instanceof ApiError ? err.message : "Gagal mengimpor data Order.");
@@ -239,10 +279,30 @@ export default function MasterDataPage() {
       setTankError("");
       queryClient.invalidateQueries({ queryKey: ["master-tanks-full"] });
       queryClient.invalidateQueries({ queryKey: ["master-tanks"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
     },
     onError: (err) => {
       setTankError(err instanceof ApiError ? err.message : "Gagal mengimpor Code Tanki.");
       setTankResult("");
+    },
+  });
+
+  const importMesin = useMutation({
+    mutationFn: (payload: { file: File; mode: string }) => {
+      const formData = new FormData();
+      formData.append("file", payload.file);
+      formData.append("mode", payload.mode);
+      return api.post<{ message: string }>("/master-data/mesin/import", formData);
+    },
+    onSuccess: (res) => {
+      setMesinResult(res.message);
+      setMesinError("");
+      queryClient.invalidateQueries({ queryKey: ["master-mesin-full"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
+    },
+    onError: (err) => {
+      setMesinError(err instanceof ApiError ? err.message : "Gagal mengimpor Code Mesin.");
+      setMesinResult("");
     },
   });
 
@@ -265,6 +325,7 @@ export default function MasterDataPage() {
       setEmployeeResult(res.message);
       setEmployeeError("");
       queryClient.invalidateQueries({ queryKey: ["master-employees"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
     },
     onError: (err) => {
       setEmployeeError(err instanceof ApiError ? err.message : "Gagal mengimpor data karyawan.");
@@ -283,6 +344,7 @@ export default function MasterDataPage() {
       setFlowResult(res.message);
       setFlowError("");
       queryClient.invalidateQueries({ queryKey: ["master-material-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
     },
     onError: (err) => {
       setFlowError(err instanceof ApiError ? err.message : "Gagal mengimpor Material Flow.");
@@ -298,6 +360,9 @@ export default function MasterDataPage() {
         </button>
         <button className={`btn ${tab === "tanki" ? "" : "btn-outline"}`} onClick={() => setTab("tanki")}>
           Master Data Tanki
+        </button>
+        <button className={`btn ${tab === "mesin" ? "" : "btn-outline"}`} onClick={() => setTab("mesin")}>
+          Master Data Mesin
         </button>
         <button className={`btn ${tab === "employee" ? "" : "btn-outline"}`} onClick={() => setTab("employee")}>
           Employee Data
@@ -321,6 +386,7 @@ export default function MasterDataPage() {
           <div className="panel">
             <div className="panel-header">Data Order Saat Ini ({ordersQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.cooispi} />
               <input
                 placeholder="Cari nomor Order..."
                 value={orderSearch}
@@ -354,6 +420,7 @@ export default function MasterDataPage() {
           <div className="panel">
             <div className="panel-header">Code Tanki Saat Ini ({tanksQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.tanki} />
               <input
                 placeholder="Cari Code Tanki..."
                 value={tankSearch}
@@ -380,6 +447,43 @@ export default function MasterDataPage() {
         </>
       )}
 
+      {tab === "mesin" && (
+        <>
+          <ImportCard
+            title="Daftar Code Mesin"
+            description='File wajib punya kolom header "Code Mesin Milling" (boleh juga Lokasi). Dipakai Dashboard > Mesin Monitoring.'
+            onImport={(file, mode) => importMesin.mutate({ file, mode })}
+            isPending={importMesin.isPending}
+            result={mesinResult}
+            error={mesinError}
+          />
+
+          <div className="panel">
+            <div className="panel-header">Code Mesin Saat Ini ({mesinQuery.data?.length ?? 0} ditampilkan)</div>
+            <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.mesin} />
+              <input
+                placeholder="Cari Code Mesin..."
+                value={mesinSearch}
+                onChange={(e) => setMesinSearch(e.target.value)}
+                style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+              <DataTable
+                rowKey={(r: MasterMesinRow) => r.code}
+                exportFileName="master-mesin"
+                storageKey="master-mesin"
+                rows={mesinQuery.data ?? []}
+                freezeFirstColumn
+                columns={[
+                  { key: "code", label: "Code Mesin", render: (r) => r.code },
+                  { key: "lokasi", label: "Lokasi", render: (r) => r.lokasi ?? "-" },
+                ]}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
       {tab === "employee" && (
         <>
           <ImportCard
@@ -394,6 +498,7 @@ export default function MasterDataPage() {
           <div className="panel">
             <div className="panel-header">Data Karyawan Saat Ini ({employeesQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.employee} />
               <input
                 placeholder="Cari Employee ID atau Nama..."
                 value={employeeSearch}
@@ -434,6 +539,7 @@ export default function MasterDataPage() {
           <div className="panel">
             <div className="panel-header">Material Flow Saat Ini ({flowQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.flow} />
               <input
                 placeholder="Cari Material Number / Description..."
                 value={flowSearch}

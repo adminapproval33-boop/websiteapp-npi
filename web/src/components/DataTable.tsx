@@ -54,6 +54,7 @@ export default function DataTable<T>({
   rowStyle,
   storageKey,
   freezeFirstColumn = false,
+  toolbarExtra,
 }: {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -68,6 +69,10 @@ export default function DataTable<T>({
    * sudah selalu freeze ke atas (position: sticky) terlepas dari opsi ini. Default false supaya
    * tabel lain yg TIDAK secara eksplisit minta fitur ini tidak berubah tampilannya. */
   freezeFirstColumn?: boolean;
+  /** Tombol/elemen custom tambahan di toolbar, dirender di sebelah kiri "Export CSV"
+   * (2026-08-02, instruksi eksplisit user utk tombol "+New PO Produk" di Production Order
+   * Monitoring). Default undefined supaya tabel lain yg tidak pakai ini tidak berubah. */
+  toolbarExtra?: ReactNode;
 }) {
   const persisted = useMemo(() => loadPersisted(storageKey), [storageKey]);
   const defaultOrder = useMemo(() => columns.map((c) => c.key), [columns]);
@@ -273,11 +278,14 @@ export default function DataTable<T>({
             ↺ Reset Kolom
           </button>
         </div>
-        {exportFileName && (
-          <button className="btn btn-outline" onClick={() => exportToCsv(exportFileName, csvColumns, rows)} disabled={rows.length === 0}>
-            ⭳ Export CSV
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {toolbarExtra}
+          {exportFileName && (
+            <button className="btn btn-outline" onClick={() => exportToCsv(exportFileName, csvColumns, rows)} disabled={rows.length === 0}>
+              ⭳ Export CSV
+            </button>
+          )}
+        </div>
       </div>
 
       {/*

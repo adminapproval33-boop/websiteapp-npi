@@ -2,11 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
 export const adminQcRouter = Router();
 adminQcRouter.use(requireAuth);
+adminQcRouter.use(requireMenuView("adminQc"));
 
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database.
@@ -77,6 +78,7 @@ adminQcRouter.get(
 adminQcRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("adminQc"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -97,6 +99,7 @@ adminQcRouter.post(
 adminQcRouter.put(
   "/:adminQcId",
   requireWrite,
+  requireMenuInput("adminQc"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -129,6 +132,7 @@ const upload = createUploader();
 adminQcRouter.post(
   "/:adminQcId/attachments",
   requireWrite,
+  requireMenuInput("adminQc"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const adminQcId = req.params.adminQcId;

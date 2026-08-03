@@ -2,12 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
-import { hasAdminQcQcPassed } from "../../lib/stageGate";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
+packingRouter.use(requireMenuView("packing"));
 
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database.
@@ -133,23 +133,21 @@ packingRouter.get(
 packingRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("packing"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Packing
-    // wajib utk semua proses -- baru boleh diinput kalau Order ini sudah
-    // py QC Passed di Admin QC (sama syarat dgn "List Antrian Packing").
-    // Baris BARU saja (PUT/Edit tetap bebas).
-    if (!(await hasAdminQcQcPassed(parsed.data.order))) {
-      res.status(400).json({
-        success: false,
-        message: `Order ${parsed.data.order} belum QC Passed di Admin QC -- tidak bisa diinput ke Packing dulu.`,
-      });
-      return;
-    }
+    // DIREVISI 2026-08-03 (instruksi eksplisit user): Packing SEKARANG bebas
+    // diinput kapan saja, TANPA menunggu tahap sebelumnya selesai secara
+    // administrasi (sebelumnya wajib QC Passed di Admin QC dulu, lihat
+    // hasAdminQcQcPassed di lib/stageGate.ts -- gerbang itu sudah dihapus dari
+    // sini). Hasil inputannya tetap otomatis masuk ke kolom "Production
+    // Actions" di Production Order Monitoring apa adanya (lihat
+    // latestPackingLabelByOrder di dashboard.routes.ts, tidak bergantung sama
+    // sekali pada status Admin QC).
     const created = await prisma.packingLog.create({
       data: { ...parsed.data, inputBy: req.auth!.nik },
     });
@@ -164,6 +162,7 @@ packingRouter.post(
 packingRouter.put(
   "/:id",
   requireWrite,
+  requireMenuInput("packing"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -196,6 +195,7 @@ const upload = createUploader();
 packingRouter.post(
   "/:id/attachments",
   requireWrite,
+  requireMenuInput("packing"),
   upload.single("file"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const logId = Number(req.params.id);

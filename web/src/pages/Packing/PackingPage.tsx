@@ -11,6 +11,7 @@ import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../
 import { computeQtyPerManFromPcsVolume } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
  * user pernah drag-resize (lihat lib/useResizableColWidths). */
@@ -162,9 +163,10 @@ export default function PackingPage({
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
+  const isViewOnly = getMenuLevel(user, "packing") === "VIEW";
   const { data: employees } = useEmployeeOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">("input");
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
@@ -463,9 +465,11 @@ export default function PackingPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            Input Packing
-          </button>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              Input Packing
+            </button>
+          )}
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             History
           </button>

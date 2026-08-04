@@ -15,6 +15,17 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   return d.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** Format Date/ISO string (tanpa jam) ke dd-mm-yyyy -- dipakai Lot No & Exp
+ * di Production Label (2026-08-04, instruksi eksplisit user: keduanya
+ * harus seragam formatnya, pakai strip bukan garis miring). */
+export function formatDateDDMMYYYY(value: string | Date | null | undefined): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
 /**
  * Format tanggal "mentah" (YYYY-MM-DD HH:mm:ss) KHUSUS untuk export CSV --
  * bukan `formatDateTime` yang sudah diformat jadi teks lokal ("17 Jul 2026,

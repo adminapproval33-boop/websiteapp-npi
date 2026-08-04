@@ -318,6 +318,30 @@ model PremixAftermixAttachment {
   @@map("premix_aftermix_attachments")
 }
 
+/// Jadwal PWO (2026-08-04, instruksi eksplisit user) -- tampilan kalender
+/// mingguan di tab "PWO Schedule & Queue" (Premix/Aftermix). Order yg sama
+/// boleh dijadwalkan ulang (upsert by order+section lewat @@unique di
+/// bawah). Field identitas (materialNumber/materialDescription/batch)
+/// di-snapshot saat dijadwalkan supaya kartu kalender bisa langsung
+/// ditampilkan tanpa perlu join ulang ke sumber antrian (yg dinamis --
+/// Premix dari Master Data, Aftermix dari History Milling). Murni metadata
+/// jadwal, TIDAK terhubung ke PremixAftermixLog.
+model PwoSchedule {
+  id                  String            @id @default(uuid())
+  order               String
+  section             ProductionSection
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  scheduledStart      DateTime
+  scheduledEnd        DateTime
+  createdBy           String
+  timestamp           DateTime          @default(now())
+
+  @@unique([order, section])
+  @@map("pwo_schedules")
+}
+
 /// Planning Schedule > Colour Matching.
 model ColourMatchingLog {
   id                  Int      @id @default(autoincrement())
@@ -691,6 +715,8 @@ model ProductionLabel {
   plant               String?
   lotNo               String?
   exp                 DateTime?
+  /// Shelf Life -- isian manual (2026-08-04, instruksi eksplisit user), tidak ada sumber otomatisnya.
+  shelfLife           String?
   codeTanki           String?
   iuPlant             String?
   /// "Paste" | "Kepala Warna" | "Assorted" -- dropdown manual, lihat komentar di ProductionLabelEntryPage.tsx.

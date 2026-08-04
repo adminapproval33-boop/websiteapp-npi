@@ -371,8 +371,14 @@ export default function DataTable<T>({
             )}
             {virtualRows.map((virtualRow) => {
               const row = tableRows[virtualRow.index];
+              // Zebra stripe dilepas (2026-08-04, instruksi eksplisit user: tabel
+              // terasa "jadul"/padat) -- kolom frozen sekarang jatuh balik ke putih
+              // polos, konsisten dgn `tbody tr` non-frozen yg juga sudah bg-white
+              // di app.css (row dibedakan lewat hover highlight, bukan lagi garis
+              // zebra), kecuali rowStyle halaman ybs eksplisit minta warna lain
+              // (mis. highlight merah utk mesin "Terpakai" di Mesin Monitoring).
               const explicitBg = rowStyle?.(row.original)?.background as string | undefined;
-              const zebraBg = virtualRow.index % 2 === 1 ? "#f8fafc" : "#ffffff";
+              const frozenCellBg = explicitBg ?? "#ffffff";
               return (
                 <tr
                   key={rowKey(row.original)}
@@ -394,7 +400,7 @@ export default function DataTable<T>({
                                 position: "sticky",
                                 left: 0,
                                 zIndex: 1,
-                                background: explicitBg ?? zebraBg,
+                                background: frozenCellBg,
                                 boxShadow: "2px 0 4px -2px rgba(0,0,0,0.15)",
                               }
                             : undefined),

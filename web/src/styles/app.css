@@ -128,22 +128,29 @@
     @apply bg-slate-50 text-slate-500;
   }
 
-  /* SENGAJA tanpa `overflow-hidden` di sini (walau div pembungkus di
+  /* Redesign 2026-08-04 (instruksi eksplisit user: tabel History/Dashboard
+     terasa "jadul" -- terlalu banyak border, kepadatan data tinggi) --
+     dari gaya "grid kotak-kotak" (border di semua sisi tiap sel + zebra
+     stripe) ke gaya list modern (SaaS-style): cuma border-bottom sbg
+     pemisah baris, padding lebih lega, tanpa zebra (row polos + highlight
+     hover) supaya lebih clean & tidak berisik secara visual. Zebra di
+     kolom frozen juga dilepas di DataTable.tsx (lihat komentar di sana).
+     SENGAJA tanpa `overflow-hidden` di sini (walau div pembungkus di
      DataTable.tsx sudah py rounded-lg+overflow-auto sendiri utk sudut
      membulat) -- `overflow` selain `visible` di elemen <table> bikin
      browser salah anggap <table> itu sendiri sbg "kotak scroll" acuan
      `position: sticky`, jadi freeze header/kolom (lihat DataTable.tsx)
      jadi tidak berfungsi sama sekali walau CSS-nya sudah benar. */
   table.data-table {
-    @apply w-full border-collapse rounded-lg text-sm;
+    @apply w-full border-collapse text-sm;
   }
 
   table.data-table th {
-    @apply border border-slate-300 bg-slate-100 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600;
+    @apply border-b-2 border-slate-200 bg-slate-50 px-4 py-3 text-left text-[0.7rem] font-bold uppercase tracking-wider text-slate-500;
   }
 
   table.data-table td {
-    @apply border border-slate-200 px-3 py-2 align-top text-slate-700;
+    @apply border-b border-slate-100 px-4 py-3 align-top text-slate-700;
     /* Teks panjang (termasuk tanpa spasi sama sekali) otomatis membungkus ke
        baris berikutnya DALAM sel yang sama (tinggi baris yang bertambah),
        bukan mendorong lebar kolom lain -- mirip "Wrap Text" di Excel. */
@@ -152,11 +159,7 @@
   }
 
   table.data-table tbody tr {
-    @apply transition-colors hover:bg-indigo-50/60;
-  }
-
-  table.data-table tbody tr:nth-child(even) {
-    @apply bg-slate-50;
+    @apply bg-white transition-colors hover:bg-indigo-50/40;
   }
 
   .col-resize-handle:hover,

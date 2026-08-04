@@ -20,6 +20,7 @@ const saveSchema = z.object({
   plant: z.string().optional(),
   lotNo: z.string().optional(),
   exp: optionalDate,
+  shelfLife: z.string().optional(),
   codeTanki: z.string().optional(),
   iuPlant: z.string().optional(),
   pasteType: z.string().optional(),

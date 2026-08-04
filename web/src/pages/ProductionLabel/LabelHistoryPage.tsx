@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
-import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, formatDateDDMMYYYY, toExcelDateTimeString } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
 
 interface LabelHistoryRow {
@@ -16,6 +16,7 @@ interface LabelHistoryRow {
   plant: string | null;
   lotNo: string | null;
   exp: string | null;
+  shelfLife: string | null;
   codeTanki: string | null;
   iuPlant: string | null;
   pasteType: string | null;
@@ -81,9 +82,10 @@ export default function LabelHistoryPage() {
             {
               key: "exp",
               label: "Exp",
-              render: (r) => (r.exp ? formatDateTime(r.exp) : "-"),
+              render: (r) => (r.exp ? formatDateDDMMYYYY(r.exp) : "-"),
               csvValue: (r) => (r.exp ? toExcelDateTimeString(r.exp) : ""),
             },
+            { key: "shelfLife", label: "Shelf Life", render: (r) => r.shelfLife },
             { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
             { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
             { key: "pasteType", label: "Material Type", render: (r) => r.pasteType },

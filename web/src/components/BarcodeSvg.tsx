@@ -5,8 +5,19 @@ import JsBarcode from "jsbarcode";
  * Batch (2026-08-04, instruksi eksplisit user). CODE39 cuma dukung
  * uppercase alfanumerik + sedikit simbol (spasi - . $ / + %), jadi value
  * di-uppercase dulu. Render langsung ke elemen <svg> lewat ref (jsbarcode
- * memanipulasi DOM svg-nya sendiri, bukan lewat JSX children React). */
-export default function BarcodeSvg({ value, className }: { value: string; className?: string }) {
+ * memanipulasi DOM svg-nya sendiri, bukan lewat JSX children React).
+ * `displayValue` default true (angka tampil di bawah barcode), tapi
+ * di-set false di layout label produksi (revisi 2026-08-04, ke-4) krn
+ * angkanya sudah ditampilkan inline di sebelah label "Order"/"Batch". */
+export default function BarcodeSvg({
+  value,
+  className,
+  displayValue = true,
+}: {
+  value: string;
+  className?: string;
+  displayValue?: boolean;
+}) {
   const ref = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -19,7 +30,7 @@ export default function BarcodeSvg({ value, className }: { value: string; classN
     try {
       JsBarcode(svg, value.trim().toUpperCase(), {
         format: "CODE39",
-        displayValue: true,
+        displayValue,
         fontSize: 12,
         height: 26,
         margin: 0,
@@ -28,7 +39,7 @@ export default function BarcodeSvg({ value, className }: { value: string; classN
       console.error(`BarcodeSvg: gagal render CODE39 utk "${value}"`, err);
       svg.innerHTML = "";
     }
-  }, [value]);
+  }, [value, displayValue]);
 
   return <svg ref={ref} className={className} />;
 }

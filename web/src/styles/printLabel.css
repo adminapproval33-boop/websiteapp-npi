@@ -1,22 +1,21 @@
 /* Production Label -- Honeywell PC42T, ukuran sticker 100mm (lebar) x 140mm
-   (tinggi) -- dikoreksi 2026-08-04 (sebelumnya kebalik, 140x100), user
-   konfirmasi ukuran yg benar tinggi 140mm lebar 100mm. Layout meniru contoh
-   label fisik yg dikirim user (Order + barcode, Batch + barcode, lalu tabel
-   bordered Material Number/Material Description/Lot No/Exp/IU Plant/Code
-   Tanki/Material Type/Drum Colour/Other), 2026-08-04.
-   PENTING -- @page pakai NAMA (Paged Media "named page", `page: productionLabel`
-   di .label-page) SENGAJA, BUKAN @page tanpa nama spt sebelumnya. Root cause
-   bug "hasil print kecil & buram" (dilaporkan user 2026-08-04): app ini SPA,
-   print.css (dipakai Print COA/Check Sheet, @page tanpa nama size:A4) ikut
-   ke-bundle bareng CSS ini krn Vite menggabungkan semua CSS yg pernah
-   di-import di seluruh app jadi satu file -- 2 aturan "@page {}" tanpa nama
-   yg beda size TABRAKAN, siapa menang tergantung urutan bundling (tidak
-   predictable), yg observed menang malah size A4 (bikin browser nge-layout
-   spt cetak ke kanvas A4, tapi kertas fisik PC42T cuma segini -> cuma
-   sepojok konten yg ke-print, sisanya predictable "constant"). Named page
-   (`@page productionLabel`) dipilih SPESIFIK by name lewat `page:` property
-   di elemen, jadi TIDAK bisa collide dgn @page anonim manapun, brp pun
-   banyak stylesheet print lain yg ikut ke-bundle di masa depan. */
+   (tinggi). Layout ke-5 (2026-08-04): niru template "shipping label" yg
+   dikirim user -- header brand, 1 barcode BESAR dominan (Batch, ditukar dgn
+   Order di revisi ke-7), baris info dipisah garis horizontal tipis (BUKAN
+   tabel bordered spt revisi ke-3), lalu barcode kecil (Order) + QR
+   berdampingan dekat bawah, ditutup baris Other. Revisi ke-9: semua jarak
+   (margin rule/header/value) dirapatkan, semua warna font dipaksa hitam
+   murni (#000, sebelumnya beberapa label pakai abu-abu #333), semua font
+   size dinaikkan lagi, dan semua weight dipastikan bold (700/800) --
+   instruksi eksplisit user. Semua angka mm di bawah sudah dikalibrasi &
+   diverifikasi lewat render headless Chrome (bukan tebakan) supaya PAS
+   mengisi 140mm tanpa overflow ke halaman ke-2 maupun nyisain celah kosong.
+   PENTING -- @page pakai NAMA (`page: productionLabel`) SENGAJA, BUKAN
+   @page tanpa nama, krn app ini SPA dan print.css (dipakai Print COA/Check
+   Sheet, @page size:A4) ikut ke-bundle bareng CSS ini -- 2 @page anonim yg
+   beda size akan TABRAKAN (root cause bug "hasil print kecil" yg pernah
+   terjadi 2026-08-04). Named page dipilih spesifik by name lewat `page:`
+   di elemen, jadi tidak collide dgn @page anonim manapun. */
 @page productionLabel {
   size: 100mm 140mm;
   margin: 0;
@@ -40,32 +39,198 @@
   width: 100mm;
   height: 140mm;
   box-sizing: border-box;
-  padding: 3mm 4mm;
+  padding: 4mm 5mm;
   background: #fff;
   color: #000;
   font-family: Arial, Helvetica, sans-serif;
   display: flex;
   flex-direction: column;
-  gap: 1mm;
   box-shadow: 0 0 0 1px #cbd5e1;
 }
 
-/* QR sekarang berisi 9 field (bukan cuma nomor Order, lihat useEffect QR di
-   ProductionLabelEntryPage.tsx), jadi jauh lebih padat modulnya (~53 modul
-   di errorCorrectionLevel L utk data realistis, vs ~29 modul versi lama yg
-   cuma isi Order) -- diletakkan sbg row tersendiri (BUKAN absolute-position
-   overlay spt sebelumnya) supaya reservasi ruangnya eksplisit & tidak
-   ketiban/menutupi barcode Order di bawahnya, dan ukurannya dinaikkan ke
-   24mm supaya tiap modul tetap cukup besar buat di-scan di printer thermal
-   203dpi (~0.45mm/modul). */
-.label-page .label-qr-row {
+/* Header: nama perusahaan (2026-08-04, revisi ke-6 -- kotak LOGO dihapus
+   atas instruksi eksplisit user, tidak ada file logo asli) + Shelf Life
+   (revisi ke-12, instruksi eksplisit user: sejajar satu baris dgn "NIPPON
+   PAINT/Production Label", rata kanan lewat justify-content:space-between). */
+.label-page .label-header {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 1mm;
 }
 
+.label-page .label-brand {
+  line-height: 1.1;
+}
+
+.label-page .label-brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #000;
+}
+
+.label-page .label-brand-sub {
+  font-size: 11px;
+  font-weight: 700;
+  color: #000;
+}
+
+.label-page .label-header-shelf-life {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.label-page .label-rule-double {
+  border: none;
+  border-top: 1.2pt solid #000;
+  border-bottom: 1.2pt solid #000;
+  height: 2.4pt;
+  margin: 0 0 1.8mm;
+  padding: 0;
+}
+
+/* Jarak antar section (2026-08-04, revisi ke-11: user minta jangan
+   kerapatan spt revisi ke-10, tapi "pas & simetris" -- margin tiap
+   .label-rule dibuat SERAGAM di semua 7 titik pemisah section supaya
+   sisa ruang vertikal terdistribusi RATA, bukan numpuk kosong di satu
+   tempat (dulu di bawah "Other") atau kerapatan semua). */
+.label-page .label-rule {
+  border: none;
+  border-top: 0.7pt solid #000;
+  margin: 2mm 0;
+}
+
+.label-page .label-order-line {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0 0 1.2mm;
+  color: #000;
+}
+
+.label-page .label-order-line .label-order-value {
+  font-weight: 800;
+  font-size: 19px;
+  margin-left: 2mm;
+  color: #000;
+}
+
+.label-page .label-order-barcode {
+  display: flex;
+  justify-content: center;
+}
+
+.label-page .label-order-barcode svg {
+  height: 18mm;
+  width: 100%;
+}
+
+.label-page .label-row {
+  display: flex;
+}
+
+.label-page .label-cell {
+  flex: 1;
+  min-width: 0;
+}
+
+.label-page .label-cell + .label-cell {
+  border-left: 0.7pt solid #000;
+  margin-left: 2.5mm;
+  padding-left: 2.5mm;
+}
+
+.label-page .label-cell-label {
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  line-height: 1.1;
+  margin: 0;
+  color: #000;
+}
+
+.label-page .label-cell-value {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0.15mm 0 0;
+  word-break: break-word;
+  color: #000;
+}
+
+/* Lot No & Exp (2026-08-04, revisi ke-8, instruksi eksplisit user: field
+   ini "krusial" jadi fontnya dinaikkan lagi & di-bold, terpisah dari
+   .label-cell-value biasa yg tetap dipakai IU Plant/Material Type/Drum
+   Colour supaya field2 itu TIDAK ikut membesar. */
+.label-page .label-cell-value-critical {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 0.15mm 0 0;
+  word-break: break-word;
+  color: #000;
+}
+
+/* Material Number & Material Description (2026-08-04, instruksi eksplisit
+   user: perbesar font-nya lagi di revisi ke-8) -- SENGAJA cuma dipakai di
+   baris FULL WIDTH (bukan berpasangan 2 kolom spt field lain), krn
+   nilainya (mis. "SF602CHIBLACKPST") kepanjangan utk muat 1 baris di kolom
+   setengah lebar pada font sebesar ini -- sempat coba dipasangkan dgn IU
+   Plant dan malah pecah jadi 2 baris, mendorong konten overflow keluar
+   140mm. */
+.label-page .label-cell-value-lg {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0.15mm 0 0;
+  word-break: break-word;
+  color: #000;
+}
+
+.label-page .label-cell-value-sm {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0.15mm 0 0;
+  word-break: break-word;
+  color: #000;
+}
+
+.label-page .label-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+}
+
+.label-page .label-bottom-barcode {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Order (2026-08-04, revisi ke-8/9, instruksi eksplisit user: field ini
+   "krusial" jadi fontnya dinaikkan lagi & di-bold). */
+.label-page .label-bottom-tag {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0 0 0.8mm;
+  color: #000;
+}
+
+.label-page .label-bottom-barcode svg {
+  height: 11mm;
+  width: 100%;
+}
+
+/* QR sekarang cuma berisi 4 field (Material Number/Description/Lot No/Exp,
+   2026-08-04 instruksi eksplisit user -- dipersempit dari 9 field), jadi
+   modulnya jauh lebih sedikit (~41 vs ~53-61) dan bisa dikecilkan tanpa
+   mengorbankan keterbacaan scan, sekaligus membebaskan ruang vertikal
+   supaya baris Other di bawahnya tidak kepotong/overflow. */
 .label-page .label-qr {
-  width: 24mm;
-  height: 24mm;
+  width: 18mm;
+  height: 18mm;
+  flex-shrink: 0;
 }
 
 .label-page .label-qr img {
@@ -74,60 +239,21 @@
   display: block;
 }
 
-.label-page .label-barcode-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3mm;
-}
-
-.label-page .label-barcode-title {
-  margin: 0;
-  font-size: 8px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.label-page .label-barcode-full {
-  display: flex;
-  justify-content: center;
-}
-
-.label-page .label-barcode-full svg {
-  height: 8.5mm;
-  width: 100%;
-}
-
-.label-page .label-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.label-page .label-table td {
-  border: 0.5pt solid #000;
-  padding: 0.7mm 2mm;
-  font-size: 9px;
-  line-height: 1.25;
-  vertical-align: middle;
-  word-break: break-word;
-}
-
-.label-page .label-table td:first-child {
-  width: 28mm;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 8px;
-  background: #f8fafc;
-}
-
-.label-page .label-table td:last-child {
-  font-weight: 600;
-}
-
 @media print {
   .label-form-panel,
   .label-toolbar {
+    display: none !important;
+  }
+  /* Sembunyikan chrome AppLayout (Topbar/Sidebar/footer statusbar) -- beda
+     dari Print COA/Check Sheet yg route-nya BERDIRI SENDIRI di luar
+     AppLayout (lihat App.tsx), Production Label Entry ini dirender DI
+     DALAM AppLayout biasa, jadi window.print() ikut mencetak topbar
+     ("Websiteapp NPI") dan footer ("Status: Online") kalau tidak
+     disembunyikan eksplisit di sini (dilaporkan user 2026-08-04). */
+  .topbar,
+  .sidebar,
+  .sidebar-backdrop,
+  .statusbar {
     display: none !important;
   }
   .label-preview-wrap {
@@ -139,7 +265,7 @@
     box-shadow: none;
   }
   /* Netralkan chrome .panel (border/shadow/padding, lihat app.css) di panel
-     pembungkus preview supaya HANYA .label-page yg tercetak, pas 140x100mm --
+     pembungkus preview supaya HANYA .label-page yg tercetak, pas 100x140mm --
      kalau tidak, padding .panel-body (20px) + border .panel bikin konten
      terdorong keluar area @page dan bisa memicu halaman ke-2 kosong. */
   .label-print-panel {

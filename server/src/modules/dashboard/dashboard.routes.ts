@@ -1330,7 +1330,12 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     const moment = latestMoment(r.start, r.finish, r.timestamp);
     const label = millingProcessLabel(r);
     if (r.codeTanki1) {
-      touches.push({ code: r.codeTanki1, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: `${label} (Couple)`, start: r.start, finish: r.finish, moment });
+      // "(Couple)" SENGAJA dilepas dari label (2026-08-04, instruksi eksplisit
+      // user: kolom Proses cukup "Milling - DN", bukan "Milling - DN (Couple)")
+      // -- tidak bikin ambigu drpd tanki 2/"(Moving)" krn keduanya selalu jadi
+      // baris terpisah (beda Code Tanki), identitas tanki-nya sendiri sudah
+      // kelihatan di kolom Code Tanki, bukan lewat suffix di Proses.
+      touches.push({ code: r.codeTanki1, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: label, start: r.start, finish: r.finish, moment });
     }
     if (r.codeTanki2) {
       touches.push({ code: r.codeTanki2, order: r.order, materialNumber: r.materialNumber, batch: r.batch, orderQty: r.orderQty, remark: r.remark, process: `${label} (Moving)`, start: r.start, finish: r.finish, moment });

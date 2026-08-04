@@ -3,6 +3,9 @@ import { toDataURL } from "qrcode";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import BarcodeSvg from "../../components/BarcodeSvg";
+import TankSelect from "../../components/TankSelect";
+import IuPlantSelect from "../../components/IuPlantSelect";
+import { formatDateDDMMYYYY } from "../../lib/datetime";
 import "../../styles/printLabel.css";
 
 /** Paste/Kepala Warna/Assorted -- dropdown manual (2026-08-04, instruksi
@@ -15,25 +18,42 @@ interface CrossModuleData {
   remark: string | null;
 }
 
-/** Production Label Entry (2026-08-04, instruksi eksplisit user) -- cetak
- * label produksi utk printer Honeywell PC42T, ukuran sticker 100mm (lebar) x
- * 140mm (tinggi) -- dikoreksi 2026-08-04, sebelumnya kebalik (140x100).
- * Order/Material Number/Description/Batch/Order Qty/Plant
- * dari Master Data Order (OrderLookup, sama sumber dgn modul lain). Code
- * Tanki/IU Plant/Remark di-autofill dari input TERAKHIR across Premix/
- * Aftermix/Milling/Approval/Admin QC (GET /production-label/latest-cross-
- * module/:order) tapi tetap field biasa yg bisa dioverride manual. Lot No/
- * Exp/Drum Colour/Paste-Kepala Warna-Assorted SENGAJA cuma isian manual --
- * tidak ada sumber otomatisnya di sistem manapun. Layout niru contoh label
- * fisik yg dikirim user (2026-08-04, revisi ke-2): No PO + barcode CODE39,
- * Batch No + barcode CODE39, lalu tabel bordered Mat Code/Nama Produk/Lot
- * No/Exp/Plant(=iuPlant)/No Tanki/KW-PST/Warna Drum/Other(=remark). QR Code
- * di pojok kanan atas berisi 9 field (Order/Batch/Material Number/
- * Description/Lot No/Exp/IU Plant/Code Tanki/Material Type) sbg teks
- * multi-baris "Label: Value" -- lihat useEffect QR di bawah, regenerate
- * tiap salah satu field itu berubah. Klik Cetak Label -> simpan dulu sbg
- * baris History baru (POST /production-label, lihat menu Label History)
- * baru window.print(). */
+/** Production Label Entry -- cetak label produksi utk printer Honeywell
+ * PC42T, ukuran sticker 100mm (lebar) x 140mm (tinggi). Order/Material
+ * Number/Description/Batch/Order Qty/Plant dari Master Data Order
+ * (OrderLookup, sama sumber dgn modul lain). Code Tanki/IU Plant/Remark
+ * di-autofill dari input TERAKHIR across Premix/Aftermix/Milling/Approval/
+ * Admin QC (GET /production-label/latest-cross-module/:order), ditampilkan
+ * via TankSelect/IuPlantSelect (2026-08-04, revisi ke-12 -- dropdown sama
+ * spt menu input proses lain, bukan lagi input teks bebas) tapi tetap bisa
+ * dioverride manual. Lot No/Shelf Life/Drum Colour/Paste-Kepala Warna-
+ * Assorted SENGAJA cuma isian manual -- tidak ada sumber otomatisnya di
+ * sistem manapun. Exp (revisi ke-12) BUKAN lagi isian manual -- dihitung
+ * OTOMATIS = Lot No + Shelf Life (bulan), lihat useEffect kalkulasi di
+ * bawah; input Exp di form jadi disabled/read-only. Shelf Life juga
+ * ditampilkan di header label (sejajar baris "NIPPON PAINT/Production
+ * Label", rata kanan).
+ *
+ * Layout (revisi ke-7, 2026-08-04) -- niru template "shipping label": nama
+ * perusahaan (tanpa logo, sudah dihapus atas instruksi user, tidak ada
+ * file logo asli), garis rangkap, lalu SATU barcode CODE39 BESAR dominan
+ * utk **Batch** (displayValue tampil di bawah bar), baris-baris info
+ * dipisah garis horizontal tipis dgn urutan Lot No/Exp -> Material Number
+ * -> Material Description -> IU Plant/Material Type -> Code Tanki ->
+ * Drum Colour, lalu barcode **Order** (lebih kecil) berdampingan dgn QR
+ * Code dekat bawah, ditutup baris Other(=remark). Order & Batch SENGAJA
+ * ditukar posisi dari revisi sebelumnya atas instruksi user. QR Code cuma
+ * berisi 4 field (Material Number/Description/Lot No/Exp -- dipersempit
+ * dari 9 field supaya bisa dikecilkan & baris Other tetap kelihatan) sbg
+ * teks "Label: Value" per baris -- lihat useEffect QR di bawah, regenerate
+ * tiap Lot No/Exp berubah. Semua ukuran mm di CSS (printLabel.css) sudah
+ * dikalibrasi & diverifikasi lewat render headless Chrome supaya pas
+ * mengisi 140mm tanpa overflow/celah kosong -- HATI-HATI kalau mengubah
+ * ukuran font/padding lagi, terutama field yg nilainya bisa panjang
+ * (Material Number/Description) di kolom SETENGAH lebar: pernah bikin teks
+ * pecah 2 baris & overflow keluar halaman, makanya sekarang full-width.
+ * Klik Cetak Label -> simpan dulu sbg baris History baru (POST
+ * /production-label, lihat menu Label History) baru window.print(). */
 export default function ProductionLabelEntryPage() {
   const [order, setOrder] = useState("");
   const [data, setData] = useState<OrderRefData | null>(null);
@@ -44,46 +64,48 @@ export default function ProductionLabelEntryPage() {
 
   const [lotNo, setLotNo] = useState("");
   const [exp, setExp] = useState("");
+  const [shelfLife, setShelfLife] = useState("");
   const [codeTanki, setCodeTanki] = useState("");
   const [iuPlant, setIuPlant] = useState("");
   const [pasteType, setPasteType] = useState("");
   const [drumColour, setDrumColour] = useState("");
   const [remark, setRemark] = useState("");
 
-  // QR Code berisi semua field ini (2026-08-04, instruksi eksplisit user,
-  // revisi dari versi awal yg cuma berisi nomor Order) -- teks "Label: Value"
-  // per baris spy langsung kebaca apa adanya oleh scanner umum, bukan JSON.
-  // Tiap baris SENGAJA diakhiri " |" sebelum "\n" (2026-08-04, revisi ke-2,
-  // laporan user: hasil scan Google Lens numpuk jadi satu paragraf krn Lens
-  // me-reflow/collapse line-break saat menampilkan teks hasil decode -- ini
-  // di luar kendali kita, bukan bug di encoding QR-nya) -- dgn separator " |"
-  // ini, hasilnya TETAP jelas terpisah per field walau line-break-nya
-  // ke-collapse jadi satu baris ("Order: X | Batch: Y | ..."), sekaligus
-  // masih tampil sbg baris terpisah apa adanya di app yg respect "\n".
-  // Regenerate tiap salah satu field-nya berubah (termasuk field manual yg
-  // diketik operator setelah Order ditemukan), bukan cuma sekali di awal.
+  // QR Code (2026-08-04, revisi ke-7, instruksi eksplisit user: dipersempit
+  // dari 9 field jadi cuma 4 -- Material Number/Description/Lot No/Exp --
+  // supaya QR-nya bisa dikecilkan & baris Other di bawahnya tetap kelihatan
+  // tanpa kepotong/overflow). Teks "Label: Value" per baris (bukan JSON)
+  // spy langsung kebaca apa adanya oleh scanner umum. Tiap baris SENGAJA
+  // diakhiri " |" sebelum "\n" (2026-08-04, laporan user: hasil scan Google
+  // Lens numpuk jadi satu paragraf krn Lens me-reflow/collapse line-break
+  // saat menampilkan teks hasil decode -- di luar kendali kita) -- dgn
+  // separator " |" ini, hasilnya TETAP jelas terpisah per field walau
+  // line-break-nya ke-collapse. Regenerate tiap Lot No/Exp berubah (Material
+  // Number/Description ikut Order yg ditemukan).
   useEffect(() => {
     if (!data) {
       setQrDataUrl("");
       return;
     }
     const qrText = [
-      `Order: ${data.order}`,
-      `Batch: ${data.batch || "-"}`,
       `Material Number: ${data.materialNumber || "-"}`,
       `Material Description: ${data.materialDescription || "-"}`,
-      `Lot No: ${lotNo || "-"}`,
-      `Exp: ${exp || "-"}`,
-      `IU Plant: ${iuPlant || "-"}`,
-      `Code Tanki: ${codeTanki || "-"}`,
-      `Material Type: ${pasteType || "-"}`,
+      `Lot No: ${formatDateDDMMYYYY(lotNo) || "-"}`,
+      `Exp: ${formatDateDDMMYYYY(exp) || "-"}`,
     ].join(" |\n");
     let cancelled = false;
-    // errorCorrectionLevel "L" (bukan default "M") -- data 9 field ini cukup
-    // panjang (~250 char), "L" menghasilkan modul lebih sedikit (~53 vs ~61)
-    // supaya tiap modul tetap cukup besar dicetak di label 100mm, tanpa
-    // korbankan resolusi sumbernya (width dinaikkan ke 400px).
-    toDataURL(qrText, { margin: 0, width: 400, errorCorrectionLevel: "L" })
+    // BUG FIX 2026-08-04: `margin: 0` sebelumnya menghapus TOTAL quiet zone
+    // (zona kosong wajib di sekeliling QR) -- ini bikin scanner gagal
+    // mendeteksi pola QR-nya sama sekali (dilaporkan user: "QR tidak bisa
+    // discan"), meski secara visual polanya kelihatan valid. `margin: 2`
+    // (2 modul, bukan 0 ataupun default 4 spec penuh) dipilih sbg jalan
+    // tengah -- cukup utk scanner mendeteksi, tapi tidak terlalu banyak
+    // makan porsi ukuran cetak yg sudah pas-pasan di label 100x140mm.
+    // errorCorrectionLevel "L" dipertahankan (bukan default "M") supaya
+    // modulnya tetap sedikit (~37-41 modul utk data realistis 4 field ini)
+    // -- makin sedikit modul = tiap modul makin besar dicetak, makin
+    // gampang discan di printer thermal 203dpi.
+    toDataURL(qrText, { margin: 2, width: 300, errorCorrectionLevel: "L" })
       .then((url) => {
         if (!cancelled) setQrDataUrl(url);
       })
@@ -93,7 +115,28 @@ export default function ProductionLabelEntryPage() {
     return () => {
       cancelled = true;
     };
-  }, [data, lotNo, exp, iuPlant, codeTanki, pasteType]);
+  }, [data, lotNo, exp]);
+
+  // Exp = Lot No + Shelf Life (2026-08-04, instruksi eksplisit user) --
+  // Shelf Life dalam bulan, dihitung otomatis begitu Lot No & Shelf Life
+  // keduanya terisi. Field Exp jadi read-only di form (lihat disabled di
+  // JSX) krn nilainya murni turunan, bukan isian manual lagi.
+  useEffect(() => {
+    if (!lotNo || !shelfLife.trim()) {
+      setExp("");
+      return;
+    }
+    const months = Number(shelfLife);
+    const lotDate = new Date(lotNo);
+    if (!Number.isFinite(months) || Number.isNaN(lotDate.getTime())) {
+      setExp("");
+      return;
+    }
+    const expDate = new Date(lotDate);
+    expDate.setMonth(expDate.getMonth() + months);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setExp(`${expDate.getFullYear()}-${pad(expDate.getMonth() + 1)}-${pad(expDate.getDate())}`);
+  }, [lotNo, shelfLife]);
 
   async function handleOrderFound(found: OrderRefData) {
     setData(found);
@@ -102,6 +145,7 @@ export default function ProductionLabelEntryPage() {
     // Field manual murni (tidak ada sumber datanya) -- reset tiap kali Order baru dicari.
     setLotNo("");
     setExp("");
+    setShelfLife("");
     setPasteType("");
     setDrumColour("");
     setCodeTanki("");
@@ -133,8 +177,9 @@ export default function ProductionLabelEntryPage() {
         batch: data.batch ?? "",
         orderQty: data.orderQty ?? "",
         plant: data.plant ?? "",
-        lotNo,
+        lotNo: formatDateDDMMYYYY(lotNo),
         exp: exp || "",
+        shelfLife,
         codeTanki,
         iuPlant,
         pasteType,
@@ -164,23 +209,27 @@ export default function ProductionLabelEntryPage() {
           {data && (
             <div className="field-grid" style={{ marginTop: 12 }}>
               <div className="field">
+                <label>Shelf Life (bulan)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={shelfLife}
+                  onChange={(e) => setShelfLife(e.target.value)}
+                  placeholder="mis. 12"
+                />
+              </div>
+              <div className="field">
                 <label>Lot No</label>
-                <input value={lotNo} onChange={(e) => setLotNo(e.target.value)} placeholder="Nomor Lot" />
+                <input type="date" value={lotNo} onChange={(e) => setLotNo(e.target.value)} />
               </div>
               <div className="field">
-                <label>Exp</label>
-                <input type="date" value={exp} onChange={(e) => setExp(e.target.value)} />
+                <label>Exp (Otomatis: Lot No + Shelf Life)</label>
+                <input type="date" value={exp} disabled />
               </div>
+              <TankSelect id="production-label-code-tanki" value={codeTanki} onChange={setCodeTanki} required={false} />
+              <IuPlantSelect id="production-label-iu-plant" value={iuPlant} onChange={setIuPlant} plant={data?.plant ?? ""} required={false} />
               <div className="field">
-                <label>Code Tanki</label>
-                <input value={codeTanki} onChange={(e) => setCodeTanki(e.target.value)} placeholder="Auto dari input terakhir, bisa diedit" />
-              </div>
-              <div className="field">
-                <label>IU Plant</label>
-                <input value={iuPlant} onChange={(e) => setIuPlant(e.target.value)} placeholder="Auto dari input terakhir, bisa diedit" />
-              </div>
-              <div className="field">
-                <label>Material Type (Paste/Kepala Warna/Assorted)</label>
+                <label>Material Type</label>
                 <select value={pasteType} onChange={(e) => setPasteType(e.target.value)}>
                   <option value="">-- Pilih --</option>
                   {PASTE_TYPE_OPTIONS.map((o) => (
@@ -217,64 +266,93 @@ export default function ProductionLabelEntryPage() {
             </div>
             <div className="label-preview-wrap">
               <div className="label-page">
-                <div className="label-qr-row">
+                <div className="label-header">
+                  <div className="label-brand">
+                    <div className="label-brand-name">NIPPON PAINT</div>
+                    <div className="label-brand-sub">Production Label</div>
+                  </div>
+                  <div className="label-header-shelf-life">
+                    <p className="label-cell-label">Shelf Life</p>
+                    <p className="label-cell-value">{shelfLife ? `${shelfLife} Bulan` : "-"}</p>
+                  </div>
+                </div>
+                <hr className="label-rule-double" />
+
+                <p className="label-order-line">
+                  Batch <span className="label-order-value">{data.batch || "-"}</span>
+                </p>
+                <div className="label-order-barcode">
+                  <BarcodeSvg value={data.batch ?? ""} />
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell">
+                    <p className="label-cell-label">Lot No</p>
+                    <p className="label-cell-value-critical">{formatDateDDMMYYYY(lotNo) || "-"}</p>
+                  </div>
+                  <div className="label-cell">
+                    <p className="label-cell-label">Exp</p>
+                    <p className="label-cell-value-critical">{formatDateDDMMYYYY(exp) || "-"}</p>
+                  </div>
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell" style={{ flex: "1 1 100%" }}>
+                    <p className="label-cell-label">Material Number</p>
+                    <p className="label-cell-value-lg">{data.materialNumber || "-"}</p>
+                  </div>
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell" style={{ flex: "1 1 100%" }}>
+                    <p className="label-cell-label">Material Description</p>
+                    <p className="label-cell-value-lg">{data.materialDescription || "-"}</p>
+                  </div>
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell">
+                    <p className="label-cell-label">IU Plant</p>
+                    <p className="label-cell-value">{iuPlant || "-"}</p>
+                  </div>
+                  <div className="label-cell">
+                    <p className="label-cell-label">Material Type</p>
+                    <p className="label-cell-value">{pasteType || "-"}</p>
+                  </div>
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell">
+                    <p className="label-cell-label">Code Tanki</p>
+                    <p className="label-cell-value-sm">{codeTanki || "-"}</p>
+                  </div>
+                  <div className="label-cell">
+                    <p className="label-cell-label">Drum Colour</p>
+                    <p className="label-cell-value">{drumColour || "-"}</p>
+                  </div>
+                </div>
+
+                <hr className="label-rule" />
+                <div className="label-bottom-row">
+                  <div className="label-bottom-barcode">
+                    <p className="label-bottom-tag">Order {data.order}</p>
+                    <BarcodeSvg value={data.order} />
+                  </div>
                   <div className="label-qr">{qrDataUrl && <img src={qrDataUrl} alt={`QR ${data.order}`} />}</div>
                 </div>
 
-                <div className="label-barcode-group">
-                  <p className="label-barcode-title">Order</p>
-                  <div className="label-barcode-full">
-                    <BarcodeSvg value={data.order} />
+                <hr className="label-rule" />
+                <div className="label-row">
+                  <div className="label-cell" style={{ flex: "1 1 100%" }}>
+                    <p className="label-cell-label">Other</p>
+                    <p className="label-cell-value-sm">{remark || "-"}</p>
                   </div>
                 </div>
-
-                <div className="label-barcode-group">
-                  <p className="label-barcode-title">Batch</p>
-                  <div className="label-barcode-full">
-                    <BarcodeSvg value={data.batch ?? ""} />
-                  </div>
-                </div>
-
-                <table className="label-table">
-                  <tbody>
-                    <tr>
-                      <td>Material Number</td>
-                      <td>{data.materialNumber || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Material Description</td>
-                      <td>{data.materialDescription || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Lot No</td>
-                      <td>{lotNo || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Exp</td>
-                      <td>{exp || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>IU Plant</td>
-                      <td>{iuPlant || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Code Tanki</td>
-                      <td>{codeTanki || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Material Type</td>
-                      <td>{pasteType || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Drum Colour</td>
-                      <td>{drumColour || "-"}</td>
-                    </tr>
-                    <tr>
-                      <td>Other</td>
-                      <td>{remark || "-"}</td>
-                    </tr>
-                  </tbody>
-                </table>
               </div>
             </div>
           </div>

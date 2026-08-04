@@ -473,3 +473,63 @@ premixAftermixRouter.post(
     res.status(201).json({ success: true, message: "File berhasil diunggah.", data: attachment });
   })
 );
+
+// ===================== PWO Schedule (kalender mingguan) =====================
+// 2026-08-04, instruksi eksplisit user: tab "PWO Schedule & Queue" bisa
+// menjadwalkan Order antrian ke kalender mingguan (klik -> pilih tanggal/
+// jam, BUKAN drag-drop). Murni metadata jadwal (model PwoSchedule),
+// terpisah dari PremixAftermixLog -- lihat komentar di schema.prisma.
+
+const scheduleSchema = z.object({
+  order: z.string().trim().min(1, "Order wajib diisi."),
+  section: sectionEnum,
+  materialNumber: z.string().optional(),
+  materialDescription: z.string().optional(),
+  batch: z.string().optional(),
+  scheduledStart: z.coerce.date(),
+  scheduledEnd: z.coerce.date(),
+});
+
+premixAftermixRouter.get(
+  "/pwo-schedule",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const section = req.query.section === "AFTERMIX" ? "AFTERMIX" : "PREMIX";
+    if (!checkSectionMenuView(req, res, section)) return;
+    const rows = await prisma.pwoSchedule.findMany({ where: { section }, orderBy: { scheduledStart: "asc" } });
+    res.json({ success: true, data: rows });
+  })
+);
+
+/// Klik "Jadwalkan" di baris antrian -> upsert by order+section (jadwal ulang
+/// Order yg sama menimpa jadwal lamanya, bukan bikin duplikat).
+premixAftermixRouter.post(
+  "/pwo-schedule",
+  requireWrite,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = scheduleSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
+    const { order, section, ...rest } = parsed.data;
+    const saved = await prisma.pwoSchedule.upsert({
+      where: { order_section: { order, section } },
+      create: { order, section, ...rest, createdBy: req.auth!.nik },
+      update: { ...rest },
+    });
+    res.json({ success: true, message: "Jadwal berhasil disimpan.", data: saved });
+  })
+);
+
+premixAftermixRouter.delete(
+  "/pwo-schedule/:id",
+  requireWrite,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const existing = await prisma.pwoSchedule.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new HttpError(404, "Jadwal tidak ditemukan.");
+    if (!checkSectionMenuInput(req, res, existing.section)) return;
+    await prisma.pwoSchedule.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: "Jadwal berhasil dihapus." });
+  })
+);

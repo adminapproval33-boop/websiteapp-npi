@@ -6,6 +6,8 @@ import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
+import WeeklyScheduleCalendar, { ScheduleEvent } from "../../components/WeeklyScheduleCalendar";
+import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
@@ -200,6 +202,63 @@ export default function PremixAftermixPage({
     queryFn: () => api.get<{ success: boolean; data: PremixQueueRow[] }>("/premix-aftermix/premix-pwo-queue").then((r) => r.data),
     enabled: !embedded && section === "PREMIX",
   });
+
+  // Kalender mingguan "PWO Schedule & Queue" (2026-08-04, instruksi eksplisit
+  // user, niru referensi Dribbble "Task Management Dashboard Schedule
+  // Experience") -- TAMBAHAN di samping tabel antrian yg sudah ada (toggle
+  // List/Kalender), bukan pengganti. Penjadwalan lewat tombol "Jadwalkan" ->
+  // modal pilih tanggal/jam (BUKAN drag-drop, pilihan eksplisit user).
+  const [queueView, setQueueView] = useState<"list" | "calendar">("list");
+  const [scheduleTarget, setScheduleTarget] = useState<{
+    order: string;
+    materialNumber: string | null;
+    materialDescription: string | null;
+    batch: string | null;
+  } | null>(null);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleStartTime, setScheduleStartTime] = useState("08:00");
+  const [scheduleEndTime, setScheduleEndTime] = useState("09:00");
+  const [scheduleError, setScheduleError] = useState("");
+
+  const pwoScheduleQuery = useQuery({
+    queryKey: ["pwo-schedule", section],
+    queryFn: () => api.get<{ success: boolean; data: ScheduleEvent[] }>(`/premix-aftermix/pwo-schedule?section=${section}`).then((r) => r.data),
+    enabled: !embedded,
+  });
+
+  const scheduleMutation = useMutation({
+    mutationFn: () => {
+      if (!scheduleTarget) return Promise.reject(new Error("Tidak ada Order yang dipilih."));
+      return api.post("/premix-aftermix/pwo-schedule", {
+        order: scheduleTarget.order,
+        section,
+        materialNumber: scheduleTarget.materialNumber ?? "",
+        materialDescription: scheduleTarget.materialDescription ?? "",
+        batch: scheduleTarget.batch ?? "",
+        scheduledStart: `${scheduleDate}T${scheduleStartTime}:00`,
+        scheduledEnd: `${scheduleDate}T${scheduleEndTime}:00`,
+      });
+    },
+    onSuccess: () => {
+      setScheduleError("");
+      setScheduleTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
+    },
+    onError: (err) => setScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal."),
+  });
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/premix-aftermix/pwo-schedule/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
+  });
+
+  function openScheduleModal(target: { order: string; materialNumber: string | null; materialDescription: string | null; batch: string | null }) {
+    setScheduleTarget(target);
+    setScheduleDate("");
+    setScheduleStartTime("08:00");
+    setScheduleEndTime("09:00");
+    setScheduleError("");
+  }
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -731,12 +790,26 @@ export default function PremixAftermixPage({
               PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Aftermix (Colour Matching, Approval,
               Packing).
             </p>
-            <input
-              placeholder="Cari nomor Order..."
-              value={queueSearch}
-              onChange={(e) => setQueueSearch(e.target.value)}
-              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+              <input
+                placeholder="Cari nomor Order..."
+                value={queueSearch}
+                onChange={(e) => setQueueSearch(e.target.value)}
+                style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
+                  📋 List
+                </button>
+                <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
+                  📅 Kalender
+                </button>
+              </div>
+            </div>
+
+            {queueView === "calendar" ? (
+              <WeeklyScheduleCalendar events={pwoScheduleQuery.data ?? []} onDelete={(id) => deleteScheduleMutation.mutate(id)} />
+            ) : (
             <DataTable
               rowKey={(r: QueueRow) => r.order}
               exportFileName="aftermix-pwo-schedule-queue"
@@ -778,19 +851,37 @@ export default function PremixAftermixPage({
                   key: "actions",
                   label: "Aksi",
                   render: (r) => (
-                    <button
-                      className="btn btn-outline"
-                      type="button"
-                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
-                      onClick={() => loadIntoInput(r)}
-                    >
-                      Input Aftermix
-                    </button>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                        onClick={() => loadIntoInput(r)}
+                      >
+                        Input Aftermix
+                      </button>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                        onClick={() =>
+                          openScheduleModal({
+                            order: r.order,
+                            materialNumber: r.materialNumber,
+                            materialDescription: r.materialDescription,
+                            batch: r.batch,
+                          })
+                        }
+                      >
+                        📅 Jadwalkan
+                      </button>
+                    </div>
                   ),
                   csvValue: () => "",
                 },
               ]}
             />
+            )}
           </div>
         </div>
       )}
@@ -807,12 +898,26 @@ export default function PremixAftermixPage({
               memang tidak pernah lewat Premix (bukan bagian rangkaian proses material itu) tidak ikut ditampilkan di
               sini.
             </p>
-            <input
-              placeholder="Cari nomor Order..."
-              value={queueSearch}
-              onChange={(e) => setQueueSearch(e.target.value)}
-              style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+              <input
+                placeholder="Cari nomor Order..."
+                value={queueSearch}
+                onChange={(e) => setQueueSearch(e.target.value)}
+                style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
+                  📋 List
+                </button>
+                <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
+                  📅 Kalender
+                </button>
+              </div>
+            </div>
+
+            {queueView === "calendar" ? (
+              <WeeklyScheduleCalendar events={pwoScheduleQuery.data ?? []} onDelete={(id) => deleteScheduleMutation.mutate(id)} />
+            ) : (
             <DataTable
               rowKey={(r: PremixQueueRow) => r.order}
               exportFileName="premix-pwo-schedule-queue"
@@ -835,21 +940,68 @@ export default function PremixAftermixPage({
                   key: "actions",
                   label: "Aksi",
                   render: (r) => (
-                    <button
-                      className="btn btn-outline"
-                      type="button"
-                      style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
-                      onClick={() => loadIntoInput(r)}
-                    >
-                      Input Premix
-                    </button>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                        onClick={() => loadIntoInput(r)}
+                      >
+                        Input Premix
+                      </button>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        style={{ padding: "6px 10px", whiteSpace: "nowrap" }}
+                        onClick={() =>
+                          openScheduleModal({
+                            order: r.order,
+                            materialNumber: r.materialNumber,
+                            materialDescription: r.materialDescription,
+                            batch: r.batch,
+                          })
+                        }
+                      >
+                        📅 Jadwalkan
+                      </button>
+                    </div>
                   ),
                   csvValue: () => "",
                 },
               ]}
             />
+            )}
           </div>
         </div>
+      )}
+
+      {scheduleTarget && (
+        <Modal title={`Jadwalkan — Order ${scheduleTarget.order}`} onClose={() => setScheduleTarget(null)} width={380}>
+          <div className="field-grid">
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>Tanggal</label>
+              <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Jam Mulai</label>
+              <input type="time" value={scheduleStartTime} onChange={(e) => setScheduleStartTime(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Jam Selesai</label>
+              <input type="time" value={scheduleEndTime} onChange={(e) => setScheduleEndTime(e.target.value)} />
+            </div>
+          </div>
+          {scheduleError && <p className="error-text">{scheduleError}</p>}
+          <button
+            className="btn"
+            type="button"
+            style={{ marginTop: 12 }}
+            disabled={!scheduleDate || scheduleMutation.isPending}
+            onClick={() => scheduleMutation.mutate()}
+          >
+            {scheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
+          </button>
+        </Modal>
       )}
     </div>
   );

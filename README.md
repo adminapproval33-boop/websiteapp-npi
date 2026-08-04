@@ -2,82 +2,47 @@
 
 Versi website mandiri dari "Websiteapp NPI" (sebelumnya Google Apps Script +
 Google Sheets). Backend Node.js/Express/Prisma + PostgreSQL, frontend
-React/Vite. Lihat rencana lengkap & progres fase di
-`C:\Users\abdad\.claude\plans\keen-beaming-hellman.md`.
+React/Vite, monorepo lewat npm workspaces (`server/` + `web/`).
 
-## Status saat ini: Fase 0-3 selesai. Menunggu file data untuk Fase 4 (migrasi)
+> Dokumentasi bisnis/end-user (BRD, Knowledge Base, User Guide, SIT/UAT test
+> case) ada di folder [`docs/`](./docs). README ini fokus ke sisi teknis/
+> source code untuk developer.
 
-Yang sudah bisa dipakai (seluruh modul fungsional versi lama sudah dibangun ulang):
-- Login (NIK + password), sesi server-side dengan sliding expiration 30 menit
-- Proteksi brute-force login (5x salah → kunci 5 menit)
-- Ganti password (wajib untuk user hasil seed/migrasi pertama kali)
-- User Management penuh (Create/Update/Delete/List) — khusus Full Access
-- Import Referensi Order/PO & Code Tanki dari file CSV/Excel — khusus Full Access
-- **Premix, Aftermix, Milling, Colour Matching, Packing, Production Process
-  Entry**: form input + history (filter by Order + export CSV), lampiran untuk
-  Premix/Aftermix
-- **Creating Product Spek**: CRUD penuh (Edit/Delete khusus Full Access)
-- **Input Check Results**: CRUD + upload appearance file + evaluasi pass/fail
-  otomatis dari string spec (mis. "40-45", "<=28") + cetak Check Sheet & COA
-  (halaman print A4 siap pakai, menggantikan pola window.open lama)
-- **Approval Schedule**: input 21-field (dgn autofill dari histori Order
-  sebelumnya) + Lot History (status & processing time otomatis, filter per
-  kolom, export CSV) + lampiran (otomatis tercatat ke Remark) + **Approval
-  Dashboard** (KPI age-bucket, grafik batang by Tech Name/Plant)
-- Kerangka aplikasi (sidebar menu sama seperti versi lama, topbar, routing).
-  Menu yang memang belum pernah diimplementasikan di versi lama (Production
-  Label, Purchase Requisition, Tank/Production Order Monitoring, COOISPI
-  Master Data, menu Employee master) tetap tampil sebagai "Coming Soon".
+## Status saat ini (4 Agustus 2026)
 
-Belum dikerjakan: **Fase 4 — skrip migrasi data lama**. Menunggu Anda export
-Sheet-sheet berikut ke CSV/Excel dan mengirimkannya: `USER`, `Approval
-Schedule Log`, `Premix Log`, `Aftermix Log`, `Milling Log`, `Colour Matching
-Log`, `Packing Log`, `Product Spec Log`, `Check Results Log`, referensi
-PO/Order, dan daftar Code Tanki. Skrip importnya akan dibuat begitu file
-tersedia supaya cocok dengan struktur kolom sebenarnya (bukan tebakan).
+Seluruh alur produksi utama sudah dibangun dan dipakai aktif secara internal:
+- **Auth & User Management**: login NIK+password, sesi server-side (sliding
+  expiration), proteksi brute-force, ganti password wajib di login pertama,
+  3 level akses global (Full Access/Input/View) + kontrol akses **per-menu**
+  (View/Input/Hide) untuk 10 menu produksi/QC — lihat `server/src/lib/menuAccess.ts`.
+- **Production & MRP Schedule**: Premix, Milling (multi-Pass), Aftermix,
+  Colour Matching, Bongkaran, Approval, Packing — tiap tahap py History,
+  PWO Queue/antrian, dan sebagian digerbangi urutan tahap baku
+  (`server/src/lib/stageGate.ts`, sumbernya Master Data "Material Flow Proses").
+- **Portal Quality Control**: Creating Product Spec, Input Check Results
+  (evaluasi Pass/Fail otomatis vs spec), Input Admin QC (Lot Passed/QC to
+  App/QC Passed, standalone dari Approval).
+- **Production Label**: cetak label produksi (barcode CODE39 Order & Batch +
+  QR Code 9-field) untuk printer Honeywell PC42T (100mm x 140mm), tersimpan
+  ke Label History tiap kali dicetak.
+- **Dashboard**: Produktivitas (per IU Plant/periode), Approval, Production
+  Order Monitoring (Proses Bar lintas tahap), Tank Monitoring, Mesin Monitoring.
+- **Master Data**: Referensi Order/PO (import dari ekspor SAP-COOISPI),
+  Material Flow Proses, Master Tanki, Master Mesin, Data Karyawan.
+- **File storage**: lampiran/upload disimpan ke **Vercel Blob** (bukan disk
+  lokal) — lihat catatan keamanan dependency di bawah.
 
-### Sebelum bisa dicoba langsung
-
-Sistem ini butuh PostgreSQL yang hidup (lihat bagian "Menjalankan dengan
-Docker" di atas). Belum ada uji coba end-to-end (login/CRUD sungguhan) karena
-PC pengembangan belum punya Docker/Postgres terpasang — baru diverifikasi
-lewat typecheck & build (semua bersih, 0 error) di setiap fase. Setelah
-Postgres/Docker tersedia, jalankan `docker compose up -d --build` lalu
-`docker compose exec api npm run seed`, dan coba alur: login → isi salah satu
-form produksi → cek muncul di History → export CSV → (Full Access) coba User
-Management & Import Master Data.
+**Belum dikerjakan**: Purchase Requisition (PR Entry/History/Monitoring) —
+masih placeholder "Coming Soon" di menu, belum pernah diimplementasikan
+(termasuk di versi Apps Script sebelumnya).
 
 Catatan keamanan dependency: paket `xlsx` (SheetJS) tidak dipakai karena versi
 npm-nya punya kerawanan HIGH severity tanpa fix resmi — diganti `exceljs`.
-Masih ada 2 advisory MODERATE yang diterima sebagai risiko rendah: `esbuild`
-(hanya memengaruhi `vite dev`, tidak dipakai di build produksi/nginx) dan
-`uuid` transitif di dalam `exceljs` (dipakai hanya di endpoint import CSV
-khusus admin Full Access). Jalankan `npm audit` sewaktu-waktu untuk cek ulang.
+Jalankan `npm audit` sewaktu-waktu untuk cek ulang.
 
-## Menjalankan dengan Docker (paling mudah)
+## Menjalankan tanpa Docker (jalur yang diverifikasi & dipakai sehari-hari)
 
-Prasyarat: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-terpasang (Windows/Mac/Linux — bisa untuk server lokal pabrik maupun VPS).
-
-```powershell
-docker compose up -d --build
-docker compose exec api npm run seed   # buat akun Full Access pertama
-```
-
-- Website: http://localhost:8080
-- API langsung (opsional, untuk debug): http://localhost:4000/api/health
-- Login pertama pakai NIK & password dari `SEED_ADMIN_NIK` /
-  `SEED_ADMIN_PASSWORD` di `docker-compose.yml` (default NIK `000001`,
-  password `ChangeMe123!`) — Anda akan diminta ganti password saat login
-  pertama.
-
-Untuk pindah ke VPS nanti: copy folder project ini, jalankan perintah yang
-sama di server tsb (ubah `CORS_ORIGIN` di `docker-compose.yml` ke domain
-publiknya). Tidak ada perubahan kode.
-
-## Menjalankan tanpa Docker (development)
-
-Prasyarat: Node.js 20+, PostgreSQL 16 berjalan lokal.
+Prasyarat: Node.js 20+, **PostgreSQL 18** terpasang & berjalan sebagai service lokal.
 
 ```powershell
 # 1. Install semua dependency (root + server + web, via npm workspaces)
@@ -85,34 +50,65 @@ npm install
 
 # 2. Siapkan database
 copy server\.env.example server\.env
-# edit server\.env, sesuaikan DATABASE_URL ke Postgres lokal Anda
+# edit server\.env: DATABASE_URL, BLOB_READ_WRITE_TOKEN (Vercel Blob), dst
 cd server
-npx prisma migrate dev --name init
-npm run seed
+npx prisma migrate dev
+npm run seed        # buat akun Full Access pertama (NIK/password dari .env)
 cd ..
 
 # 3. Jalankan backend & frontend di 2 terminal terpisah
-npm run dev:server   # http://localhost:4000
-npm run dev:web      # http://localhost:5173 (proxy /api ke :4000)
+npm run dev:server   # http://localhost:4000  (health check: /api/health)
+npm run dev:web      # http://localhost:5173  (proxy /api ke :4000, host:true jadi bisa diakses dari LAN)
+```
+
+Kalau butuh diakses dari luar jaringan kantor (demo/presentasi), jalankan
+`ngrok http 5173` — cukup tunnel frontend saja, `/api` sudah di-proxy Vite.
+
+## Menjalankan dengan Docker (belum diverifikasi ulang, cek dulu sebelum dipakai)
+
+`docker-compose.yml` disiapkan sejak fase awal project, tapi **berpotensi usang**
+dan belum di-update mengikuti perubahan terbaru — dua hal yang perlu dicek/
+disesuaikan dulu sebelum dipakai:
+- Image `postgres:16-alpine` di compose vs **PostgreSQL 18** yang dipakai jalur
+  native saat ini (sebaiknya disamakan supaya perilaku identik).
+- Env var `UPLOAD_DIR` (disk lokal) di compose sudah tidak relevan — kode
+  saat ini upload lampiran ke **Vercel Blob** (`BLOB_READ_WRITE_TOKEN`), bukan
+  disk lokal lagi.
+
+```powershell
+docker compose up -d --build
+docker compose exec api npm run seed
 ```
 
 ## Struktur project
 
 ```
 websiteapp-npi/
-├─ docker-compose.yml
-├─ server/            Express + TypeScript + Prisma (PostgreSQL)
-│  ├─ prisma/schema.prisma   skema seluruh modul (termasuk yg belum dibangun)
+├─ docker-compose.yml      (lihat catatan di atas -- perlu diverifikasi ulang)
+├─ docs/                   BRD, Knowledge Base, User Guide, SIT/UAT test cases
+├─ server/                 Express + TypeScript + Prisma (PostgreSQL)
+│  ├─ prisma/schema.prisma     skema seluruh modul + migrations/
 │  └─ src/
-│     ├─ modules/     auth, users, masterdata (bertambah tiap fase)
-│     ├─ middleware/  requireAuth / requireWrite / requireFullAccess
-│     └─ scripts/     seed.ts (+ skrip import migrasi di Fase 4)
-└─ web/               React + Vite + TypeScript
+│     ├─ modules/          1 folder per modul: auth, users, masterdata,
+│     │                    premixAftermix, milling, colourMatching,
+│     │                    bongkaran, packing, productSpec, checkResults,
+│     │                    approval, adminQc, dashboard, productionLabel,
+│     │                    tankManualInput, productionOrderManualInput
+│     ├─ middleware/       requireAuth / requireWrite / requireFullAccess /
+│     │                    requireMenuView / requireMenuInput
+│     ├─ lib/              menuAccess.ts (kontrol akses per-menu),
+│     │                    stageGate.ts (urutan tahap baku), session.ts
+│     └─ scripts/          seed.ts
+└─ web/                    React + Vite + TypeScript
    └─ src/
-      ├─ layout/       Sidebar, Topbar, AppLayout, struktur menu (menu.tsx)
-      ├─ auth/          AuthContext, ProtectedRoute
-      ├─ api/           client fetch + penyimpanan sesi (sessionStorage)
-      └─ pages/         1 folder per modul
+      ├─ layout/           Sidebar, Topbar, AppLayout, struktur menu (menu.tsx)
+      ├─ auth/             AuthContext, ProtectedRoute
+      ├─ api/              client fetch + penyimpanan sesi (sessionStorage)
+      ├─ lib/              menuAccess.ts (mirror sisi frontend), printFit,
+      │                    datetime, useResizableColWidths, dsb
+      ├─ components/       DataTable, OrderLookup, EmployeeNameSelect,
+      │                    BarcodeSvg, dsb -- dipakai lintas modul
+      └─ pages/            1 folder per modul (mirror struktur server/modules)
 ```
 
 ## Catatan keamanan & perbedaan dari versi Apps Script
@@ -120,11 +116,11 @@ websiteapp-npi/
 - Tidak ada lagi akun "Developer" khusus di luar tabel user — admin pertama
   dibuat lewat `npm run seed`, login lewat jalur yang sama seperti user lain.
 - Password lama (hash SHA-256 di Sheet USER) tidak bisa dipulihkan ke
-  plaintext. Saat migrasi data user (Fase 4), setiap akun akan mendapat
-  password sementara = NIK masing-masing dan wajib ganti password di login
-  pertama — informasikan ke tim sebelum go-live.
-- Endpoint List User sekarang khusus Full Access (di versi lama, siapa pun
-  yang login bisa memanggil `listUsers`) — perbaikan otorisasi.
+  plaintext.
+- Endpoint List User khusus Full Access (di versi lama, siapa pun yang login
+  bisa memanggil `listUsers`) — perbaikan otorisasi.
 - Sinkronisasi dua-arah ke Google Sheets mirror (khusus modul Approval) tidak
-  dibawa ke versi ini — sudah tidak relevan karena data kini bisa
-  difilter/diedit/diexport langsung di website.
+  dibawa ke versi ini.
+- Kontrol akses per-menu (View/Input/Hide) dan aturan "Input-level bisa hapus
+  History menu miliknya sendiri" adalah fitur baru yang tidak ada di versi
+  Apps Script — lihat `docs/KnowledgeBase.md` bagian Role & Akses.

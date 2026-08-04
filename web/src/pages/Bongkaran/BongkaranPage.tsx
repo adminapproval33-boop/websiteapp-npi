@@ -528,7 +528,7 @@ export default function BongkaranPage({
                       <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
                         ✏️
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "bongkaran") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

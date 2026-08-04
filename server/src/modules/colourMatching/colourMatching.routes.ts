@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 
@@ -260,7 +260,7 @@ colourMatchingRouter.put(
 
 colourMatchingRouter.delete(
   "/:id",
-  requireFullAccess,
+  requireMenuInput("colourMatching"),
   asyncRoute(async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.colourMatchingLog.findUnique({ where: { id } });

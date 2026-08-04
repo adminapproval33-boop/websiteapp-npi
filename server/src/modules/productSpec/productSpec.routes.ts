@@ -132,7 +132,7 @@ productSpecRouter.put(
 
 productSpecRouter.delete(
   "/:specId",
-  requireFullAccess,
+  requireMenuInput("productSpec"),
   asyncRoute(async (req, res) => {
     const specId = req.params.specId;
     const existing = await prisma.productSpec.findUnique({ where: { specId } });

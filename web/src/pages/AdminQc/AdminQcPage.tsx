@@ -661,7 +661,7 @@ export default function AdminQcPage() {
                       >
                         📎
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "adminQc") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

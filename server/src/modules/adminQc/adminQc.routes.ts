@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
 export const adminQcRouter = Router();
@@ -117,7 +117,7 @@ adminQcRouter.put(
 
 adminQcRouter.delete(
   "/:adminQcId",
-  requireFullAccess,
+  requireMenuInput("adminQc"),
   asyncRoute(async (req, res) => {
     const adminQcId = req.params.adminQcId;
     const existing = await prisma.adminQc.findUnique({ where: { adminQcId } });
@@ -155,7 +155,7 @@ adminQcRouter.post(
 
 adminQcRouter.delete(
   "/:adminQcId/attachments/:id",
-  requireFullAccess,
+  requireMenuInput("adminQc"),
   asyncRoute(async (req, res) => {
     const id = Number(req.params.id);
     const attachment = await prisma.adminQcAttachment.findUnique({ where: { id } });

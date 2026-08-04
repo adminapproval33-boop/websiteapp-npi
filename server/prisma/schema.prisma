@@ -670,3 +670,35 @@ model AdminQcAttachment {
   @@index([adminQcId])
   @@map("admin_qc_attachments")
 }
+
+/// Production Label (2026-08-04, instruksi eksplisit user) -- histori tiap
+/// kali label produksi dicetak dari menu Production Label Entry. Order/
+/// Material Number/Description/Batch/Order Qty/Plant diambil dari Master
+/// Data Order (OrderLookup, sama spt modul lain). codeTanki/iuPlant/remark
+/// di-autofill dari input TERAKHIR across Premix/Aftermix/Milling/Approval/
+/// Admin QC (lihat getLatestCrossModule di productionLabel.routes.ts) tapi
+/// tetap bisa dioverride manual oleh operator sebelum cetak. lotNo/exp/
+/// pasteType/drumColour TIDAK punya sumber otomatis di modul manapun --
+/// selalu diisi manual oleh operator di form Cetak Label.
+model ProductionLabel {
+  id                  String    @id @default(uuid())
+  timestamp           DateTime  @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  orderQty            String?
+  plant               String?
+  lotNo               String?
+  exp                 DateTime?
+  codeTanki           String?
+  iuPlant             String?
+  /// "Paste" | "Kepala Warna" | "Assorted" -- dropdown manual, lihat komentar di ProductionLabelEntryPage.tsx.
+  pasteType           String?
+  drumColour          String?
+  remark              String?
+  printedBy           String
+
+  @@index([order])
+  @@map("production_labels")
+}

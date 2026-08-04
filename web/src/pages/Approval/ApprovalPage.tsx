@@ -694,7 +694,7 @@ export default function ApprovalPage({
                       >
                         📎
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "approval") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"
@@ -797,7 +797,7 @@ export default function ApprovalPage({
                 <a href={fileUrl(a.filePath)} target="_blank" rel="noreferrer">
                   {a.fileName}
                 </a>
-                {user?.access === "FULL_ACCESS" && (
+                {getMenuLevel(user, "approval") === "INPUT" && (
                   <button
                     className="btn btn-danger"
                     onClick={() => deleteAttachmentMutation.mutate({ approvalId: attachmentModalId, id: a.id })}

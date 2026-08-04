@@ -19,6 +19,8 @@ import ProductionOrderDashboardPage from "../pages/ProductionOrderDashboard/Prod
 import TankDashboardPage from "../pages/TankDashboard/TankDashboardPage";
 import ProduktivitasDashboardPage from "../pages/ProduktivitasDashboard/ProduktivitasDashboardPage";
 import MesinDashboardPage from "../pages/MesinDashboard/MesinDashboardPage";
+import ProductionLabelEntryPage from "../pages/ProductionLabel/ProductionLabelEntryPage";
+import LabelHistoryPage from "../pages/ProductionLabel/LabelHistoryPage";
 
 export interface MenuLeaf {
   type: "leaf";
@@ -72,8 +74,8 @@ export const menuTree: MenuNode[] = [
     leaf("Input Admin QC", "/qc/admin-qc", <AdminQcPage />),
   ]),
   group("Production Label", [
-    leaf("Production Label Entry", "/production-label/entry", undefined, OUT_OF_SCOPE),
-    leaf("Label History", "/production-label/history", undefined, OUT_OF_SCOPE),
+    leaf("Production Label Entry", "/production-label/entry", <ProductionLabelEntryPage />),
+    leaf("Label History", "/production-label/history", <LabelHistoryPage />),
   ]),
   group("Purchase Requisition", [
     leaf("PR Entry", "/pr/entry", undefined, OUT_OF_SCOPE),

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { checkQcGate } from "../../lib/stageGate";
 
@@ -200,7 +200,7 @@ checkResultsRouter.put(
 
 checkResultsRouter.delete(
   "/:checkId",
-  requireFullAccess,
+  requireMenuInput("checkResults"),
   asyncRoute(async (req, res) => {
     const checkId = req.params.checkId;
     const existing = await prisma.checkResult.findUnique({ where: { checkId } });
@@ -240,7 +240,7 @@ checkResultsRouter.post(
 
 checkResultsRouter.delete(
   "/:checkId/appearance-files/:fileId",
-  requireFullAccess,
+  requireMenuInput("checkResults"),
   asyncRoute(async (req, res) => {
     const fileId = Number(req.params.fileId);
     const file = await prisma.icrAppearanceFile.findUnique({ where: { id: fileId } });

@@ -1,0 +1,154 @@
+/* Production Label -- Honeywell PC42T, ukuran sticker 100mm (lebar) x 140mm
+   (tinggi) -- dikoreksi 2026-08-04 (sebelumnya kebalik, 140x100), user
+   konfirmasi ukuran yg benar tinggi 140mm lebar 100mm. Layout meniru contoh
+   label fisik yg dikirim user (Order + barcode, Batch + barcode, lalu tabel
+   bordered Material Number/Material Description/Lot No/Exp/IU Plant/Code
+   Tanki/Material Type/Drum Colour/Other), 2026-08-04.
+   PENTING -- @page pakai NAMA (Paged Media "named page", `page: productionLabel`
+   di .label-page) SENGAJA, BUKAN @page tanpa nama spt sebelumnya. Root cause
+   bug "hasil print kecil & buram" (dilaporkan user 2026-08-04): app ini SPA,
+   print.css (dipakai Print COA/Check Sheet, @page tanpa nama size:A4) ikut
+   ke-bundle bareng CSS ini krn Vite menggabungkan semua CSS yg pernah
+   di-import di seluruh app jadi satu file -- 2 aturan "@page {}" tanpa nama
+   yg beda size TABRAKAN, siapa menang tergantung urutan bundling (tidak
+   predictable), yg observed menang malah size A4 (bikin browser nge-layout
+   spt cetak ke kanvas A4, tapi kertas fisik PC42T cuma segini -> cuma
+   sepojok konten yg ke-print, sisanya predictable "constant"). Named page
+   (`@page productionLabel`) dipilih SPESIFIK by name lewat `page:` property
+   di elemen, jadi TIDAK bisa collide dgn @page anonim manapun, brp pun
+   banyak stylesheet print lain yg ikut ke-bundle di masa depan. */
+@page productionLabel {
+  size: 100mm 140mm;
+  margin: 0;
+}
+
+.label-toolbar {
+  max-width: 100mm;
+  margin: 0 auto 12px;
+}
+
+.label-preview-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+
+.label-page {
+  page: productionLabel;
+  width: 100mm;
+  height: 140mm;
+  box-sizing: border-box;
+  padding: 3mm 4mm;
+  background: #fff;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+  box-shadow: 0 0 0 1px #cbd5e1;
+}
+
+/* QR sekarang berisi 9 field (bukan cuma nomor Order, lihat useEffect QR di
+   ProductionLabelEntryPage.tsx), jadi jauh lebih padat modulnya (~53 modul
+   di errorCorrectionLevel L utk data realistis, vs ~29 modul versi lama yg
+   cuma isi Order) -- diletakkan sbg row tersendiri (BUKAN absolute-position
+   overlay spt sebelumnya) supaya reservasi ruangnya eksplisit & tidak
+   ketiban/menutupi barcode Order di bawahnya, dan ukurannya dinaikkan ke
+   24mm supaya tiap modul tetap cukup besar buat di-scan di printer thermal
+   203dpi (~0.45mm/modul). */
+.label-page .label-qr-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.label-page .label-qr {
+  width: 24mm;
+  height: 24mm;
+}
+
+.label-page .label-qr img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.label-page .label-barcode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3mm;
+}
+
+.label-page .label-barcode-title {
+  margin: 0;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.label-page .label-barcode-full {
+  display: flex;
+  justify-content: center;
+}
+
+.label-page .label-barcode-full svg {
+  height: 8.5mm;
+  width: 100%;
+}
+
+.label-page .label-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.label-page .label-table td {
+  border: 0.5pt solid #000;
+  padding: 0.7mm 2mm;
+  font-size: 9px;
+  line-height: 1.25;
+  vertical-align: middle;
+  word-break: break-word;
+}
+
+.label-page .label-table td:first-child {
+  width: 28mm;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 8px;
+  background: #f8fafc;
+}
+
+.label-page .label-table td:last-child {
+  font-weight: 600;
+}
+
+@media print {
+  .label-form-panel,
+  .label-toolbar {
+    display: none !important;
+  }
+  .label-preview-wrap {
+    padding: 0;
+    background: none;
+    border-radius: 0;
+  }
+  .label-page {
+    box-shadow: none;
+  }
+  /* Netralkan chrome .panel (border/shadow/padding, lihat app.css) di panel
+     pembungkus preview supaya HANYA .label-page yg tercetak, pas 140x100mm --
+     kalau tidak, padding .panel-body (20px) + border .panel bikin konten
+     terdorong keluar area @page dan bisa memicu halaman ke-2 kosong. */
+  .label-print-panel {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: none !important;
+  }
+  .label-print-panel .panel-body {
+    padding: 0 !important;
+  }
+}

@@ -732,7 +732,7 @@ export default function PackingPage({
                       <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
                         ✏️
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "packing") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

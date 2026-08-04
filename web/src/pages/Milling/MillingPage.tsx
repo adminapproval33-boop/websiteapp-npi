@@ -927,7 +927,7 @@ export default function MillingPage({
                       <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r.log)}>
                         ✏️
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "milling") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

@@ -785,7 +785,7 @@ export default function CheckResultsPage({
                       <button className="btn btn-outline" type="button" onClick={() => startEdit(r.raw)}>
                         Edit
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "checkResults") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

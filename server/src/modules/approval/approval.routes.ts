@@ -386,7 +386,7 @@ approvalRouter.put(
 
 approvalRouter.delete(
   "/:approvalId",
-  requireFullAccess,
+  requireMenuInput("approval"),
   asyncRoute(async (req, res) => {
     const approvalId = req.params.approvalId;
     const existing = await prisma.approvalSchedule.findUnique({ where: { approvalId } });
@@ -453,7 +453,7 @@ approvalRouter.post(
 
 approvalRouter.delete(
   "/:approvalId/attachments/:id",
-  requireFullAccess,
+  requireMenuInput("approval"),
   asyncRoute(async (req, res) => {
     const id = Number(req.params.id);
     const attachment = await prisma.approvalAttachment.findUnique({ where: { id } });

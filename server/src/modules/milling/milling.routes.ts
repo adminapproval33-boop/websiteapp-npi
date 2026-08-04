@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 
@@ -274,7 +274,7 @@ millingRouter.put(
 
 millingRouter.delete(
   "/:id",
-  requireFullAccess,
+  requireMenuInput("milling"),
   asyncRoute(async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.millingLog.findUnique({ where: { id } });

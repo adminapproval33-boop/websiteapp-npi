@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
 export const bongkaranRouter = Router();
@@ -164,7 +164,7 @@ bongkaranRouter.put(
 
 bongkaranRouter.delete(
   "/:id",
-  requireFullAccess,
+  requireMenuInput("bongkaran"),
   asyncRoute(async (req, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.bongkaranLog.findUnique({ where: { id } });

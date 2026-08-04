@@ -468,7 +468,7 @@ export default function ProductSpekPage() {
                       >
                         ✏️
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, "productSpec") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

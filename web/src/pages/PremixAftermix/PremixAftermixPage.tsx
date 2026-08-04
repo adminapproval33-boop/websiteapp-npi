@@ -697,7 +697,7 @@ export default function PremixAftermixPage({
                       <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
                         ✏️
                       </button>
-                      {user?.access === "FULL_ACCESS" && (
+                      {getMenuLevel(user, section === "PREMIX" ? "premix" : "aftermix") === "INPUT" && (
                         <button
                           className="btn btn-danger"
                           type="button"

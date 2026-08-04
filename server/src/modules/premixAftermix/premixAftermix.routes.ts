@@ -2,7 +2,7 @@ import { Router, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
@@ -436,11 +436,11 @@ premixAftermixRouter.put(
 
 premixAftermixRouter.delete(
   "/:id",
-  requireFullAccess,
-  asyncRoute(async (req, res) => {
+  asyncRoute(async (req: AuthedRequest, res) => {
     const id = Number(req.params.id);
     const existing = await prisma.premixAftermixLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");
+    if (!checkSectionMenuInput(req, res, existing.section)) return;
     await prisma.premixAftermixLog.delete({ where: { id } });
     res.json({ success: true, message: "Data berhasil dihapus." });
   })

@@ -476,9 +476,12 @@ premixAftermixRouter.post(
 
 // ===================== PWO Schedule (kalender mingguan) =====================
 // 2026-08-04, instruksi eksplisit user: tab "PWO Schedule & Queue" bisa
-// menjadwalkan Order antrian ke kalender mingguan (klik -> pilih tanggal/
-// jam, BUKAN drag-drop). Murni metadata jadwal (model PwoSchedule),
-// terpisah dari PremixAftermixLog -- lihat komentar di schema.prisma.
+// menjadwalkan Order antrian ke kalender mingguan. VERSI AWAL klik -> pilih
+// tanggal/jam; 2026-08-05 DISEDERHANAKAN (instruksi eksplisit user: "menu jam
+// tidak perlu, cukup list & nomor urutan") jadi drag-drop Queue -> hari
+// (scheduledDate, tanpa jam) + urutan prioritas dalam hari itu (sequence).
+// Murni metadata jadwal (model PwoSchedule), terpisah dari
+// PremixAftermixLog -- lihat komentar di schema.prisma.
 
 const scheduleSchema = z.object({
   order: z.string().trim().min(1, "Order wajib diisi."),
@@ -486,8 +489,7 @@ const scheduleSchema = z.object({
   materialNumber: z.string().optional(),
   materialDescription: z.string().optional(),
   batch: z.string().optional(),
-  scheduledStart: z.coerce.date(),
-  scheduledEnd: z.coerce.date(),
+  scheduledDate: z.coerce.date(),
 });
 
 premixAftermixRouter.get(
@@ -495,13 +497,37 @@ premixAftermixRouter.get(
   asyncRoute(async (req: AuthedRequest, res) => {
     const section = req.query.section === "AFTERMIX" ? "AFTERMIX" : "PREMIX";
     if (!checkSectionMenuView(req, res, section)) return;
-    const rows = await prisma.pwoSchedule.findMany({ where: { section }, orderBy: { scheduledStart: "asc" } });
-    res.json({ success: true, data: rows });
+    const rows = await prisma.pwoSchedule.findMany({
+      where: { section },
+      orderBy: [{ scheduledDate: "asc" }, { sequence: "asc" }],
+    });
+
+    // "Today-ATP" (2026-08-05, instruksi eksplisit user) -- live lookup ke
+    // Master Data Referensi Order/PO (SAP-COOISPI), BUKAN disimpan di
+    // PwoSchedule sendiri, supaya re-upload Master Data otomatis update
+    // nilainya di sini juga tanpa langkah tambahan (pola yg sama spt %GR
+    // dkk di dashboard.routes.ts -- lihat komentar UPDATE 2026-08-01 di
+    // project_cooispi_master_data_workflow).
+    const orders = Array.from(new Set(rows.map((r) => r.order)));
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: orders } },
+      select: { order: true, todayAtp: true },
+    });
+    const todayAtpByOrder = new Map(masterOrders.map((m) => [m.order, m.todayAtp]));
+
+    res.json({
+      success: true,
+      data: rows.map((r) => ({ ...r, todayAtp: todayAtpByOrder.get(r.order) ?? null })),
+    });
   })
 );
 
-/// Klik "Jadwalkan" di baris antrian -> upsert by order+section (jadwal ulang
-/// Order yg sama menimpa jadwal lamanya, bukan bikin duplikat).
+/// Drag Order dari strip Queue -> hari di Kalender (baru ATAU pindah hari,
+/// 2026-08-05) -- upsert by order+section (jadwal ulang Order yg sama
+/// menimpa jadwal lamanya, bukan bikin duplikat). `sequence` SELALU
+/// di-append otomatis ke urutan PALING BAWAH hari target (max sequence hari
+/// itu + 1) -- klien tidak pernah kirim sequence eksplisit di sini, itu cuma
+/// utk reorder DALAM 1 hari yg sama (lihat PUT /pwo-schedule/reorder di bawah).
 premixAftermixRouter.post(
   "/pwo-schedule",
   requireWrite,
@@ -512,13 +538,49 @@ premixAftermixRouter.post(
       return;
     }
     if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
-    const { order, section, ...rest } = parsed.data;
+    const { order, section, scheduledDate, ...rest } = parsed.data;
+    const maxSeq = await prisma.pwoSchedule.aggregate({
+      where: { section, scheduledDate },
+      _max: { sequence: true },
+    });
+    const sequence = (maxSeq._max.sequence ?? -1) + 1;
     const saved = await prisma.pwoSchedule.upsert({
       where: { order_section: { order, section } },
-      create: { order, section, ...rest, createdBy: req.auth!.nik },
-      update: { ...rest },
+      create: { order, section, scheduledDate, sequence, ...rest, createdBy: req.auth!.nik },
+      update: { scheduledDate, sequence, ...rest },
     });
     res.json({ success: true, message: "Jadwal berhasil disimpan.", data: saved });
+  })
+);
+
+const reorderSchema = z.object({
+  section: sectionEnum,
+  scheduledDate: z.coerce.date(),
+  orderedIds: z.array(z.string()).min(1),
+});
+
+/// Reorder drag-drop DALAM 1 hari yg sama (2026-08-05, instruksi eksplisit
+/// user: nomor urutan bisa diatur bebas) -- klien kirim urutan ID final utk
+/// 1 hari sekaligus (hasil drag-reorder di layar), server set
+/// sequence=index utk tiap ID via transaksi (bukan API sempit per-item,
+/// supaya semua nomor urutan hari itu selalu konsisten 0..n-1 tanpa celah).
+premixAftermixRouter.put(
+  "/pwo-schedule/reorder",
+  requireWrite,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = reorderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
+    const { section, scheduledDate, orderedIds } = parsed.data;
+    await prisma.$transaction(
+      orderedIds.map((id, index) =>
+        prisma.pwoSchedule.updateMany({ where: { id, section, scheduledDate }, data: { sequence: index } })
+      )
+    );
+    res.json({ success: true, message: "Urutan berhasil disimpan." });
   })
 );
 

@@ -326,6 +326,13 @@ model PremixAftermixAttachment {
 /// ditampilkan tanpa perlu join ulang ke sumber antrian (yg dinamis --
 /// Premix dari Master Data, Aftermix dari History Milling). Murni metadata
 /// jadwal, TIDAK terhubung ke PremixAftermixLog.
+/// "PWO Schedule & Queue" Kalender (2026-08-04 versi grid jam -> 2026-08-05
+/// disederhanakan, instruksi eksplisit user: "menu jam tidak perlu, cukup
+/// list & nomor urutan") -- scheduledStart/scheduledEnd (jam presisi) diganti
+/// scheduledDate (tanggal saja) + sequence (urutan prioritas dalam hari itu,
+/// 0=paling atas/duluan). Diedit lewat drag-drop: Queue->hari (POST biasa,
+/// sequence di-append otomatis di server) atau reorder dalam 1 hari (PUT
+/// /pwo-schedule/reorder, kirim urutan ID final utk 1 hari sekaligus).
 model PwoSchedule {
   id                  String            @id @default(uuid())
   order               String
@@ -333,8 +340,8 @@ model PwoSchedule {
   materialNumber      String?
   materialDescription String?
   batch               String?
-  scheduledStart      DateTime
-  scheduledEnd        DateTime
+  scheduledDate       DateTime
+  sequence            Int               @default(0)
   createdBy           String
   timestamp           DateTime          @default(now())
 

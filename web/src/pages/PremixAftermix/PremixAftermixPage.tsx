@@ -1,12 +1,19 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
-import WeeklyScheduleCalendar, { ScheduleEvent } from "../../components/WeeklyScheduleCalendar";
+import WeeklyScheduleCalendar, {
+  ScheduleEvent,
+  buildEventDragId,
+  dateKeyFromIso,
+  parseDayDropId,
+  parseInsertBeforeId,
+} from "../../components/WeeklyScheduleCalendar";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -131,6 +138,71 @@ const emptyForm = {
   remark: "",
 };
 
+/** Info minimal 1 Order antrian yg dibutuhkan utk drag-drop penjadwalan
+ * (2026-08-05, instruksi eksplisit user) -- subset field yg sama-sama ada di
+ * `PremixQueueRow` maupun `QueueRow` (AFTERMIX). */
+interface DraggableQueueInfo {
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+}
+
+/** 1 "chip" Order yg bisa di-drag dari strip Queue ke grid Kalender
+ * (2026-08-05, instruksi eksplisit user, revisi dari versi awal klik tombol
+ * "Jadwalkan" 2026-08-04). ID drag-nya `queue:<order>` -- unik per Order,
+ * beda namespace dari ID kartu jadwal yg sudah ada (`event:<id>`, lihat
+ * WeeklyScheduleCalendar.tsx) supaya onDragEnd bisa bedakan "Order baru dari
+ * Queue" vs "kartu lama yg mau di-reschedule" lewat `active.data.current.type`. */
+function buildQueueDragId(order: string): string {
+  return `queue:${order}`;
+}
+
+function DraggableQueueChip({
+  row,
+  selected,
+  onToggleSelect,
+}: {
+  row: DraggableQueueInfo;
+  selected: boolean;
+  onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+}) {
+  const dragId = buildQueueDragId(row.order);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: dragId,
+    data: { type: "queue" as const, row },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onClick={(e) => onToggleSelect(dragId, e)}
+      title={`${row.order} — ${row.materialDescription ?? ""} (tarik ke Kalender utk menjadwalkan, Ctrl+Klik utk pilih banyak sekaligus)`}
+      style={{
+        flex: "0 0 auto",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        padding: "6px 10px",
+        background: "var(--panel-bg, #fff)",
+        cursor: "grab",
+        touchAction: "none",
+        opacity: isDragging ? 0.4 : 1,
+        boxShadow: selected ? "0 0 0 2px #4338ca" : undefined,
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        maxWidth: 200,
+      }}
+    >
+      <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--navy-dark)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {row.order}
+      </div>
+      <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {row.materialDescription ?? row.batch ?? ""}
+      </div>
+    </div>
+  );
+}
+
 export default function PremixAftermixPage({
   section,
   title,
@@ -206,8 +278,11 @@ export default function PremixAftermixPage({
   // Kalender mingguan "PWO Schedule & Queue" (2026-08-04, instruksi eksplisit
   // user, niru referensi Dribbble "Task Management Dashboard Schedule
   // Experience") -- TAMBAHAN di samping tabel antrian yg sudah ada (toggle
-  // List/Kalender), bukan pengganti. Penjadwalan lewat tombol "Jadwalkan" ->
-  // modal pilih tanggal/jam (BUKAN drag-drop, pilihan eksplisit user).
+  // List/Kalender), bukan pengganti. Versi awal: klik tombol "Jadwalkan" ->
+  // modal pilih tanggal & jam. 2026-08-05 DISEDERHANAKAN (instruksi eksplisit
+  // user: "menu jam tidak perlu, cukup list & nomor urutan") jadi drag-drop
+  // Queue -> hari (tanpa jam), modal "Jadwalkan" TETAP ada sbg alternatif
+  // non-drag tapi cuma pilih tanggal.
   const [queueView, setQueueView] = useState<"list" | "calendar">("list");
   const [scheduleTarget, setScheduleTarget] = useState<{
     order: string;
@@ -216,8 +291,6 @@ export default function PremixAftermixPage({
     batch: string | null;
   } | null>(null);
   const [scheduleDate, setScheduleDate] = useState("");
-  const [scheduleStartTime, setScheduleStartTime] = useState("08:00");
-  const [scheduleEndTime, setScheduleEndTime] = useState("09:00");
   const [scheduleError, setScheduleError] = useState("");
 
   const pwoScheduleQuery = useQuery({
@@ -225,6 +298,15 @@ export default function PremixAftermixPage({
     queryFn: () => api.get<{ success: boolean; data: ScheduleEvent[] }>(`/premix-aftermix/pwo-schedule?section=${section}`).then((r) => r.data),
     enabled: !embedded,
   });
+
+  /** Order yg sudah punya jadwal (muncul di Kalender) -- dipakai supaya strip
+   * Queue di mode Kalender TIDAK lagi menampilkan Order yg sudah dijadwalkan
+   * (2026-08-05, instruksi eksplisit user: sebelumnya Order yg sudah
+   * dijadwalkan tetap kelihatan di strip atas, bikin bingung dikira ada
+   * batasan jumlah). Cuma memfilter strip drag-chip, BUKAN tabel List biasa
+   * (List tetap tampilkan semua antrian apa adanya, krn dipakai jg utk aksi
+   * lain spt "Input Premix"/"Input Aftermix" yg tidak terkait status jadwal). */
+  const scheduledOrders = useMemo(() => new Set((pwoScheduleQuery.data ?? []).map((e) => e.order)), [pwoScheduleQuery.data]);
 
   const scheduleMutation = useMutation({
     mutationFn: () => {
@@ -235,8 +317,7 @@ export default function PremixAftermixPage({
         materialNumber: scheduleTarget.materialNumber ?? "",
         materialDescription: scheduleTarget.materialDescription ?? "",
         batch: scheduleTarget.batch ?? "",
-        scheduledStart: `${scheduleDate}T${scheduleStartTime}:00`,
-        scheduledEnd: `${scheduleDate}T${scheduleEndTime}:00`,
+        scheduledDate: scheduleDate,
       });
     },
     onSuccess: () => {
@@ -252,11 +333,269 @@ export default function PremixAftermixPage({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
   });
 
+  // Reorder dalam 1 hari (tombol ▲▼ di WeeklyScheduleCalendar, 2026-08-05) --
+  // kirim urutan ID final utk 1 hari sekaligus ke PUT /pwo-schedule/reorder.
+  const reorderMutation = useMutation({
+    mutationFn: (payload: { scheduledDate: string; orderedIds: string[] }) =>
+      api.put("/premix-aftermix/pwo-schedule/reorder", { section, ...payload }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
+    onError: (err) => setScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan urutan."),
+  });
+
+  function handleReorderDay(dayEvents: ScheduleEvent[]) {
+    if (dayEvents.length === 0) return;
+    reorderMutation.mutate({ scheduledDate: dayEvents[0].scheduledDate, orderedIds: dayEvents.map((e) => e.id) });
+  }
+
+  // Drag-drop penjadwalan (2026-08-05, instruksi eksplisit user, revisi dari
+  // versi awal "klik tombol Jadwalkan" 2026-08-04) -- reuse endpoint POST yg
+  // SAMA dgn scheduleMutation di atas (upsert by order+section, jadi
+  // otomatis jadi "pindah hari" kalau Order-nya sudah py jadwal). Mutation
+  // terpisah (bukan pakai scheduleMutation) krn sumber datanya beda (payload
+  // eksplisit dari drag event, bukan dari scheduleTarget/scheduleDate state
+  // punya form modal).
+  type ActiveDragInfo =
+    | { kind: "single"; order: string; materialDescription: string | null; batch: string | null }
+    | { kind: "multi"; count: number };
+  const [activeDrag, setActiveDrag] = useState<ActiveDragInfo | null>(null);
+  const dragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  // Multi-select Ctrl+Klik (2026-08-05, instruksi eksplisit user: pilih
+  // beberapa Order sekaligus lalu drag bareng) -- key-nya SAMA PERSIS dgn ID
+  // drag dnd-kit (`queue:<order>` / `event:<id>`, lihat buildQueueDragId &
+  // WeeklyScheduleCalendar.buildEventDragId), jadi onDragStart/onDragEnd
+  // tinggal cek `selectedIds.has(String(active.id))` tanpa perlu mapping id
+  // terpisah. Lintas strip Queue MAUPUN kartu kalender -- boleh campur.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelect(dragId: string, e: ReactMouseEvent) {
+    if (!e.ctrlKey) return; // klik biasa (tanpa Ctrl) tidak melakukan apa-apa di kartu/chip ini
+    e.preventDefault();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(dragId)) next.delete(dragId);
+      else next.add(dragId);
+      return next;
+    });
+  }
+
+  const dragScheduleMutation = useMutation({
+    mutationFn: (payload: {
+      order: string;
+      materialNumber: string | null;
+      materialDescription: string | null;
+      batch: string | null;
+      scheduledDate: string;
+    }) =>
+      api.post<{ success: boolean; data: ScheduleEvent }>("/premix-aftermix/pwo-schedule", {
+        order: payload.order,
+        section,
+        materialNumber: payload.materialNumber ?? "",
+        materialDescription: payload.materialDescription ?? "",
+        batch: payload.batch ?? "",
+        scheduledDate: payload.scheduledDate,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
+    onError: (err) => setScheduleError(err instanceof ApiError ? err.message : "Gagal menjadwalkan lewat drag-drop."),
+  });
+
+  function handleDragStart(evt: DragStartEvent) {
+    const data = evt.active.data.current as { type: "queue"; row: DraggableQueueInfo } | { type: "scheduled"; event: ScheduleEvent } | undefined;
+    if (!data) return;
+    const draggedId = String(evt.active.id);
+    if (selectedIds.has(draggedId) && selectedIds.size > 1) {
+      // Kartu/chip yg di-drag adalah bagian dari seleksi Ctrl+Klik yg py
+      // >1 anggota -- SEMUANYA ikut dipindah bareng (2026-08-05, instruksi
+      // eksplisit user). Kalau yg di-drag BUKAN bagian seleksi (atau
+      // seleksi cuma 1), perilakunya balik ke drag 1-item biasa spt
+      // sebelumnya -- seleksi yg ada dibiarkan apa adanya, tidak direset.
+      setActiveDrag({ kind: "multi", count: selectedIds.size });
+    } else {
+      const src = data.type === "queue" ? data.row : data.event;
+      setActiveDrag({ kind: "single", order: src.order, materialDescription: src.materialDescription, batch: src.batch });
+    }
+  }
+
+  /** Hitung urutan ID final utk 1 hari, dgn `movedIds` (1 ATAU BEBERAPA
+   * item sekaligus, 2026-08-05 instruksi eksplisit user: pilih banyak Order
+   * lalu drag bareng -- urutan relatif ANTAR item yg dipindah mengikuti
+   * urutan array `movedIds`) disisipkan TEPAT SEBELUM `insertBeforeId`
+   * (kalau ada) atau di paling akhir (kalau tidak ada, mis. drop di area
+   * kosong kolom, bukan di atas kartu tertentu). `allEvents` HARUS data
+   * SEBELUM drag ini (state lama, bukan hasil refetch) -- perhitungan di
+   * sini murni lokal/optimistic. */
+  function computeInsertOrderMulti(allEvents: ScheduleEvent[], targetDateKey: string, movedIds: string[], insertBeforeId: string | null): string[] {
+    const movedSet = new Set(movedIds);
+    const dayIds = allEvents
+      .filter((e) => dateKeyFromIso(e.scheduledDate) === targetDateKey && !movedSet.has(e.id))
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((e) => e.id);
+    const insertAt = insertBeforeId ? dayIds.indexOf(insertBeforeId) : -1;
+    dayIds.splice(insertAt === -1 ? dayIds.length : insertAt, 0, ...movedIds);
+    return dayIds;
+  }
+
+  /** Pindahkan BEBERAPA item sekaligus (hasil seleksi Ctrl+Klik, 2026-08-05
+   * instruksi eksplisit user) ke `targetDateKey`, tersisip sebelum
+   * `insertBeforeId` kalau ada. POST dikirim SATU-SATU berurutan (di-await,
+   * BUKAN Promise.all paralel) -- server menghitung sequence berikutnya
+   * lewat query "sequence max saat ini" (lihat POST /pwo-schedule di
+   * premixAftermix.routes.ts), jadi kalau dikirim paralel ke hari yg SAMA,
+   * 2 request bisa saling baca sequence lama satu sama lain sebelum salah
+   * satunya commit & berebut angka yg sama -- berurutan menghindari itu
+   * (agak lebih lambat utk banyak item sekaligus, tapi tetap benar). Ditutup
+   * dgn 1x panggilan reorder final utk urutan yg presisi (bukan cuma
+   * ke-append). */
+  async function runMultiMove(ids: string[], allEvents: ScheduleEvent[], targetDateKey: string, insertBeforeId: string | null) {
+    const queueSource = section === "AFTERMIX" ? filteredQueue : filteredPremixQueue;
+    type Item = { id: string; kind: "queue"; row: DraggableQueueInfo } | { id: string; kind: "scheduled"; event: ScheduleEvent };
+    const items: Item[] = [];
+    for (const dragId of ids) {
+      if (dragId.startsWith("queue:")) {
+        const order = dragId.slice("queue:".length);
+        const row = queueSource.find((r) => r.order === order);
+        if (row) items.push({ id: dragId, kind: "queue", row });
+      } else {
+        const ev = allEvents.find((e) => buildEventDragId(e.id) === dragId);
+        if (ev) items.push({ id: dragId, kind: "scheduled", event: ev });
+      }
+    }
+    if (items.length === 0) return;
+
+    try {
+      const finalIds: string[] = [];
+      for (const item of items) {
+        if (item.kind === "queue") {
+          const res = await api.post<{ success: boolean; data: ScheduleEvent }>("/premix-aftermix/pwo-schedule", {
+            order: item.row.order,
+            section,
+            materialNumber: item.row.materialNumber ?? "",
+            materialDescription: item.row.materialDescription ?? "",
+            batch: item.row.batch ?? "",
+            scheduledDate: targetDateKey,
+          });
+          finalIds.push(res.data.id);
+        } else {
+          const sourceDateKey = dateKeyFromIso(item.event.scheduledDate);
+          if (sourceDateKey !== targetDateKey) {
+            await api.post("/premix-aftermix/pwo-schedule", {
+              order: item.event.order,
+              section,
+              materialNumber: item.event.materialNumber ?? "",
+              materialDescription: item.event.materialDescription ?? "",
+              batch: item.event.batch ?? "",
+              scheduledDate: targetDateKey,
+            });
+          }
+          finalIds.push(item.event.id);
+        }
+      }
+      const orderedIds = computeInsertOrderMulti(allEvents, targetDateKey, finalIds, insertBeforeId);
+      await api.put("/premix-aftermix/pwo-schedule/reorder", { section, scheduledDate: targetDateKey, orderedIds });
+      setScheduleError("");
+      setSelectedIds(new Set());
+    } catch (err) {
+      setScheduleError(err instanceof ApiError ? err.message : "Gagal memindahkan beberapa Order sekaligus.");
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
+    }
+  }
+
+  function handleDragEnd(evt: DragEndEvent) {
+    setActiveDrag(null);
+    const { active, over } = evt;
+    if (!over) return; // dilepas di luar kolom hari -- batal, tidak berubah apa2
+    const data = active.data.current as { type: "queue"; row: DraggableQueueInfo } | { type: "scheduled"; event: ScheduleEvent } | undefined;
+    if (!data) return;
+
+    // Drop bisa kena 2 jenis target: latar kolom hari (day:<tanggal>, artinya
+    // "taruh di paling bawah hari ini") ATAU tepat di atas 1 kartu
+    // (insertBefore:<id>, artinya "sisip SEBELUM kartu itu", 2026-08-05
+    // instruksi eksplisit user). `pointerWithin` di DndContext (bukan
+    // rectIntersection bawaan) SENGAJA dipakai spy target kartu yg lebih
+    // kecil & bersarang di dalam kolom hari tetap kepilih drpd kolom
+    // besarnya kalau pointer pas di atas kartu itu.
+    const dayDrop = parseDayDropId(String(over.id));
+    const insertBeforeId = dayDrop ? null : parseInsertBeforeId(String(over.id));
+    let targetDateKey: string;
+    if (dayDrop) {
+      targetDateKey = dayDrop.dateKey;
+    } else if (insertBeforeId) {
+      const targetEvent = (pwoScheduleQuery.data ?? []).find((e) => e.id === insertBeforeId);
+      if (!targetEvent) return;
+      targetDateKey = dateKeyFromIso(targetEvent.scheduledDate);
+    } else {
+      return;
+    }
+
+    const allEvents = pwoScheduleQuery.data ?? [];
+
+    // Multi-select (2026-08-05, instruksi eksplisit user): kalau kartu/chip
+    // yg di-drag adalah bagian dari seleksi Ctrl+Klik yg py >1 anggota,
+    // SEMUA anggota seleksi ikut dipindah bareng lewat runMultiMove --
+    // jalur di bawah ini (drag 1-item) dilewati sepenuhnya.
+    const draggedId = String(active.id);
+    if (selectedIds.has(draggedId) && selectedIds.size > 1) {
+      void runMultiMove(Array.from(selectedIds), allEvents, targetDateKey, insertBeforeId);
+      return;
+    }
+
+    if (data.type === "queue") {
+      // Order baru dari Queue -- POST dulu (server append ke akhir hari
+      // target & kasih id resmi), BARU kalau perlu disisip di posisi
+      // tertentu (bukan cuma append), susul dgn reorder memindahkan id itu
+      // ke posisi yg benar.
+      dragScheduleMutation.mutate(
+        {
+          order: data.row.order,
+          materialNumber: data.row.materialNumber,
+          materialDescription: data.row.materialDescription,
+          batch: data.row.batch,
+          scheduledDate: targetDateKey,
+        },
+        {
+          onSuccess: (res) => {
+            if (!insertBeforeId) return;
+            const orderedIds = computeInsertOrderMulti(allEvents, targetDateKey, [res.data.id], insertBeforeId);
+            reorderMutation.mutate({ scheduledDate: targetDateKey, orderedIds });
+          },
+        }
+      );
+      return;
+    }
+
+    // Kartu yg sudah ada di-drag.
+    const sourceDateKey = dateKeyFromIso(data.event.scheduledDate);
+    if (sourceDateKey === targetDateKey) {
+      // Masih di hari yg SAMA -- reorder murni lokal, tidak perlu POST sama sekali.
+      if (data.event.id === insertBeforeId) return; // drop tepat di kartu-nya sendiri -- no-op
+      const orderedIds = computeInsertOrderMulti(allEvents, targetDateKey, [data.event.id], insertBeforeId);
+      reorderMutation.mutate({ scheduledDate: targetDateKey, orderedIds });
+    } else {
+      // Pindah ke hari lain -- POST dulu (append ke akhir hari baru), baru
+      // reorder kalau perlu disisip, sama pola dgn Order baru dari Queue.
+      dragScheduleMutation.mutate(
+        {
+          order: data.event.order,
+          materialNumber: data.event.materialNumber,
+          materialDescription: data.event.materialDescription,
+          batch: data.event.batch,
+          scheduledDate: targetDateKey,
+        },
+        {
+          onSuccess: () => {
+            if (!insertBeforeId) return;
+            const orderedIds = computeInsertOrderMulti(allEvents, targetDateKey, [data.event.id], insertBeforeId);
+            reorderMutation.mutate({ scheduledDate: targetDateKey, orderedIds });
+          },
+        }
+      );
+    }
+  }
+
   function openScheduleModal(target: { order: string; materialNumber: string | null; materialDescription: string | null; batch: string | null }) {
     setScheduleTarget(target);
     setScheduleDate("");
-    setScheduleStartTime("08:00");
-    setScheduleEndTime("09:00");
     setScheduleError("");
   }
 
@@ -808,7 +1147,61 @@ export default function PremixAftermixPage({
             </div>
 
             {queueView === "calendar" ? (
-              <WeeklyScheduleCalendar events={pwoScheduleQuery.data ?? []} onDelete={(id) => deleteScheduleMutation.mutate(id)} />
+              <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <p style={{ margin: "0 0 8px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  Tarik Order dari daftar di bawah ini ke kolom hari yang diinginkan di Kalender untuk menjadwalkan --
+                  kartu yang sudah terjadwal juga bisa ditarik ke hari lain utk pindah, atau pakai ▲▼ di kartunya utk
+                  ubah urutan. Order yang sudah dijadwalkan otomatis hilang dari daftar di bawah ini. Tahan{" "}
+                  <strong>Ctrl</strong> lalu klik beberapa Order (di daftar di bawah maupun kartu di Kalender) untuk
+                  pilih banyak sekaligus, lalu tarik salah satunya -- semuanya ikut pindah bareng.
+                </p>
+                {selectedIds.size > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.78rem" }}>
+                    <span style={{ color: "var(--navy-dark)", fontWeight: 700 }}>{selectedIds.size} Order dipilih</span>
+                    <button type="button" className="btn btn-outline" style={{ padding: "2px 10px" }} onClick={() => setSelectedIds(new Set())}>
+                      Batal Pilih
+                    </button>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
+                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
+                    <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
+                  ))}
+                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length === 0 && (
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Semua antrian sudah dijadwalkan (atau antrian kosong).</span>
+                  )}
+                </div>
+                <WeeklyScheduleCalendar
+                  events={pwoScheduleQuery.data ?? []}
+                  onDelete={(id) => deleteScheduleMutation.mutate(id)}
+                  onReorderDay={handleReorderDay}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                />
+                <DragOverlay>
+                  {activeDrag && (
+                    <div
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        background: "#fff",
+                        boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+                        maxWidth: 200,
+                      }}
+                    >
+                      {activeDrag.kind === "multi" ? (
+                        <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--navy-dark)" }}>{activeDrag.count} Order dipilih</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--navy-dark)" }}>{activeDrag.order}</div>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{activeDrag.materialDescription ?? activeDrag.batch ?? ""}</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </DragOverlay>
+              </DndContext>
             ) : (
             <DataTable
               rowKey={(r: QueueRow) => r.order}
@@ -916,7 +1309,61 @@ export default function PremixAftermixPage({
             </div>
 
             {queueView === "calendar" ? (
-              <WeeklyScheduleCalendar events={pwoScheduleQuery.data ?? []} onDelete={(id) => deleteScheduleMutation.mutate(id)} />
+              <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+                <p style={{ margin: "0 0 8px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                  Tarik Order dari daftar di bawah ini ke kolom hari yang diinginkan di Kalender untuk menjadwalkan --
+                  kartu yang sudah terjadwal juga bisa ditarik ke hari lain utk pindah, atau pakai ▲▼ di kartunya utk
+                  ubah urutan. Order yang sudah dijadwalkan otomatis hilang dari daftar di bawah ini. Tahan{" "}
+                  <strong>Ctrl</strong> lalu klik beberapa Order (di daftar di bawah maupun kartu di Kalender) untuk
+                  pilih banyak sekaligus, lalu tarik salah satunya -- semuanya ikut pindah bareng.
+                </p>
+                {selectedIds.size > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.78rem" }}>
+                    <span style={{ color: "var(--navy-dark)", fontWeight: 700 }}>{selectedIds.size} Order dipilih</span>
+                    <button type="button" className="btn btn-outline" style={{ padding: "2px 10px" }} onClick={() => setSelectedIds(new Set())}>
+                      Batal Pilih
+                    </button>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
+                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
+                    <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
+                  ))}
+                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length === 0 && (
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Semua antrian sudah dijadwalkan (atau antrian kosong).</span>
+                  )}
+                </div>
+                <WeeklyScheduleCalendar
+                  events={pwoScheduleQuery.data ?? []}
+                  onDelete={(id) => deleteScheduleMutation.mutate(id)}
+                  onReorderDay={handleReorderDay}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                />
+                <DragOverlay>
+                  {activeDrag && (
+                    <div
+                      style={{
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        background: "#fff",
+                        boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+                        maxWidth: 200,
+                      }}
+                    >
+                      {activeDrag.kind === "multi" ? (
+                        <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--navy-dark)" }}>{activeDrag.count} Order dipilih</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--navy-dark)" }}>{activeDrag.order}</div>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{activeDrag.materialDescription ?? activeDrag.batch ?? ""}</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </DragOverlay>
+              </DndContext>
             ) : (
             <DataTable
               rowKey={(r: PremixQueueRow) => r.order}
@@ -982,15 +1429,11 @@ export default function PremixAftermixPage({
               <label>Tanggal</label>
               <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
             </div>
-            <div className="field">
-              <label>Jam Mulai</label>
-              <input type="time" value={scheduleStartTime} onChange={(e) => setScheduleStartTime(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Jam Selesai</label>
-              <input type="time" value={scheduleEndTime} onChange={(e) => setScheduleEndTime(e.target.value)} />
-            </div>
           </div>
+          <p style={{ marginTop: 4, fontSize: "0.75rem", color: "var(--text-muted)" }}>
+            Order otomatis masuk ke urutan paling bawah hari ini -- ubah urutan lewat tombol ▲▼ di kartu-nya di
+            Kalender, atau tarik kartu ke hari lain kalau mau pindah tanggal.
+          </p>
           {scheduleError && <p className="error-text">{scheduleError}</p>}
           <button
             className="btn"

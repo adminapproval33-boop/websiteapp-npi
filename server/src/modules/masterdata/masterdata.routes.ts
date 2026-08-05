@@ -752,12 +752,13 @@ const MATERIAL_FLOW_BOOL_FIELDS = [
 /// Edit 7 tahap wajib/tidak utk 1 Material dari panel "Info Proses Material"
 /// (2026-07-31, instruksi eksplisit user: "kolom edit yang terkoneksi dgn
 /// master datanya") -- upsert (Material yg belum terdaftar di MaterialFlow
-/// otomatis dibuatkan barunya, bukan ditolak). requireFullAccess krn ini
-/// data resmi yg dipakai penguncian urutan tahap seluruh sistem
-/// (lib/stageGate.ts), bukan sekadar preferensi tampilan.
+/// otomatis dibuatkan barunya, bukan ditolak). requireWrite (BUKAN
+/// requireFullAccess, 2026-08-05 instruksi eksplisit user) krn user akses
+/// INPUT juga perlu bisa menceklis kolom Wajib di panel Info Proses Material
+/// -- cuma akses VIEW yg tetap ditolak.
 masterDataRouter.put(
   "/material-flow/:materialNumber",
-  requireFullAccess,
+  requireWrite,
   asyncRoute(async (req, res) => {
     const materialNumber = req.params.materialNumber.trim();
     if (!materialNumber) {

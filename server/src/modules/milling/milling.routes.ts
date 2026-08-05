@@ -10,8 +10,10 @@ export const millingRouter = Router();
 millingRouter.use(requireAuth);
 millingRouter.use(requireMenuView("milling"));
 
-/// 10 slot bacaan tetap (Fineness/Visco/Suhu); slot kosong tetap dikirim sbg string kosong.
-const readings10 = z.array(z.string()).max(10).optional();
+/// Bacaan Fineness/Visco/Suhu per Pass, jumlah Pass TIDAK dibatasi (2026-08-05,
+/// instruksi eksplisit user -- sebelumnya dibatasi max 10, dilepas krn ada
+/// kasus nyata sampai 15 Pass, dan tidak ada alasan bisnis utk batas atas).
+const readings10 = z.array(z.string()).optional();
 
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database.

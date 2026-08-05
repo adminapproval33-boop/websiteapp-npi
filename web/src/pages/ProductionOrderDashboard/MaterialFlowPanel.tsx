@@ -85,7 +85,11 @@ export default function MaterialFlowPanel({
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const canEdit = user?.access === "FULL_ACCESS";
+  /** FULL_ACCESS & INPUT boleh edit, VIEW tetap ditolak (2026-08-05, instruksi
+   * eksplisit user: user akses Input perlu bisa menceklis kolom Wajib di sini
+   * -- backend sinkron, lihat requireWrite di masterdata.routes.ts PUT
+   * /material-flow/:materialNumber). */
+  const canEdit = user?.access === "FULL_ACCESS" || user?.access === "INPUT";
   const isRfOrder = orderType === "RF01" || orderType === "RF02";
   const [checked, setChecked] = useState<Record<FlowField, boolean> | null>(null);
   const [message, setMessage] = useState("");
@@ -335,7 +339,7 @@ export default function MaterialFlowPanel({
               </>
             ) : (
               <p style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                Cuma akun Full Access yang bisa mengubah Wajib/Tidak-nya tahap.
+                Akun dengan akses View tidak bisa mengubah Wajib/Tidak-nya tahap.
               </p>
             )}
           </>

@@ -198,6 +198,44 @@ checkResultsRouter.put(
   })
 );
 
+/// Sinkron 2-arah Appearance Check Results <-> Admin QC "Appearance Check
+/// Results" (dulu "Remark", 2026-08-05 instruksi eksplisit user). SENGAJA
+/// APPEND sbg baris baru, BUKAN overwrite/timpa isi lama -- kalau dites
+/// end-to-end user (input NG pertama di sini, lalu tambah NG kedua dari
+/// Admin QC) hasil yg diharapkan adalah tabel ini menampilkan KEDUA temuan,
+/// bukan cuma yg terakhir. TIDAK dikasih label/timestamp/NIK (2026-08-05,
+/// revisi eksplisit user: "langsung saja... supaya lebih simple") -- cuma
+/// teks barunya polos, dipisah 1 baris baru saja dari teks lama (TANPA
+/// baris kosong di antaranya, 2026-08-05 revisi eksplisit user). Endpoint SEMPIT
+/// khusus 1 field ini -- SENGAJA bukan lewat PUT /:checkId biasa di atas
+/// (itu perlu payload lengkap termasuk `parameters`, dan AdminQcPage.tsx
+/// tidak punya semua field CheckResult lain spt customer/lotCoa/dst di
+/// state-nya, jadi kalau dipaksa lewat situ berisiko menimpa/mengosongkan
+/// field yg tidak terlihat dari Admin QC). Dipanggil dari AdminQcPage.tsx
+/// setelah Save Admin QC berhasil, KALAU Order ybs terhubung ke 1 Check
+/// Results (checkPassthrough.checkId) DAN teksnya berubah dari baseline yg
+/// terakhir dimuat (frontend yg menentukan kapan perlu append, endpoint ini
+/// SELALU append apa pun yg dikirim). requireWrite polos (bukan
+/// requireMenuInput("checkResults")) krn ini efek-samping dari Save di menu
+/// Admin QC, bukan aksi langsung di menu Check Results itu sendiri.
+checkResultsRouter.put(
+  "/:checkId/appearance-notes",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const checkId = req.params.checkId;
+    const existing = await prisma.checkResult.findUnique({ where: { checkId } });
+    if (!existing) throw new HttpError(404, "Check Results tidak ditemukan.");
+    const note = typeof req.body.note === "string" ? req.body.note.trim() : "";
+    if (!note) {
+      res.json({ success: true, message: "Tidak ada catatan baru utk disinkronkan.", data: existing });
+      return;
+    }
+    const appearanceNotes = existing.appearanceNotes ? `${existing.appearanceNotes}\n${note}` : note;
+    const updated = await prisma.checkResult.update({ where: { checkId }, data: { appearanceNotes } });
+    res.json({ success: true, message: "Appearance Check Results berhasil disinkronkan.", data: updated });
+  })
+);
+
 checkResultsRouter.delete(
   "/:checkId",
   requireMenuInput("checkResults"),

@@ -63,10 +63,6 @@ const MILLING_COL_ROWS: string[][] = [
   ["passLabel", "fineness", "visco", "suhu"],
 ];
 
-/** Max "Pass" (baris Fineness/Visco/Suhu) yg boleh ditambah via +Add -- harus
- * cocok dgn batas backend (z.array().max(10) di milling.routes.ts). */
-const MAX_PASSES = 10;
-
 interface QueueRow {
   order: string;
   materialNumber: string | null;
@@ -276,7 +272,6 @@ function PassReadingsTable({
           aria-label="Tambah Pass"
           style={{ width: 26, height: 24, padding: 0, lineHeight: 1, fontWeight: 700, flex: "0 0 auto" }}
           onClick={onAdd}
-          disabled={rows >= MAX_PASSES}
         >
           +
         </button>

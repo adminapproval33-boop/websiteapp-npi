@@ -19,6 +19,7 @@ import ProductionOrderDashboardPage from "../pages/ProductionOrderDashboard/Prod
 import TankDashboardPage from "../pages/TankDashboard/TankDashboardPage";
 import ProduktivitasDashboardPage from "../pages/ProduktivitasDashboard/ProduktivitasDashboardPage";
 import MesinDashboardPage from "../pages/MesinDashboard/MesinDashboardPage";
+import QualityCheckReviewPage from "../pages/QualityCheckReview/QualityCheckReviewPage";
 import ProductionLabelEntryPage from "../pages/ProductionLabel/ProductionLabelEntryPage";
 import LabelHistoryPage from "../pages/ProductionLabel/LabelHistoryPage";
 
@@ -58,6 +59,7 @@ export const menuTree: MenuNode[] = [
     leaf("Production Order Monitoring", "/dashboard/production-order", <ProductionOrderDashboardPage />),
     leaf("Tank Monitoring", "/dashboard/tank", <TankDashboardPage />),
     leaf("Mesin Monitoring", "/dashboard/mesin", <MesinDashboardPage />),
+    leaf("Quality Check Review", "/dashboard/quality-check-review", <QualityCheckReviewPage />),
   ]),
   group("Production & MRP Schedule", [
     leaf("Premix", "/planning/premix", <PremixAftermixPage section="PREMIX" title="Premix" />),

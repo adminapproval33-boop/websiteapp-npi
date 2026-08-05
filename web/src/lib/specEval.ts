@@ -20,8 +20,21 @@ export const SPEC_VERDICT_LABEL: Record<SpecVerdict, string> = {
  */
 export function evaluateSpec(spec: string | null | undefined, result: string | null | undefined): SpecVerdict {
   const specTrim = String(spec ?? "").trim();
-  const resultNum = parseFloat(String(result ?? "").trim());
-  if (!specTrim || Number.isNaN(resultNum)) return "unknown";
+  const resultTrim = String(result ?? "").trim();
+  if (!specTrim) return "unknown";
+
+  // Spec tekstual "OK" (mis. Item Check Appearance/visual yg bukan angka) --
+  // Result dibandingkan sbg teks "OK"/"NG" langsung, bukan diparse jadi angka
+  // (2026-08-05, instruksi eksplisit user).
+  if (specTrim.toUpperCase() === "OK") {
+    const resultUpper = resultTrim.toUpperCase();
+    if (resultUpper === "OK") return "ok";
+    if (resultUpper === "NG") return "ng";
+    return "unknown";
+  }
+
+  const resultNum = parseFloat(resultTrim);
+  if (Number.isNaN(resultNum)) return "unknown";
 
   const num = "(-?\\d+(?:\\.\\d+)?)";
   let m: RegExpMatchArray | null;

@@ -179,6 +179,14 @@ export default function AdminQcPage() {
   const [form, setForm] = useState(emptyForm);
   const [params, setParams] = useState<ParamRow[]>([]);
   const [checkPassthrough, setCheckPassthrough] = useState<CheckPassthrough>(emptyCheckPassthrough);
+  /** Nilai "Appearance Check Results" (form.remark) PERSIS seperti saat
+   * dimuat (dari CheckResult.appearanceNotes yg sudah gabungan/kombinasi,
+   * atau dari Admin QC sendiri kalau Order ini blm py Check Results) --
+   * dipakai saveMutation utk tahu apa saja yg BERUBAH (2026-08-05, instruksi
+   * eksplisit user: sinkron 2 arah harus APPEND entri baru, bukan overwrite
+   * -- kalau isinya sama persis dgn baseline ini, Save tidak perlu kirim
+   * apa-apa ke Check Results supaya tidak dobel entri percuma). */
+  const [remarkBaseline, setRemarkBaseline] = useState("");
   const [specStatus, setSpecStatus] = useState<"idle" | "loading" | "found" | "not-found">("idle");
   const [editingAdminQcId, setEditingAdminQcId] = useState<string | null>(null);
   const [lastSavedAdminQcId, setLastSavedAdminQcId] = useState<string | null>(null);
@@ -260,8 +268,12 @@ export default function AdminQcPage() {
           lotPassed: f.lotPassed || latest.lotPassed || "",
           qcToApproval: f.qcToApproval || latest.qcToApproval || "",
           qcPassed: f.qcPassed || latest.qcPassed || "",
-          remark: f.remark || latest.remark || "",
+          // Prefill sementara dari Admin QC terakhir -- ditimpa lagi di bawah
+          // kalau Order ini ternyata terhubung ke Check Results (itu sumber
+          // yg lebih otoritatif, sudah gabungan semua entri Admin QC lama).
+          remark: latest.remark || "",
         }));
+        setRemarkBaseline(latest.remark || "");
       }
     } catch {
       /* belum ada histori Admin QC utk Order ini -- biarkan kosong */
@@ -302,6 +314,16 @@ export default function AdminQcPage() {
             pic: p.pic ?? "",
           }))
         );
+        // "Appearance Check Results" (2026-08-05, instruksi eksplisit user) --
+        // otomatis terisi dari appearanceNotes Check Results Order ini (sumber
+        // OTORITATIF, sudah gabungan semua entri Admin QC sebelumnya -- lihat
+        // endpoint PUT /check-results/:checkId/appearance-notes), MENIMPA
+        // prefill sementara dari Admin QC terakhir di atas. Baseline-nya juga
+        // ikut di-set sama supaya saveMutation tahu apa yg benar2 baru diketik
+        // admin dari sini (tidak sekadar apa yg dimuat ulang).
+        const combinedNotes = cr.data!.appearanceNotes ?? "";
+        setForm((f) => ({ ...f, remark: combinedNotes }));
+        setRemarkBaseline(combinedNotes);
         setSpecStatus("found");
       } else {
         setCheckPassthrough(emptyCheckPassthrough);
@@ -319,16 +341,38 @@ export default function AdminQcPage() {
     setCheckPassthrough(emptyCheckPassthrough);
     setSpecStatus("idle");
     setEditingAdminQcId(null);
+    setRemarkBaseline("");
   }
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      // Spec Parameters (params/checkPassthrough) VIEW-ONLY di halaman ini --
-      // Admin QC cuma menyimpan header-nya sendiri, tidak menulis balik ke
-      // Check Results (lihat komentar CheckPassthrough di atas).
-      return editingAdminQcId
+      // Spec Parameters (params) TETAP view-only di halaman ini -- Admin QC
+      // tidak pernah menulis balik ke situ. TAPI Appearance Check Results
+      // (form.remark) SEKARANG sinkron 2 arah (2026-08-05, instruksi eksplisit
+      // user, revisi: APPEND bukan overwrite -- lihat komentar
+      // remarkBaseline). Kalau Order ini terhubung ke 1 Check Results DAN
+      // teksnya berubah dari baseline yg dimuat, Save di sini juga mengirim
+      // teks itu sbg entri BARU ke CheckResult.appearanceNotes lewat endpoint
+      // sempit khusus 1 field itu (backend yg urus format append-nya, lihat
+      // PUT /check-results/:checkId/appearance-notes di checkResults.routes.ts).
+      // Kalau tidak berubah, tidak dikirim apa2 (hindari entri dobel percuma
+      // tiap kali Save Admin QC utk alasan lain, mis. ubah QC Passed doang).
+      // Kegagalan sync ini SENGAJA tidak menggagalkan save Admin QC-nya
+      // sendiri (data header Admin QC sudah kepalang tersimpan) -- cuma
+      // ditambahkan ke pesan sukses sbg peringatan.
+      const res = editingAdminQcId
         ? await api.put<{ success: boolean; data: AdminQcRow }>(`/admin-qc/${editingAdminQcId}`, form)
         : await api.post<{ success: boolean; data: AdminQcRow }>("/admin-qc", form);
+      let syncWarning = "";
+      const trimmedRemark = form.remark.trim();
+      if (checkPassthrough.checkId && trimmedRemark && trimmedRemark !== remarkBaseline.trim()) {
+        try {
+          await api.put(`/check-results/${checkPassthrough.checkId}/appearance-notes`, { note: trimmedRemark });
+        } catch {
+          syncWarning = " (Peringatan: gagal menyinkronkan ke Input Check Results, coba Save ulang.)";
+        }
+      }
+      return { ...res, syncWarning };
     },
     onSuccess: (res) => {
       setError("");
@@ -337,10 +381,11 @@ export default function AdminQcPage() {
       resetForm();
       setLastSavedAdminQcId(savedId);
       queryClient.invalidateQueries({ queryKey: ["admin-qc-history"] });
+      queryClient.invalidateQueries({ queryKey: ["check-results-history"] });
       if (attachFile) {
         uploadMutation.mutate({ adminQcId: savedId, file: attachFile });
       } else {
-        setMessage(wasEditing ? "Data Admin QC berhasil diperbarui." : "Data Admin QC berhasil disimpan.");
+        setMessage((wasEditing ? "Data Admin QC berhasil diperbarui." : "Data Admin QC berhasil disimpan.") + res.syncWarning);
       }
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
@@ -387,6 +432,7 @@ export default function AdminQcPage() {
       qcPassed: row.qcPassed ?? "",
       remark: row.remark ?? "",
     });
+    setRemarkBaseline(row.remark ?? "");
     void (async () => {
       try {
         const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(row.order)}`);
@@ -404,6 +450,11 @@ export default function AdminQcPage() {
               pic: p.pic ?? "",
             }))
           );
+          // Sama spt handleOrderFound -- appearanceNotes Check Results adalah
+          // sumber otoritatif (sudah gabungan), timpa prefill row.remark di atas.
+          const combinedNotes = cr.data!.appearanceNotes ?? "";
+          setForm((f) => ({ ...f, remark: combinedNotes }));
+          setRemarkBaseline(combinedNotes);
           setSpecStatus("found");
         } else {
           setCheckPassthrough(emptyCheckPassthrough);
@@ -564,13 +615,19 @@ export default function AdminQcPage() {
 
             <div className="field" style={{ marginTop: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                <label style={{ margin: 0 }}>Remark</label>
+                <label style={{ margin: 0 }}>Appearance Check Results</label>
                 <button type="button" className="btn btn-info" style={{ padding: "3px 12px" }} onClick={() => fileInputRef.current?.click()}>
                   Upload File
                 </button>
                 {attachFile && <span style={{ fontSize: 12, color: "var(--muted)" }}>{attachFile.name}</span>}
                 <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={(e) => setAttachFile(e.target.files?.[0] ?? null)} />
               </div>
+              <p style={{ margin: "0 0 6px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                Otomatis terisi dari Appearance Check Results yang sudah diinput di menu Input Check Results untuk Order
+                ini. Kalau isi kolom ini diubah lalu di-Save, teksnya akan <strong>ditambahkan sebagai temuan baru</strong>{" "}
+                (bukan menimpa) ke Appearance Check Results Order ini -- jadi riwayat pengecekan sebelumnya tetap
+                tersimpan, tidak hilang.
+              </p>
               <textarea rows={5} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
             </div>
 
@@ -640,7 +697,7 @@ export default function AdminQcPage() {
                   render: (r) => formatDateTime(r.qcPassed),
                   csvValue: (r) => toExcelDateTimeString(r.qcPassed),
                 },
-                { key: "remark", label: "Remark", render: (r) => r.remark },
+                { key: "remark", label: "Appearance Check Results", render: (r) => r.remark },
                 { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
                 { key: "attachments", label: "Lampiran", render: (r) => (r.attachments.length ? `${r.attachments.length} file` : "-") },
                 {

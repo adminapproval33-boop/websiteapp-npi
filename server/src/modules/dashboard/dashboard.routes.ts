@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth } from "../../middleware/auth";
-import { evaluateSpec } from "../../lib/specEval";
+import { evaluateSpec, evaluateSpecDetailed, DetailedSpecVerdict } from "../../lib/specEval";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -1867,5 +1867,83 @@ dashboardRouter.get(
     ].filter((r): r is ProcessRemark => Boolean(r));
 
     res.json({ success: true, data: rows });
+  })
+);
+
+interface QualityReviewRow {
+  checkId: string;
+  timestamp: Date;
+  order: string;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  customer: string | null;
+  itemCheck: string;
+  spec: string | null;
+  result: string | null;
+  verdict: DetailedSpecVerdict;
+  pic: string | null;
+  inputBy: string;
+}
+
+/**
+ * Dashboard > Quality Check Review (2026-08-05, instruksi eksplisit user) --
+ * merekap SEMUA baris Spec Parameter dari seluruh histori Input Check Results
+ * (bukan cuma 1 Order), dihitung berapa item per verdict: OK, OK Lower, OK
+ * Center, OK Upper, NG (2026-08-05, instruksi eksplisit user: breakdown
+ * lengkap, bukan cuma OK/NG digabung) pakai evaluateSpecDetailed -- versi
+ * detail dari evaluateSpec yg dipakai checkQcGate (itu cuma butuh pass/fail
+ * polos, jadi TETAP pakai evaluateSpec biasa, tidak diubah). Filter `from`/
+ * `to` opsional (berdasar CheckResult.timestamp, bukan start/finish
+ * per-parameter -- field itu sering kosong).
+ */
+dashboardRouter.get(
+  "/quality-check-review",
+  asyncRoute(async (req, res) => {
+    const from = req.query.from ? new Date(String(req.query.from)) : undefined;
+    const to = req.query.to ? new Date(String(req.query.to)) : undefined;
+
+    const checks = await prisma.checkResult.findMany({
+      where: {
+        AND: [from ? { timestamp: { gte: from } } : {}, to ? { timestamp: { lte: to } } : {}],
+      },
+      include: { parameters: { orderBy: { no: "asc" } } },
+      orderBy: { timestamp: "desc" },
+    });
+
+    const rows: QualityReviewRow[] = [];
+    const summary = { ok: 0, okLower: 0, okCenter: 0, okUpper: 0, ng: 0, unknown: 0, total: 0 };
+    for (const c of checks) {
+      for (const p of c.parameters) {
+        const verdict = evaluateSpecDetailed(p.standard, p.result);
+        if (verdict === "ok") summary.ok++;
+        else if (verdict === "ok-lower") summary.okLower++;
+        else if (verdict === "ok-center") summary.okCenter++;
+        else if (verdict === "ok-upper") summary.okUpper++;
+        else if (verdict === "ng") summary.ng++;
+        else summary.unknown++;
+        rows.push({
+          checkId: c.checkId,
+          timestamp: c.timestamp,
+          order: c.order,
+          materialNumber: c.materialNumber,
+          materialDescription: c.materialDescription,
+          batch: c.batch,
+          customer: c.customer,
+          itemCheck: p.parameter,
+          spec: p.standard,
+          result: p.result,
+          verdict,
+          pic: p.pic,
+          inputBy: c.inputBy,
+        });
+      }
+    }
+    summary.total = rows.length;
+
+    res.json({
+      success: true,
+      data: { summary, rows },
+    });
   })
 );

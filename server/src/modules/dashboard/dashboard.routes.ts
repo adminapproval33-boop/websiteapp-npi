@@ -1645,16 +1645,38 @@ const UNKNOWN_PLANT_LABEL = "Tidak Diketahui";
  * IU Plant/Plant kosong ("" atau null) dikelompokkan ke "Tidak Diketahui"
  * (BUKAN dibuang), supaya total baris tetap cocok dgn jumlah data aslinya.
  */
+/** Qty di semua modul disimpan sbg free-text String (diketik manual di lantai
+ * produksi, tanpa validasi format), jadi tidak bisa pakai Prisma `_sum`
+ * (butuh kolom numerik). Parse manual: buang semua karakter selain
+ * digit/titik/minus, lalu `parseFloat`; string kosong/non-numerik -> 0. */
+function parseQtyNumber(v: string | null | undefined): number {
+  if (!v) return 0;
+  const cleaned = v.replace(/[^\d.-]/g, "");
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Kolom Premix/Aftermix/Milling/Packing (2026-08-06, instruksi eksplisit
+ * user) diganti dari JUMLAH BARIS Finish jadi JUMLAH QTY (KG/Ltr) Finish --
+ * field sumbernya beda per modul krn masing2 py field qty yg maknanya beda:
+ * - Premix/Aftermix: `orderQty` (satu2nya field qty yg ada).
+ * - Milling: `qtyAct` (Qty Aktual hasil Milling) BUKAN `orderQty` (itu
+ *   rencana) -- lebih mencerminkan produktivitas nyata.
+ * - Packing: `qtyPerMan` ("Qty/Man (Ltr)", label di form) BUKAN `totalQty`
+ *   ("Volume") atau `orderQty` -- instruksi eksplisit user pakai field ini.
+ * Colour Matching TETAP jumlah baris Finish (jumlah No Order yg dikerjakan),
+ * krn modul itu tidak py field qty KG/Ltr sama sekali.
+ */
 async function buildProduktivitasData(period: ProduktivitasPeriod) {
   const periodStart = periodStartInstant(period, new Date());
   const finishWhere = periodStart ? { finish: { not: null, gte: periodStart } } : { finish: { not: null } };
 
   const [premixRows, aftermixRows, millingRows, colourRows, packingRows, tankMap] = await Promise.all([
-    prisma.premixAftermixLog.groupBy({ by: ["iuPlant"], where: { section: "PREMIX", ...finishWhere }, _count: { _all: true } }),
-    prisma.premixAftermixLog.groupBy({ by: ["iuPlant"], where: { section: "AFTERMIX", ...finishWhere }, _count: { _all: true } }),
-    prisma.millingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
+    prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } }),
+    prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } }),
+    prisma.millingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyAct: true } }),
     prisma.colourMatchingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
-    prisma.packingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
+    prisma.packingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyPerMan: true } }),
     buildTankStatusMap(),
   ]);
 
@@ -1683,15 +1705,20 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
     }
     return row;
   }
-  for (const r of premixRows) ensure(plantKey(r.iuPlant)).premix += r._count._all;
-  for (const r of aftermixRows) ensure(plantKey(r.iuPlant)).aftermix += r._count._all;
-  for (const r of millingRows) ensure(plantKey(r.iuPlant)).milling += r._count._all;
+  for (const r of premixRows) ensure(plantKey(r.iuPlant)).premix += parseQtyNumber(r.orderQty);
+  for (const r of aftermixRows) ensure(plantKey(r.iuPlant)).aftermix += parseQtyNumber(r.orderQty);
+  for (const r of millingRows) ensure(plantKey(r.iuPlant)).milling += parseQtyNumber(r.qtyAct);
   for (const r of colourRows) ensure(plantKey(r.iuPlant)).colourMatching += r._count._all;
-  for (const r of packingRows) ensure(plantKey(r.iuPlant)).packing += r._count._all;
+  for (const r of packingRows) ensure(plantKey(r.iuPlant)).packing += parseQtyNumber(r.qtyPerMan);
 
+  // "Total" SENGAJA cuma jumlah Premix+Aftermix+Milling+Packing (semua
+  // KG/Ltr) -- Colour Matching (jumlah Order, satuan beda) DIKELUARKAN dari
+  // Total krn menjumlah KG/Ltr dgn jumlah Order tidak bermakna secara satuan.
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   const productivity = Array.from(byPlant.values())
-    .map((r) => ({ ...r, total: r.premix + r.milling + r.aftermix + r.colourMatching + r.packing }))
-    .sort((a, b) => b.total - a.total);
+    .map((r) => ({ ...r, premix: round2(r.premix), milling: round2(r.milling), aftermix: round2(r.aftermix), packing: round2(r.packing) }))
+    .map((r) => ({ ...r, totalQty: round2(r.premix + r.milling + r.aftermix + r.packing) }))
+    .sort((a, b) => b.totalQty - a.totalQty);
 
   // Label "Tanki Atas"/"Tanki Bawah" (2026-08-02, instruksi eksplisit user):
   // sebelumnya digabung 1 baris per Plant, tapi Tanki Atas & Tanki Bawah itu
@@ -1827,20 +1854,22 @@ interface ProcessRemark {
 }
 
 /**
- * Remark tiap tahap (Premix, Aftermix, Milling, Colour Matching, QC, Approval,
- * Packing) utk 1 Order -- dipakai popup di kolom "Remark" Dashboard. Beda
- * dari kolom "Remark" di baris utama (yg cuma nampilin Remark dari INPUT
- * PALING TERAKHIR lintas modul), popup ini nampilin Remark dari SEMUA modul
- * yg pernah py entri utk Order ini sekaligus -- krn sejak Remark tiap proses
- * dipisah (tidak lagi saling mewarisi antar modul), Remark Premix/Aftermix/
- * dst bisa beda-beda dan histori lengkapnya perlu tetap terlihat di 1 tempat.
+ * Remark tiap tahap (Bongkaran, Premix, Aftermix, Milling, Colour Matching,
+ * QC, Approval, Packing) utk 1 Order -- dipakai popup di kolom "Remark"
+ * Dashboard. Beda dari kolom "Remark" di baris utama (yg cuma nampilin
+ * Remark dari INPUT PALING TERAKHIR lintas modul), popup ini nampilin
+ * Remark dari SEMUA modul yg pernah py entri utk Order ini sekaligus -- krn
+ * sejak Remark tiap proses dipisah (tidak lagi saling mewarisi antar
+ * modul), Remark Premix/Aftermix/dst bisa beda-beda dan histori lengkapnya
+ * perlu tetap terlihat di 1 tempat.
  */
 dashboardRouter.get(
   "/production-orders/:order/remarks",
   asyncRoute(async (req, res) => {
     const order = req.params.order.trim();
 
-    const [premixAftermix, milling, colourMatching, packing, checkResult, approval] = await Promise.all([
+    const [bongkaran, premixAftermix, milling, colourMatching, packing, checkResult, approval] = await Promise.all([
+      prisma.bongkaranLog.findFirst({ where: { order }, select: { remark: true, timestamp: true }, orderBy: { timestamp: "desc" } }),
       prisma.premixAftermixLog.findMany({
         where: { order },
         select: { section: true, remark: true, timestamp: true },
@@ -1857,6 +1886,7 @@ dashboardRouter.get(
     const aftermix = premixAftermix.find((r) => r.section === "AFTERMIX");
 
     const rows: ProcessRemark[] = [
+      bongkaran && { process: "Bongkaran", remark: bongkaran.remark, timestamp: bongkaran.timestamp },
       premix && { process: "Premix", remark: premix.remark, timestamp: premix.timestamp },
       milling && { process: "Milling", remark: milling.remark, timestamp: milling.timestamp },
       aftermix && { process: "Aftermix", remark: aftermix.remark, timestamp: aftermix.timestamp },

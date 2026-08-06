@@ -6,6 +6,16 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $repoRoot = 'C:\Users\abdad\websiteapp-npi'
 
+# Guards against duplicate launches when this script is invoked from more than one
+# terminal in quick succession (e.g. several new PowerShell windows opened within
+# seconds of each other, before npm run dev has had time to bind its port).
+$mutex = New-Object System.Threading.Mutex($false, 'Global\NpiStartLocalLock')
+if (-not $mutex.WaitOne(0)) {
+    Write-Host "[NPI] start-local.ps1 is already running in another window - skipping." -ForegroundColor Yellow
+    return
+}
+try {
+
 function Test-PortListening($port) {
     return $null -ne (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
@@ -26,11 +36,11 @@ if ($pg -and $pg.Status -ne 'Running') {
 
 if (-not $backendUp) {
     Write-Host "[NPI] Starting backend..." -ForegroundColor Cyan
-    Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', 'npm run dev' -WorkingDirectory "$repoRoot\server" -WindowStyle Minimized
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-NoExit', '-Command', 'npm run dev' -WorkingDirectory "$repoRoot\server" -WindowStyle Minimized
 }
 if (-not $frontendUp) {
     Write-Host "[NPI] Starting frontend..." -ForegroundColor Cyan
-    Start-Process powershell.exe -ArgumentList '-NoExit', '-Command', 'npm run dev' -WorkingDirectory "$repoRoot\web" -WindowStyle Minimized
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-NoExit', '-Command', 'npm run dev' -WorkingDirectory "$repoRoot\web" -WindowStyle Minimized
 }
 if (-not $keepAwakeUp) {
     Write-Host "[NPI] Starting keep-awake..." -ForegroundColor Cyan
@@ -63,3 +73,33 @@ if ($lanIp) {
 }
 Write-Host "[NPI] Backend + Frontend + Keep-awake siap. (Ngrok tidak dinyalakan - mode lokal saja.)" -ForegroundColor Green
 Write-Host ""
+
+if ($lanIp) {
+    $waMessage = @"
+Halo tim Admin,
+
+Website NPI sekarang sudah bisa diakses di jaringan kantor (WiFi/LAN) untuk input administrasi produksi.
+
+Alamat akses: http://${lanIp}:5173
+
+Catatan penting:
+- Buka link di atas dari browser (Chrome/Edge) selama terhubung ke WiFi/LAN kantor yang sama dengan komputer server.
+- Link ini tidak bisa diakses dari luar kantor (rumah/data seluler) - hanya untuk penggunaan internal di area kantor.
+- Login pakai NIK dan password masing-masing seperti biasa.
+- Kalau link tidak bisa dibuka, pastikan WiFi sudah tersambung, lalu coba refresh. Kalau masih bermasalah, hubungi [nama/kontak PIC].
+
+Silakan mulai input administrasi produksi melalui link tersebut.
+
+Terima kasih.
+"@
+    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "[NPI] Teks siap kirim ke WhatsApp tim admin (copy semua di bawah ini):" -ForegroundColor Yellow
+    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host $waMessage
+    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+} finally {
+    $mutex.ReleaseMutex()
+}

@@ -14,13 +14,22 @@ const PERIOD_OPTIONS: { value: Period; label: string }[] = [
 
 interface ProduktivitasRow {
   iuPlant: string;
+  /** KG/Ltr (jumlah Order Qty Finish) */
   premix: number;
+  /** KG/Ltr (jumlah Qty Act Finish) */
   milling: number;
+  /** KG/Ltr (jumlah Order Qty Finish) */
   aftermix: number;
+  /** Jumlah No Order Finish -- SATU-SATUNYA kolom yg bukan KG/Ltr */
   colourMatching: number;
+  /** KG/Ltr (jumlah Qty/Man Finish) */
   packing: number;
-  total: number;
+  /** Premix+Milling+Aftermix+Packing SAJA (KG/Ltr) -- Colour Matching sengaja
+   * tidak diikutkan krn satuannya beda (jumlah Order, bukan KG/Ltr) */
+  totalQty: number;
 }
+
+const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
 
 interface TankOccupancyRow {
   plant: string;
@@ -70,13 +79,15 @@ function OccupancyBar({ percent }: { percent: number }) {
 
 /**
  * Dashboard > Dashboard Produktivitas (2026-08-02, instruksi eksplisit
- * user, versi pertama "sesuai dengan data yang sudah ada sekarang"): 2
- * rangkuman -- (1) jumlah baris proses yg SUDAH Finish per tahap (Premix,
- * Milling, Aftermix, Colour Matching, Packing) dikelompokkan per IU Plant,
- * bisa difilter periode; (2) okupansi tanki (Kosong/Terisi/% Terisi)
- * dikelompokkan per Plant, sumber datanya SAMA dgn Dashboard > Tank
- * Monitoring (GET /dashboard/produktivitas gabungkan keduanya jadi 1
- * response supaya konsisten).
+ * user): 2 rangkuman -- (1) produktivitas per tahap (Premix/Milling/
+ * Aftermix/Packing dlm Qty KG/Ltr, Colour Matching dlm jumlah No Order --
+ * lihat komentar `buildProduktivitasData` di dashboard.routes.ts utk field
+ * sumber tiap kolom, direvisi 2026-08-06 instruksi eksplisit user dari
+ * jumlah-baris ke Qty KG/Ltr) dikelompokkan per IU Plant, bisa difilter
+ * periode; (2) okupansi tanki (Kosong/Terisi/% Terisi) dikelompokkan per
+ * Plant, sumber datanya SAMA dgn Dashboard > Tank Monitoring (GET
+ * /dashboard/produktivitas gabungkan keduanya jadi 1 response supaya
+ * konsisten).
  */
 export default function ProduktivitasDashboardPage() {
   const [period, setPeriod] = useState<Period>("month");
@@ -90,7 +101,8 @@ export default function ProduktivitasDashboardPage() {
   const productivity = query.data?.productivity ?? [];
   const tankOccupancy = query.data?.tankOccupancy ?? [];
 
-  const totalSelesai = productivity.reduce((sum, r) => sum + r.total, 0);
+  const totalQtyDiproses = productivity.reduce((sum, r) => sum + r.totalQty, 0);
+  const totalColourMatching = productivity.reduce((sum, r) => sum + r.colourMatching, 0);
   const totalTanki = tankOccupancy.reduce((sum, r) => sum + r.total, 0);
   const totalTerisi = tankOccupancy.reduce((sum, r) => sum + r.terisi, 0);
   const overallPercentTerisi = totalTanki > 0 ? Math.round((totalTerisi / totalTanki) * 100) : 0;
@@ -100,9 +112,9 @@ export default function ProduktivitasDashboardPage() {
       <div className="panel-header">Dashboard Produktivitas</div>
       <div className="panel-body">
         <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-          Rangkuman produktivitas tim per IU Plant (dihitung dari jumlah baris proses yang sudah py Finish di tiap
-          tahap) dan okupansi tanki per Plant (sumber sama dengan Dashboard &gt; Tank Monitoring). Versi awal --
-          dihitung langsung dari data yang sudah ada di sistem sekarang.
+          Rangkuman produktivitas tim per IU Plant (Qty KG/Ltr yang sudah Finish di tiap tahap, kecuali Colour
+          Matching yang dihitung jumlah No Order) dan okupansi tanki per Plant (sumber sama dengan Dashboard &gt;
+          Tank Monitoring).
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -119,7 +131,8 @@ export default function ProduktivitasDashboardPage() {
         </div>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-          <KpiCard label="Total Proses Selesai" value={totalSelesai} color="var(--navy-light)" />
+          <KpiCard label="Total Qty Diproses (KG/Ltr)" value={numberFmt.format(totalQtyDiproses)} color="var(--navy-light)" />
+          <KpiCard label="Total Order Colour Matching" value={totalColourMatching} color="var(--navy-light)" />
           <KpiCard label="Total Tanki" value={totalTanki} color="var(--navy-light)" />
           <KpiCard label="Tanki Terisi" value={totalTerisi} color="var(--danger)" />
           <KpiCard label="Tanki Kosong" value={totalTanki - totalTerisi} color="var(--success)" />
@@ -128,22 +141,30 @@ export default function ProduktivitasDashboardPage() {
 
         <h3 style={{ marginBottom: 4 }}>Produktivitas Tim per IU Plant</h3>
         <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Satuan tiap angka = <strong>jumlah Order/batch yang sudah selesai (Finish)</strong> di tahap itu, bukan Kg/Liter.
+          Premix/Milling/Aftermix/Packing = <strong>jumlah Qty (KG/Ltr)</strong> yang sudah selesai (Finish) di tahap
+          itu. Colour Matching = <strong>jumlah No Order</strong> yang dikerjakan (modul ini tidak punya Qty
+          KG/Ltr). Kolom Total hanya menjumlah Premix+Milling+Aftermix+Packing (Colour Matching tidak diikutkan
+          karena satuannya beda).
         </p>
         <DataTable
           rowKey={(r: ProduktivitasRow) => r.iuPlant}
           exportFileName="dashboard-produktivitas-tim"
-          storageKey="dashboard-produktivitas-tim"
+          storageKey="dashboard-produktivitas-tim-v2"
           rows={productivity}
           emptyMessage="Belum ada proses yang Finish pada periode ini."
           columns={[
             { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
-            { key: "premix", label: "Premix", render: (r) => r.premix },
-            { key: "milling", label: "Milling", render: (r) => r.milling },
-            { key: "aftermix", label: "Aftermix", render: (r) => r.aftermix },
-            { key: "colourMatching", label: "Colour Matching", render: (r) => r.colourMatching },
-            { key: "packing", label: "Packing", render: (r) => r.packing },
-            { key: "total", label: "Total", render: (r) => <strong>{r.total}</strong>, csvValue: (r) => r.total },
+            { key: "premix", label: "Premix (KG/Ltr)", render: (r) => numberFmt.format(r.premix), csvValue: (r) => r.premix },
+            { key: "milling", label: "Milling (KG/Ltr)", render: (r) => numberFmt.format(r.milling), csvValue: (r) => r.milling },
+            { key: "aftermix", label: "Aftermix (KG/Ltr)", render: (r) => numberFmt.format(r.aftermix), csvValue: (r) => r.aftermix },
+            { key: "colourMatching", label: "Colour Matching (Jumlah No Order)", render: (r) => r.colourMatching },
+            { key: "packing", label: "Packing (KG/Ltr)", render: (r) => numberFmt.format(r.packing), csvValue: (r) => r.packing },
+            {
+              key: "totalQty",
+              label: "Total (KG/Ltr)",
+              render: (r) => <strong>{numberFmt.format(r.totalQty)}</strong>,
+              csvValue: (r) => r.totalQty,
+            },
           ]}
         />
 

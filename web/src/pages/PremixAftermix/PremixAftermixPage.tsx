@@ -5,7 +5,7 @@ import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import WeeklyScheduleCalendar, {
   ScheduleEvent,
@@ -1085,7 +1085,7 @@ export default function PremixAftermixPage({
                   csvValue: (r) => (r.finish ? toExcelDateTimeString(r.finish) : ""),
                 },
                 { key: "remark", label: "Remark", render: (r) => r.remark },
-                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+                { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 { key: "attachments", label: "Lampiran", render: (r) => (r.attachments.length ? `${r.attachments.length} file` : "-") },
                 {
                   key: "actions",

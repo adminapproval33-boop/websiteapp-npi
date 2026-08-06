@@ -20,29 +20,46 @@ interface ProduktivitasRow {
   milling: number;
   /** KG/Ltr (jumlah Order Qty Finish) */
   aftermix: number;
-  /** Jumlah No Order Finish -- SATU-SATUNYA kolom yg bukan KG/Ltr */
+  /** KG/Ltr (jumlah Order Qty Finish) */
   colourMatching: number;
-  /** KG/Ltr (jumlah Qty/Man Finish) */
+  /** KG/Ltr (jumlah Qty/Pcs x Volume Finish) */
   packing: number;
-  /** Premix+Milling+Aftermix+Packing SAJA (KG/Ltr) -- Colour Matching sengaja
-   * tidak diikutkan krn satuannya beda (jumlah Order, bukan KG/Ltr) */
+  /** Premix+Milling+Aftermix+Colour Matching+Packing (KG/Ltr) -- semua kolom
+   * satuannya seragam jadi Total menjumlah kelimanya. */
   totalQty: number;
 }
 
-const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
+const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+
+/** "Produktivitas IU Plant/No Order" (2026-08-06, instruksi eksplisit user)
+ * -- tabel KEDUA, terpisah dari ProduktivitasRow (KG/Ltr) di atas: jumlah No
+ * Order (jumlah baris Finish) per tahap per IU Plant, bukan qty. */
+interface ProduktivitasCountRow {
+  iuPlant: string;
+  premix: number;
+  milling: number;
+  aftermix: number;
+  colourMatching: number;
+  packing: number;
+}
 
 interface TankOccupancyRow {
   plant: string;
   tipeTanki: string;
+  /** TIDAK termasuk tanki Damaged (2026-08-06, instruksi eksplisit user) */
   total: number;
   terisi: number;
   kosong: number;
+  /** Ditandai lewat checkbox "Damaged" di Master Data > Tanki -- dikeluarkan
+   * dari total/kosong/terisi krn bukan kapasitas yg benar2 bisa dipakai. */
+  damaged: number;
   percentTerisi: number;
 }
 
 interface ProduktivitasData {
   period: Period;
   productivity: ProduktivitasRow[];
+  productivityOrderCount: ProduktivitasCountRow[];
   tankOccupancy: TankOccupancyRow[];
 }
 
@@ -79,15 +96,16 @@ function OccupancyBar({ percent }: { percent: number }) {
 
 /**
  * Dashboard > Dashboard Produktivitas (2026-08-02, instruksi eksplisit
- * user): 2 rangkuman -- (1) produktivitas per tahap (Premix/Milling/
- * Aftermix/Packing dlm Qty KG/Ltr, Colour Matching dlm jumlah No Order --
- * lihat komentar `buildProduktivitasData` di dashboard.routes.ts utk field
- * sumber tiap kolom, direvisi 2026-08-06 instruksi eksplisit user dari
- * jumlah-baris ke Qty KG/Ltr) dikelompokkan per IU Plant, bisa difilter
- * periode; (2) okupansi tanki (Kosong/Terisi/% Terisi) dikelompokkan per
- * Plant, sumber datanya SAMA dgn Dashboard > Tank Monitoring (GET
- * /dashboard/produktivitas gabungkan keduanya jadi 1 response supaya
- * konsisten).
+ * user): 2 rangkuman -- (1) produktivitas per tahap, SEMUA kolom Qty
+ * KG/Ltr (Premix/Aftermix/Colour Matching = Order Qty, Milling = Qty Act,
+ * Packing = Qty/Pcs x Volume -- lihat komentar `buildProduktivitasData` di
+ * dashboard.routes.ts utk detail per kolom, direvisi 2x 2026-08-06 instruksi
+ * eksplisit user: pertama dari jumlah-baris ke Qty KG/Ltr, lalu Colour
+ * Matching & Packing disamakan field sumbernya) dikelompokkan per IU Plant,
+ * bisa difilter periode; (2) okupansi tanki (Kosong/Terisi/% Terisi)
+ * dikelompokkan per Plant, sumber datanya SAMA dgn Dashboard > Tank
+ * Monitoring (GET /dashboard/produktivitas gabungkan keduanya jadi 1
+ * response supaya konsisten).
  */
 export default function ProduktivitasDashboardPage() {
   const [period, setPeriod] = useState<Period>("month");
@@ -99,10 +117,10 @@ export default function ProduktivitasDashboardPage() {
   });
 
   const productivity = query.data?.productivity ?? [];
+  const productivityOrderCount = query.data?.productivityOrderCount ?? [];
   const tankOccupancy = query.data?.tankOccupancy ?? [];
 
   const totalQtyDiproses = productivity.reduce((sum, r) => sum + r.totalQty, 0);
-  const totalColourMatching = productivity.reduce((sum, r) => sum + r.colourMatching, 0);
   const totalTanki = tankOccupancy.reduce((sum, r) => sum + r.total, 0);
   const totalTerisi = tankOccupancy.reduce((sum, r) => sum + r.terisi, 0);
   const overallPercentTerisi = totalTanki > 0 ? Math.round((totalTerisi / totalTanki) * 100) : 0;
@@ -112,9 +130,8 @@ export default function ProduktivitasDashboardPage() {
       <div className="panel-header">Dashboard Produktivitas</div>
       <div className="panel-body">
         <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-          Rangkuman produktivitas tim per IU Plant (Qty KG/Ltr yang sudah Finish di tiap tahap, kecuali Colour
-          Matching yang dihitung jumlah No Order) dan okupansi tanki per Plant (sumber sama dengan Dashboard &gt;
-          Tank Monitoring).
+          Rangkuman produktivitas tim per IU Plant (Qty KG/Ltr yang sudah Finish di tiap tahap) dan okupansi tanki
+          per Plant (sumber sama dengan Dashboard &gt; Tank Monitoring).
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -132,24 +149,21 @@ export default function ProduktivitasDashboardPage() {
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
           <KpiCard label="Total Qty Diproses (KG/Ltr)" value={numberFmt.format(totalQtyDiproses)} color="var(--navy-light)" />
-          <KpiCard label="Total Order Colour Matching" value={totalColourMatching} color="var(--navy-light)" />
           <KpiCard label="Total Tanki" value={totalTanki} color="var(--navy-light)" />
           <KpiCard label="Tanki Terisi" value={totalTerisi} color="var(--danger)" />
           <KpiCard label="Tanki Kosong" value={totalTanki - totalTerisi} color="var(--success)" />
           <KpiCard label="% Terisi Keseluruhan" value={`${overallPercentTerisi}%`} color="#d97706" />
         </div>
 
-        <h3 style={{ marginBottom: 4 }}>Produktivitas Tim per IU Plant</h3>
+        <h3 style={{ marginBottom: 4 }}>Produktivitas IU Plant/LTR</h3>
         <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Premix/Milling/Aftermix/Packing = <strong>jumlah Qty (KG/Ltr)</strong> yang sudah selesai (Finish) di tahap
-          itu. Colour Matching = <strong>jumlah No Order</strong> yang dikerjakan (modul ini tidak punya Qty
-          KG/Ltr). Kolom Total hanya menjumlah Premix+Milling+Aftermix+Packing (Colour Matching tidak diikutkan
-          karena satuannya beda).
+          Semua kolom = <strong>jumlah Qty (KG/Ltr)</strong> yang sudah selesai (Finish) di tahap itu (Premix/
+          Aftermix/Colour Matching dari Order Qty, Milling dari Qty Act, Packing dari Qty/Pcs x Volume).
         </p>
         <DataTable
           rowKey={(r: ProduktivitasRow) => r.iuPlant}
           exportFileName="dashboard-produktivitas-tim"
-          storageKey="dashboard-produktivitas-tim-v2"
+          storageKey="dashboard-produktivitas-tim-v3"
           rows={productivity}
           emptyMessage="Belum ada proses yang Finish pada periode ini."
           columns={[
@@ -157,22 +171,45 @@ export default function ProduktivitasDashboardPage() {
             { key: "premix", label: "Premix (KG/Ltr)", render: (r) => numberFmt.format(r.premix), csvValue: (r) => r.premix },
             { key: "milling", label: "Milling (KG/Ltr)", render: (r) => numberFmt.format(r.milling), csvValue: (r) => r.milling },
             { key: "aftermix", label: "Aftermix (KG/Ltr)", render: (r) => numberFmt.format(r.aftermix), csvValue: (r) => r.aftermix },
-            { key: "colourMatching", label: "Colour Matching (Jumlah No Order)", render: (r) => r.colourMatching },
-            { key: "packing", label: "Packing (KG/Ltr)", render: (r) => numberFmt.format(r.packing), csvValue: (r) => r.packing },
             {
-              key: "totalQty",
-              label: "Total (KG/Ltr)",
-              render: (r) => <strong>{numberFmt.format(r.totalQty)}</strong>,
-              csvValue: (r) => r.totalQty,
+              key: "colourMatching",
+              label: "Colour Matching (KG/Ltr)",
+              render: (r) => numberFmt.format(r.colourMatching),
+              csvValue: (r) => r.colourMatching,
             },
+            { key: "packing", label: "Packing (KG/Ltr)", render: (r) => numberFmt.format(r.packing), csvValue: (r) => r.packing },
           ]}
         />
 
-        <h3 style={{ marginTop: 28, marginBottom: 8 }}>Okupansi Tanki per Plant</h3>
+        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Produktivitas IU Plant/No Order</h3>
+        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Semua kolom = <strong>jumlah No Order</strong> yang sudah selesai (Finish) di tahap itu, per IU Plant.
+        </p>
+        <DataTable
+          rowKey={(r: ProduktivitasCountRow) => r.iuPlant}
+          exportFileName="dashboard-produktivitas-tim-order-count"
+          storageKey="dashboard-produktivitas-tim-order-count"
+          rows={productivityOrderCount}
+          emptyMessage="Belum ada proses yang Finish pada periode ini."
+          columns={[
+            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+            { key: "premix", label: "Premix", render: (r) => r.premix },
+            { key: "milling", label: "Milling", render: (r) => r.milling },
+            { key: "aftermix", label: "Aftermix", render: (r) => r.aftermix },
+            { key: "colourMatching", label: "Colour Matching", render: (r) => r.colourMatching },
+            { key: "packing", label: "Packing", render: (r) => r.packing },
+          ]}
+        />
+
+        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Okupansi Tanki per Plant</h3>
+        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Tanki yang ditandai <strong>Damaged</strong> (Master Data &gt; Tanki) dikeluarkan dari Total/Kosong/Terisi/%
+          Terisi -- dihitung terpisah di kolom Damaged.
+        </p>
         <DataTable
           rowKey={(r: TankOccupancyRow) => `${r.plant}-${r.tipeTanki}`}
           exportFileName="dashboard-produktivitas-tanki"
-          storageKey="dashboard-produktivitas-tanki-v2"
+          storageKey="dashboard-produktivitas-tanki-v3"
           rows={tankOccupancy}
           emptyMessage="Belum ada data tanki."
           columns={[
@@ -181,6 +218,12 @@ export default function ProduktivitasDashboardPage() {
             { key: "total", label: "Total Tanki", render: (r) => r.total },
             { key: "terisi", label: "Terisi", render: (r) => r.terisi },
             { key: "kosong", label: "Kosong", render: (r) => r.kosong },
+            {
+              key: "damaged",
+              label: "Damaged",
+              render: (r) => <span style={{ color: r.damaged > 0 ? "var(--danger)" : undefined, fontWeight: r.damaged > 0 ? 700 : undefined }}>{r.damaged}</span>,
+              csvValue: (r) => r.damaged,
+            },
             {
               key: "percentTerisi",
               label: "% Terisi",

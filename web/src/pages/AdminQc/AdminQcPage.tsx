@@ -7,6 +7,7 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
+import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
@@ -172,6 +173,7 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
 }
 
 export default function AdminQcPage() {
+  const { data: employees } = useEmployeeOptions();
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "adminQc") === "VIEW";
   const queryClient = useQueryClient();
@@ -698,7 +700,7 @@ export default function AdminQcPage() {
                   csvValue: (r) => toExcelDateTimeString(r.qcPassed),
                 },
                 { key: "remark", label: "Appearance Check Results", render: (r) => r.remark },
-                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+                { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 { key: "attachments", label: "Lampiran", render: (r) => (r.attachments.length ? `${r.attachments.length} file` : "-") },
                 {
                   key: "actions",

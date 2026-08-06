@@ -389,6 +389,16 @@ premixAftermixRouter.post(
       return;
     }
     if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
+    // Material ini benar2 memakai tahap ini? (2026-08-06, instruksi eksplisit
+    // user -- gerbang BARU, terpisah dari gerbang prasyarat di bawah. Lihat
+    // komentar checkStageApplicableGate di lib/stageGate.ts.) Baris BARU saja
+    // (PUT/Edit tetap bebas).
+    const stageKey = parsed.data.section === "PREMIX" ? "premix" : "aftermix";
+    const applicable = await stageGate.checkStageApplicableGate(stageKey, parsed.data.materialNumber);
+    if (!applicable.ok) {
+      res.status(400).json({ success: false, message: `Material ini tidak memakai proses ${applicable.stageLabel}.` });
+      return;
+    }
     // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Aftermix
     // baru boleh diinput kalau prasyaratnya (Milling, atau Premix kalau
     // Milling di-skip utk Material ini menurut MaterialFlow) sudah "-DN".

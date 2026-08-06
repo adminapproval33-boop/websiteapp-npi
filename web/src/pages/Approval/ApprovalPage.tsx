@@ -7,7 +7,7 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
-import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
@@ -672,7 +672,7 @@ export default function ApprovalPage({
                   csvValue: (r) => toExcelDateTimeString(r.finishApp),
                 },
                 { key: "remark", label: "Remark", render: (r) => r.remark },
-                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+                { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 { key: "status", label: "Status", render: (r) => r.status },
                 { key: "processingTime", label: "Processing Time", render: (r) => r.processingTime },
                 { key: "hasAttachment", label: "Lampiran", render: (r) => (r.hasAttachment ? "Filled" : "No File"), csvValue: (r) => (r.hasAttachment ? "Filled" : "No File") },

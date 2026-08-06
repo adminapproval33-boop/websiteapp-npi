@@ -2,10 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 
 export const productionLabelRouter = Router();
 productionLabelRouter.use(requireAuth);
+productionLabelRouter.use(requireMenuView("productionLabel"));
 
 const optionalDate = z
   .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
@@ -113,6 +114,7 @@ productionLabelRouter.get(
 productionLabelRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("productionLabel"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {

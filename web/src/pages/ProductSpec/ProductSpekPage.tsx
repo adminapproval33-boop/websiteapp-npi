@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
+import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
@@ -89,6 +90,7 @@ function flattenSpecs(specs: SpecRow[]): FlatParamRow[] {
 const emptyForm = { materialNumber: "", materialDescription: "", information: "" };
 
 export default function ProductSpekPage() {
+  const { data: employees } = useEmployeeOptions();
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "productSpec") === "VIEW";
   const queryClient = useQueryClient();
@@ -442,7 +444,7 @@ export default function ProductSpekPage() {
                 { key: "no", label: "No", render: (r) => r.parameter.no },
                 { key: "itemCheck", label: "Item Check", render: (r) => r.parameter.itemCheck },
                 { key: "standardSpec", label: "Standard/Spec", render: (r) => r.parameter.standardSpec || "-" },
-                { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+                { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 {
                   key: "actions",
                   label: "Aksi",
@@ -560,7 +562,7 @@ export default function ProductSpekPage() {
           )}
 
           <p style={{ marginTop: 14, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-            Dibuat {formatDateTime(detailSpec.timestamp)} oleh {detailSpec.inputBy}
+            Dibuat {formatDateTime(detailSpec.timestamp)} oleh {formatInputBy(employees, detailSpec.inputBy)}
           </p>
         </Modal>
       )}

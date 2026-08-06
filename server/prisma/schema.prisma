@@ -23,7 +23,7 @@ enum ProductionSection {
 /// admin awal dibuat lewat seed script dan login lewat jalur yang sama
 /// seperti user lain.
 model User {
-  nik               String   @id
+  nik               String      @id
   name              String
   department        String
   passwordHash      String
@@ -36,13 +36,13 @@ model User {
   /// GET/POST-nya ditolak total). TIDAK berlaku utk FULL_ACCESS (lihat
   /// requireMenuView/requireMenuInput di middleware/auth.ts) -- murni utk
   /// user INPUT/VIEW biasa.
-  hiddenMenus       String[] @default([])
-  viewOnlyMenus     String[] @default([])
-  mustResetPassword Boolean  @default(false)
+  hiddenMenus       String[]    @default([])
+  viewOnlyMenus     String[]    @default([])
+  mustResetPassword Boolean     @default(false)
   /// Pathname foto avatar di Vercel Blob (private), diisi lewat menu Settings > Profil.
   avatarPath        String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
   sessions          Session[]
 
   @@map("users")
@@ -109,6 +109,13 @@ model MasterTank {
   newNumber     String?
   locationPlant String?
   typeTanki     String?
+  /// Ditandai rusak (2026-08-06, instruksi eksplisit user) -- dicentang lewat
+  /// Master Data > Tanki, yg langsung mengarahkan ke Form Input Maintenance
+  /// (menu baru) supaya perbaikannya tercatat. Tanki `damaged=true` DIKELUARKAN
+  /// dari hitungan Kosong/Terisi di Dashboard Tank Monitoring & Dashboard
+  /// Produktivitas (lihat buildTankStatusMap/buildProduktivitasData di
+  /// dashboard.routes.ts) -- masuk hitungan "Damaged" tersendiri.
+  damaged       Boolean  @default(false)
   updatedAt     DateTime @updatedAt
 
   @@map("master_tanks")
@@ -223,8 +230,8 @@ model MasterEmployee {
 
 /// Planning Schedule > Milling.
 model MillingLog {
-  id                  Int      @id @default(autoincrement())
-  timestamp           DateTime @default(now())
+  id                  Int                 @id @default(autoincrement())
+  timestamp           DateTime            @default(now())
   order               String
   materialNumber      String?
   materialDescription String?
@@ -273,9 +280,9 @@ model MillingAttachment {
 
 /// Planning Schedule > Premix & Aftermix (1 tabel, dibedakan kolom `section`).
 model PremixAftermixLog {
-  id                  Int               @id @default(autoincrement())
+  id                  Int                        @id @default(autoincrement())
   section             ProductionSection
-  timestamp           DateTime          @default(now())
+  timestamp           DateTime                   @default(now())
   order               String
   materialNumber      String?
   materialDescription String?
@@ -351,8 +358,8 @@ model PwoSchedule {
 
 /// Planning Schedule > Colour Matching.
 model ColourMatchingLog {
-  id                  Int      @id @default(autoincrement())
-  timestamp           DateTime @default(now())
+  id                  Int                        @id @default(autoincrement())
+  timestamp           DateTime                   @default(now())
   order               String
   materialNumber      String?
   materialDescription String?
@@ -410,8 +417,8 @@ model ColourMatchingAttachment {
 /// begitu terisi, kolom "Proses" di Production Order Monitoring berubah jadi
 /// "Produksi - PQE" (lihat bongkaranProcessLabel di dashboard.routes.ts).
 model BongkaranLog {
-  id                  Int      @id @default(autoincrement())
-  timestamp           DateTime @default(now())
+  id                  Int                   @id @default(autoincrement())
+  timestamp           DateTime              @default(now())
   order               String
   materialNumber      String?
   materialDescription String?
@@ -453,10 +460,62 @@ model BongkaranAttachment {
   @@map("bongkaran_attachments")
 }
 
+/// Menu "Maintenance" (2026-08-06, instruksi eksplisit user) -- dipicu dari
+/// checkbox "Damaged" di Master Data > Tanki (MasterTank.damaged), tapi field
+/// `codeTanki` sengaja BUKAN foreign key (pola sama dgn `codeTanki` di semua
+/// modul produksi lain -- referensi bebas, bukan relasi ketat) supaya form ini
+/// tetap bisa dipakai lepas dari Master Data Tanki kalau perlu ke depannya.
+/// Status ditentukan dari field mana yg terisi (BUKAN kolom tersendiri, pola
+/// sama dgn Approval.computeStatus di server/src/modules/approval/approval.routes.ts):
+/// - Belum ada scheduledDate -> "Pending".
+/// - scheduledDate terisi, start belum -> "Dijadwalkan".
+/// - start terisi, finish belum -> "Dikerjakan".
+/// - finish terisi -> "Selesai".
+/// `scheduledDate`+`sequence` dipakai kalender drag-drop "Jadwal Pengerjaan"
+/// (pola SAMA PERSIS dgn PwoSchedule -- day+sequence, lihat komentar model
+/// itu) -- BEDA dari PwoSchedule, di sini jadwalnya nempel LANGSUNG di baris
+/// Job Maintenance itu sendiri (bukan tabel jadwal terpisah), krn 1 Job
+/// Maintenance = 1 entitas utuh dari lapor sampai selesai, tidak seperti
+/// PWO yg jadwalnya cuma metadata terpisah dari data produksi aslinya.
+model MaintenanceLog {
+  id            Int                     @id @default(autoincrement())
+  timestamp     DateTime                @default(now())
+  codeTanki     String
+  description   String
+  reportedBy    String
+  priority      String?
+  technician    String?
+  scheduledDate DateTime?
+  sequence      Int                     @default(0)
+  start         DateTime?
+  finish        DateTime?
+  remark        String?
+  inputBy       String
+  attachments   MaintenanceAttachment[]
+
+  @@index([codeTanki])
+  @@map("maintenance_logs")
+}
+
+model MaintenanceAttachment {
+  id         Int             @id @default(autoincrement())
+  codeTanki  String
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime        @default(now())
+  logId      Int?
+  log        MaintenanceLog? @relation(fields: [logId], references: [id], onDelete: SetNull)
+
+  @@index([codeTanki])
+  @@map("maintenance_attachments")
+}
+
 /// Planning Schedule > Packing.
 model PackingLog {
-  id                  Int      @id @default(autoincrement())
-  timestamp           DateTime @default(now())
+  id                  Int                 @id @default(autoincrement())
+  timestamp           DateTime            @default(now())
   spvNik              String?
   spvName             String
   leaderNik           String?
@@ -509,8 +568,8 @@ model PackingAttachment {
 
 /// Quality Control > Creating Product Spek. specId = group key (dulu "Spec ID").
 model ProductSpec {
-  specId              String                  @id @default(uuid())
-  timestamp           DateTime                @default(now())
+  specId              String                 @id @default(uuid())
+  timestamp           DateTime               @default(now())
   materialNumber      String
   materialDescription String
   information         String?
@@ -537,8 +596,8 @@ model ProductSpecParameter {
 
 /// Quality Control > Input Check Results. checkId = group key (dulu "Check ID").
 model CheckResult {
-  checkId             String                  @id @default(uuid())
-  timestamp           DateTime                @default(now())
+  checkId             String                 @id @default(uuid())
+  timestamp           DateTime               @default(now())
   order               String
   materialNumber      String?
   materialDescription String?
@@ -605,8 +664,8 @@ model IcrAppearanceFile {
 /// layout eksplisit user) karena keduanya bagian dari header Order/Plant,
 /// bukan tahap QC.
 model ApprovalSchedule {
-  approvalId             String   @id @default(uuid())
-  timestamp              DateTime @default(now())
+  approvalId             String               @id @default(uuid())
+  timestamp              DateTime             @default(now())
   inputBy                String
   order                  String
   materialNumber         String?
@@ -665,8 +724,8 @@ model ApprovalAttachment {
 /// CheckResultParameter yg SAMA dgn menu "Input Check Results" (1 sumber
 /// data QC, dieditnya bisa dari 2 halaman).
 model AdminQc {
-  adminQcId           String    @id @default(uuid())
-  timestamp           DateTime  @default(now())
+  adminQcId           String              @id @default(uuid())
+  timestamp           DateTime            @default(now())
   inputBy             String
   order               String
   materialNumber      String?

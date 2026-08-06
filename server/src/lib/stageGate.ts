@@ -20,15 +20,21 @@ import { prisma } from "./prisma";
  * cuma Aftermix/Colour Matching yg bisa di-skip spt asumsi versi pertama --
  * makanya SEMUA tahap (Premix/Milling/Aftermix/Colour Matching) sekarang
  * dicek "wajib atau tidak" lewat MaterialFlow, bukan cuma dua tahap
- * terakhir. QC & Approval & Packing TETAP logika lama (QC&Packing wajib
- * mutlak sesuai instruksi eksplisit user, dikonfirmasi jg oleh data: SEMUA
- * 2711 Material di file py QC+Packing terisi; Approval/Packing tetap gerbang
- * AdminQc, bukan MaterialFlow, krn itu keputusan administratif terpisah).
+ * terakhir. QC TETAP logika lama (wajib mutlak sesuai instruksi eksplisit
+ * user, dikonfirmasi jg oleh data: SEMUA 2711 Material di file py QC
+ * terisi) -- lihat checkQcGate.
  *
  * Kalau Material belum ada di MaterialFlow sama sekali (belum sempat
  * diimpor/material baru), fallback ke heuristik lama (pernah ada histori
  * log di tahap itu) supaya tidak mendadak memblokir semua input utk Material
  * yg belum sempat terdaftar.
+ *
+ * Packing (DIREVISI 2026-08-03) & Approval (DIREVISI 2026-08-06) SUDAH
+ * TIDAK gerbang AdminQc lagi -- keduanya sekarang bebas diinput Order
+ * apapun kapan saja tanpa syarat administratif dari tahap sebelumnya,
+ * instruksi eksplisit user. Fungsi gerbangnya (hasAdminQcQcPassed utk
+ * Packing, hasAdminQcApprovalType utk Approval) sudah dihapus total dari
+ * file ini -- lihat komentar di packing.routes.ts/approval.routes.ts.
  */
 
 async function latestPremix(order: string) {
@@ -83,14 +89,6 @@ export async function isColourMatchingDone(order: string): Promise<boolean> {
   return isDn(await latestColourMatching(order));
 }
 
-/** Order-nya SUDAH masuk "List Antrian Approval" (AdminQc Stage terbaru
- * Approval/Joint Lot) -- gerbang wajib SEBELUM baris Approval baru boleh
- * dibuat, terpisah dari tier-validation internal Approval yg sudah ada. */
-export async function hasAdminQcApprovalType(order: string): Promise<boolean> {
-  const latest = await prisma.adminQc.findFirst({ where: { order }, orderBy: { timestamp: "desc" }, select: { typeLot: true } });
-  return latest?.typeLot === "Approval" || latest?.typeLot === "Joint Lot";
-}
-
 type FlowStage = "premix" | "milling" | "aftermix" | "colourMatching";
 
 const STAGE_LABEL: Record<FlowStage, string> = {
@@ -134,6 +132,31 @@ export async function isStageRequiredForMaterial(stage: FlowStage, materialNumbe
     }[stage];
   }
   return materialHasHistoryIn(stage, materialNumber);
+}
+
+export interface StageApplicableResult {
+  ok: boolean;
+  stageLabel?: string;
+}
+
+/**
+ * Material ini benar2 MEMAKAI tahap `stage` menurut MaterialFlow? (2026-08-06,
+ * instruksi eksplisit user -- gerbang BARU, beda dari findRequiredPredecessor
+ * di bawah yg cuma ngecek prasyarat tahap SEBELUMNYA. Sebelum ini, checkbox
+ * "Wajib?" di panel Info Proses Material cuma informasi visual -- Order bisa
+ * tetap di-Save ke tahap yg ditandai "Tidak Wajib" utk Material tsb (kasus
+ * nyata: Order 1010165790/Material 6192TXHKCREAM berhasil diinput ke Premix
+ * padahal MaterialFlow bilang premixRequired=false utk Material itu). Dipakai
+ * sbg hard-block TAMBAHAN di POST create Premix/Milling/Aftermix/Colour
+ * Matching (di luar gerbang prasyarat yg sudah ada) -- PUT/Edit baris yg
+ * SUDAH ADA tetap bebas, sama pola dgn gerbang lain.
+ */
+export async function checkStageApplicableGate(
+  stage: FlowStage,
+  materialNumber: string | null | undefined
+): Promise<StageApplicableResult> {
+  const required = await isStageRequiredForMaterial(stage, materialNumber);
+  return required ? { ok: true } : { ok: false, stageLabel: STAGE_LABEL[stage] };
 }
 
 /**

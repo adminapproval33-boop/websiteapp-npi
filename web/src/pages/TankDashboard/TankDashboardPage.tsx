@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
@@ -37,6 +38,11 @@ interface TankRow {
   newNumber: string | null;
   locationPlant: string | null;
   typeTanki: string | null;
+  /** Ditandai lewat checkbox "Damaged" di Master Data > Tanki (2026-08-06,
+   * instruksi eksplisit user) -- independen dari status occupied/empty di
+   * bawah (tanki bisa Damaged sekaligus masih tercatat Terisi kalau ada
+   * histori proses yg belum di-Packing). */
+  damaged: boolean;
   status: "occupied" | "empty";
   occupant: TankOccupant | null;
 }
@@ -91,6 +97,8 @@ function formatDuration(since: string): string {
 }
 
 export default function TankDashboardPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
@@ -100,6 +108,20 @@ export default function TankDashboardPage() {
     queryKey: ["tank-status"],
     queryFn: () => api.get<{ success: boolean; data: TankRow[] }>("/dashboard/tank-status").then((r) => r.data),
     refetchInterval: 30_000,
+  });
+
+  /** Checkbox "Damaged" (2026-08-06, instruksi eksplisit user -- lokasinya
+   * SEMPAT ditaruh di Master Data > Tanki, tapi dipindah ke sini krn ini yg
+   * dimaksud user dari awal) -- dicentang langsung mengarahkan ke Form Input
+   * Maintenance (menu Maintenance) supaya perbaikannya tercatat. Tanki
+   * `damaged=true` dikeluarkan dari hitungan Kosong/Terisi di sini &
+   * Dashboard Produktivitas (lihat buildTankStatusMap di server). */
+  const toggleDamaged = useMutation({
+    mutationFn: ({ code, damaged }: { code: string; damaged: boolean }) => api.put(`/master-data/tanks/${encodeURIComponent(code)}/damaged`, { damaged }),
+    onSuccess: (_res, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+      if (variables.damaged) navigate(`/maintenance/form?codeTanki=${encodeURIComponent(variables.code)}`);
+    },
   });
 
   // 3 popup ini reuse endpoint yang SAMA dgn Dashboard Production Order
@@ -137,8 +159,9 @@ export default function TankDashboardPage() {
   });
 
   const rows = tankQuery.data ?? [];
-  const occupiedCount = rows.filter((r) => r.status === "occupied").length;
-  const emptyCount = rows.length - occupiedCount;
+  const damagedCount = rows.filter((r) => r.damaged).length;
+  const occupiedCount = rows.filter((r) => !r.damaged && r.status === "occupied").length;
+  const emptyCount = rows.length - damagedCount - occupiedCount;
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -158,6 +181,7 @@ export default function TankDashboardPage() {
         <KpiCard label="Total Tank" value={rows.length} color="var(--navy-light)" />
         <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
         <KpiCard label="Tank Terisi" value={occupiedCount} color="var(--danger)" />
+        <KpiCard label="Tank Damaged" value={damagedCount} color="#d97706" />
       </div>
 
       <div className="panel">
@@ -167,7 +191,10 @@ export default function TankDashboardPage() {
             Status "Terisi"/"Kosong" diturunkan otomatis dari Code Tanki yang diisi di menu Premix, Milling, Aftermix,
             Colour Matching, QC, Approval, dan Packing -- diambil dari input PALING TERAKHIR untuk tiap Tank (lintas
             Order manapun), dan dianggap kosong lagi begitu Order tersebut sudah masuk Packing. Data ini bukan sensor
-            fisik, jadi bisa saja tidak 100% akurat kalau ada tahap yang belum diinput ke sistem.
+            fisik, jadi bisa saja tidak 100% akurat kalau ada tahap yang belum diinput ke sistem. Status
+            "<strong>Damaged</strong>" ditandai manual lewat checkbox di kolom "Damaged" tabel ini (otomatis
+            mengarahkan ke menu Maintenance) -- menggantikan tampilan Terisi/Kosong di baris itu, dan dikeluarkan
+            dari KPI "Tank Kosong"/"Tank Terisi" di atas.
           </p>
           <input
             placeholder="Cari Code Tanki / Order / Material..."
@@ -182,10 +209,10 @@ export default function TankDashboardPage() {
           <DataTable
             rowKey={(r: TankRow) => r.code}
             exportFileName="tank-monitoring"
-            storageKey="tank-monitoring"
+            storageKey="tank-monitoring-v2"
             rows={filteredRows}
             freezeFirstColumn
-            rowStyle={(r) => (r.status === "occupied" ? { background: "#fef2f2" } : undefined)}
+            rowStyle={(r) => (r.damaged ? { background: "#fffbeb" } : r.status === "occupied" ? { background: "#fef2f2" } : undefined)}
             columns={[
               { key: "code", label: "Code Tanki", render: (r) => r.code },
               { key: "typeTanki", label: "Tank Type", render: (r) => r.typeTanki || "-" },
@@ -202,14 +229,28 @@ export default function TankDashboardPage() {
                       borderRadius: 999,
                       fontSize: "0.75rem",
                       fontWeight: 700,
-                      background: r.status === "occupied" ? "#fbd6d6" : "#d4f4dd",
-                      color: r.status === "occupied" ? "#991b1b" : "#065f46",
+                      background: r.damaged ? "#fef3c7" : r.status === "occupied" ? "#fbd6d6" : "#d4f4dd",
+                      color: r.damaged ? "#92400e" : r.status === "occupied" ? "#991b1b" : "#065f46",
                     }}
+                    title={r.damaged ? "Ditandai rusak -- lihat menu Maintenance" : undefined}
                   >
-                    {r.status === "occupied" ? "Terisi" : "Kosong"}
+                    {r.damaged ? "Damaged" : r.status === "occupied" ? "Terisi" : "Kosong"}
                   </span>
                 ),
-                csvValue: (r) => (r.status === "occupied" ? "Terisi" : "Kosong"),
+                csvValue: (r) => (r.damaged ? "Damaged" : r.status === "occupied" ? "Terisi" : "Kosong"),
+              },
+              {
+                key: "damagedCheckbox",
+                label: "Damaged",
+                render: (r) => (
+                  <input
+                    type="checkbox"
+                    checked={r.damaged}
+                    title={r.damaged ? "Tanki ditandai rusak" : "Centang kalau tanki ini rusak"}
+                    onChange={(e) => toggleDamaged.mutate({ code: r.code, damaged: e.target.checked })}
+                  />
+                ),
+                csvValue: (r) => (r.damaged ? "Ya" : "Tidak"),
               },
               {
                 key: "source",

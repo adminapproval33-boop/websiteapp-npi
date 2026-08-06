@@ -234,6 +234,15 @@ millingRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    // Material ini benar2 memakai tahap Milling? (2026-08-06, instruksi
+    // eksplisit user -- gerbang BARU, terpisah dari gerbang prasyarat di
+    // bawah. Lihat komentar checkStageApplicableGate di lib/stageGate.ts.)
+    // Baris BARU saja (PUT/Edit tetap bebas).
+    const applicable = await stageGate.checkStageApplicableGate("milling", parsed.data.materialNumber);
+    if (!applicable.ok) {
+      res.status(400).json({ success: false, message: `Material ini tidak memakai proses ${applicable.stageLabel}.` });
+      return;
+    }
     // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Milling
     // baru boleh diinput kalau prasyaratnya (Premix, kalau wajib utk Material
     // ini menurut MaterialFlow) sudah "-DN". Baris BARU saja yg dicek

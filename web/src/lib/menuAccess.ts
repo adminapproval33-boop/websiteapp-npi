@@ -14,6 +14,9 @@ export const MENU_KEYS = [
   "productSpec",
   "checkResults",
   "adminQc",
+  "maintenance",
+  "productionLabel",
+  "purchaseRequisition",
 ] as const;
 
 export type MenuKey = (typeof MENU_KEYS)[number];
@@ -29,6 +32,9 @@ export const MENU_LABELS: Record<MenuKey, string> = {
   productSpec: "Creating Product Spek",
   checkResults: "Input Check Results",
   adminQc: "Input Admin QC",
+  maintenance: "Maintenance",
+  productionLabel: "Production Label",
+  purchaseRequisition: "Purchase Requisition",
 };
 
 /** Path menu (lihat layout/menu.tsx) -> MenuKey -- dipakai utk sembunyikan
@@ -44,6 +50,14 @@ export const MENU_KEY_BY_PATH: Record<string, MenuKey> = {
   "/qc/product-spec": "productSpec",
   "/qc/check-results": "checkResults",
   "/qc/admin-qc": "adminQc",
+  "/maintenance/form": "maintenance",
+  "/maintenance/list": "maintenance",
+  "/maintenance/schedule": "maintenance",
+  "/production-label/entry": "productionLabel",
+  "/production-label/history": "productionLabel",
+  "/pr/entry": "purchaseRequisition",
+  "/pr/history": "purchaseRequisition",
+  "/pr/monitoring": "purchaseRequisition",
 };
 
 export type MenuLevel = "VIEW" | "INPUT" | "HIDE";

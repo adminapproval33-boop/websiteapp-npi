@@ -1122,6 +1122,13 @@ export interface TankStatusInfo {
   newNumber: string | null;
   locationPlant: string | null;
   typeTanki: string | null;
+  /// Ditandai rusak lewat checkbox "Damaged" di Master Data > Tanki
+  /// (2026-08-06, instruksi eksplisit user) -- tanki damaged dikeluarkan dari
+  /// hitungan Kosong/Terisi di Dashboard Produktivitas (lihat tankByPlant di
+  /// buildProduktivitasData), status occupied/empty di bawah TETAP dihitung
+  /// apa adanya (independen dari damaged) krn dipakai jg oleh Tank
+  /// Monitoring yg di luar cakupan perubahan ini.
+  damaged: boolean;
   status: "occupied" | "empty";
   occupant: {
     order: string;
@@ -1461,6 +1468,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
         newNumber: tank.newNumber,
         locationPlant: tank.locationPlant,
         typeTanki: tank.typeTanki,
+        damaged: tank.damaged,
         status: "occupied",
         occupant: {
           order: manual.order,
@@ -1505,6 +1513,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       newNumber: tank.newNumber,
       locationPlant: tank.locationPlant,
       typeTanki: tank.typeTanki,
+      damaged: tank.damaged,
       status: occupied ? "occupied" : "empty",
       occupant:
         occupied && touch
@@ -1656,16 +1665,21 @@ function parseQtyNumber(v: string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Kolom Premix/Aftermix/Milling/Packing (2026-08-06, instruksi eksplisit
- * user) diganti dari JUMLAH BARIS Finish jadi JUMLAH QTY (KG/Ltr) Finish --
- * field sumbernya beda per modul krn masing2 py field qty yg maknanya beda:
+/** Kolom Premix/Aftermix/Milling/Colour Matching/Packing (2026-08-06,
+ * instruksi eksplisit user, REVISI KEDUA sore hari yg sama) semuanya JUMLAH
+ * QTY (KG/Ltr) Finish -- field sumbernya beda per modul krn masing2 py field
+ * qty yg maknanya beda:
  * - Premix/Aftermix: `orderQty` (satu2nya field qty yg ada).
  * - Milling: `qtyAct` (Qty Aktual hasil Milling) BUKAN `orderQty` (itu
  *   rencana) -- lebih mencerminkan produktivitas nyata.
- * - Packing: `qtyPerMan` ("Qty/Man (Ltr)", label di form) BUKAN `totalQty`
- *   ("Volume") atau `orderQty` -- instruksi eksplisit user pakai field ini.
- * Colour Matching TETAP jumlah baris Finish (jumlah No Order yg dikerjakan),
- * krn modul itu tidak py field qty KG/Ltr sama sekali.
+ * - Colour Matching: `orderQty` (revisi -- SEBELUMNYA jumlah baris/No Order,
+ *   krn dikira modul ini tidak py field qty; instruksi eksplisit user
+ *   "harusnya memakai kolom Order Qty saja" supaya semua kolom KG/Ltr).
+ * - Packing: `qtyPcs x totalQty` ("Qty/Pcs x Volume", instruksi eksplisit
+ *   user -- revisi dari `qtyPerMan` yg dipakai di versi pertama).
+ * SEMUA kolom sekarang satuan seragam (KG/Ltr) -- makanya "Total" di bawah
+ * boleh menjumlah kelimanya lagi (versi pertama sengaja mengecualikan Colour
+ * Matching dari Total krn waktu itu masih berupa jumlah Order, bukan qty).
  */
 async function buildProduktivitasData(period: ProduktivitasPeriod) {
   const periodStart = periodStartInstant(period, new Date());
@@ -1675,8 +1689,8 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
     prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } }),
     prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } }),
     prisma.millingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyAct: true } }),
-    prisma.colourMatchingLog.groupBy({ by: ["iuPlant"], where: finishWhere, _count: { _all: true } }),
-    prisma.packingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyPerMan: true } }),
+    prisma.colourMatchingLog.findMany({ where: finishWhere, select: { iuPlant: true, orderQty: true } }),
+    prisma.packingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyPcs: true, totalQty: true } }),
     buildTankStatusMap(),
   ]);
 
@@ -1708,17 +1722,54 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
   for (const r of premixRows) ensure(plantKey(r.iuPlant)).premix += parseQtyNumber(r.orderQty);
   for (const r of aftermixRows) ensure(plantKey(r.iuPlant)).aftermix += parseQtyNumber(r.orderQty);
   for (const r of millingRows) ensure(plantKey(r.iuPlant)).milling += parseQtyNumber(r.qtyAct);
-  for (const r of colourRows) ensure(plantKey(r.iuPlant)).colourMatching += r._count._all;
-  for (const r of packingRows) ensure(plantKey(r.iuPlant)).packing += parseQtyNumber(r.qtyPerMan);
+  for (const r of colourRows) ensure(plantKey(r.iuPlant)).colourMatching += parseQtyNumber(r.orderQty);
+  for (const r of packingRows) ensure(plantKey(r.iuPlant)).packing += parseQtyNumber(r.qtyPcs) * parseQtyNumber(r.totalQty);
 
-  // "Total" SENGAJA cuma jumlah Premix+Aftermix+Milling+Packing (semua
-  // KG/Ltr) -- Colour Matching (jumlah Order, satuan beda) DIKELUARKAN dari
-  // Total krn menjumlah KG/Ltr dgn jumlah Order tidak bermakna secara satuan.
+  // Total = jumlah semua 5 kolom -- sekarang bermakna krn semuanya KG/Ltr.
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const productivity = Array.from(byPlant.values())
-    .map((r) => ({ ...r, premix: round2(r.premix), milling: round2(r.milling), aftermix: round2(r.aftermix), packing: round2(r.packing) }))
-    .map((r) => ({ ...r, totalQty: round2(r.premix + r.milling + r.aftermix + r.packing) }))
+    .map((r) => ({
+      ...r,
+      premix: round2(r.premix),
+      milling: round2(r.milling),
+      aftermix: round2(r.aftermix),
+      colourMatching: round2(r.colourMatching),
+      packing: round2(r.packing),
+    }))
+    .map((r) => ({ ...r, totalQty: round2(r.premix + r.milling + r.aftermix + r.colourMatching + r.packing) }))
     .sort((a, b) => b.totalQty - a.totalQty);
+
+  /** "Produktivitas IU Plant/No Order" (2026-08-06, instruksi eksplisit
+   * user, tabel KEDUA terpisah dari yg KG/Ltr di atas) -- jumlah No Order yg
+   * diproduksi (jumlah baris Finish) per tahap per IU Plant. Reuse array yg
+   * SAMA dgn perhitungan qty di atas (premixRows dkk) supaya tidak query DB
+   * dua kali -- di sini cuma hitung PANJANG baris, bukan jumlah field qty. */
+  interface ProduktivitasCountRow {
+    iuPlant: string;
+    premix: number;
+    milling: number;
+    aftermix: number;
+    colourMatching: number;
+    packing: number;
+  }
+  const countByPlant = new Map<string, ProduktivitasCountRow>();
+  function ensureCount(plant: string): ProduktivitasCountRow {
+    let row = countByPlant.get(plant);
+    if (!row) {
+      row = { iuPlant: plant, premix: 0, milling: 0, aftermix: 0, colourMatching: 0, packing: 0 };
+      countByPlant.set(plant, row);
+    }
+    return row;
+  }
+  for (const r of premixRows) ensureCount(plantKey(r.iuPlant)).premix += 1;
+  for (const r of aftermixRows) ensureCount(plantKey(r.iuPlant)).aftermix += 1;
+  for (const r of millingRows) ensureCount(plantKey(r.iuPlant)).milling += 1;
+  for (const r of colourRows) ensureCount(plantKey(r.iuPlant)).colourMatching += 1;
+  for (const r of packingRows) ensureCount(plantKey(r.iuPlant)).packing += 1;
+
+  const productivityOrderCount = Array.from(countByPlant.values())
+    .map((r) => ({ ...r, total: r.premix + r.milling + r.aftermix + r.colourMatching + r.packing }))
+    .sort((a, b) => b.total - a.total);
 
   // Label "Tanki Atas"/"Tanki Bawah" (2026-08-02, instruksi eksplisit user):
   // sebelumnya digabung 1 baris per Plant, tapi Tanki Atas & Tanki Bawah itu
@@ -1728,14 +1779,22 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
   const TA_TB_LABEL: Record<string, string> = { TA: "Tanki Atas", TB: "Tanki Bawah" };
   const taTbLabel = (v: string | null) => TA_TB_LABEL[(v ?? "").trim().toUpperCase()] ?? "Tidak Diketahui";
 
-  const tankByPlant = new Map<string, { plant: string; tipeTanki: string; total: number; terisi: number }>();
+  // Tanki `damaged=true` (checkbox Master Data > Tanki, 2026-08-06 instruksi
+  // eksplisit user) DIKELUARKAN dari Total/Kosong/Terisi -- dihitung
+  // terpisah di kolom "Damaged" sendiri, krn tanki rusak bukan kapasitas yg
+  // benar2 bisa dipakai produksi.
+  const tankByPlant = new Map<string, { plant: string; tipeTanki: string; total: number; terisi: number; damaged: number }>();
   for (const t of tankMap.values()) {
     const plant = plantKey(t.locationPlant);
     const tipeTanki = taTbLabel(t.taTb);
     const key = `${plant}|${tipeTanki}`;
-    const row = tankByPlant.get(key) ?? { plant, tipeTanki, total: 0, terisi: 0 };
-    row.total += 1;
-    if (t.status === "occupied") row.terisi += 1;
+    const row = tankByPlant.get(key) ?? { plant, tipeTanki, total: 0, terisi: 0, damaged: 0 };
+    if (t.damaged) {
+      row.damaged += 1;
+    } else {
+      row.total += 1;
+      if (t.status === "occupied") row.terisi += 1;
+    }
     tankByPlant.set(key, row);
   }
   const tankOccupancy = Array.from(tankByPlant.values())
@@ -1745,11 +1804,12 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
       total: r.total,
       terisi: r.terisi,
       kosong: r.total - r.terisi,
+      damaged: r.damaged,
       percentTerisi: r.total > 0 ? Math.round((r.terisi / r.total) * 100) : 0,
     }))
     .sort((a, b) => a.plant.localeCompare(b.plant) || a.tipeTanki.localeCompare(b.tipeTanki));
 
-  return { productivity, tankOccupancy };
+  return { productivity, productivityOrderCount, tankOccupancy };
 }
 
 dashboardRouter.get(

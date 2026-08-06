@@ -18,6 +18,9 @@ export const MENU_KEYS = [
   "productSpec",
   "checkResults",
   "adminQc",
+  "maintenance",
+  "productionLabel",
+  "purchaseRequisition",
 ] as const;
 
 export type MenuKey = (typeof MENU_KEYS)[number];
@@ -33,6 +36,9 @@ export const MENU_LABELS: Record<MenuKey, string> = {
   productSpec: "Creating Product Spek",
   checkResults: "Input Check Results",
   adminQc: "Input Admin QC",
+  maintenance: "Maintenance",
+  productionLabel: "Production Label",
+  purchaseRequisition: "Purchase Requisition",
 };
 
 export function isMenuKey(v: unknown): v is MenuKey {

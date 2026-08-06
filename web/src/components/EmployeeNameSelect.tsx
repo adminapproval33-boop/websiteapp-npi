@@ -32,6 +32,22 @@ export function isKnownEmployeeName(employees: EmployeeOption[] | undefined, nam
 }
 
 /**
+ * Format kolom "Input By" di semua menu History (2026-08-06, instruksi
+ * eksplisit user: NIK saja tidak cukup krn user tidak hapal NIK siapa
+ * namanya) -- `inputBy` yg disimpan di semua tabel Log adalah NIK login
+ * (`req.auth!.nik`), BUKAN nama. Cari nama di Data Karyawan by `employeeId`
+ * (NIK), tampilkan "Nama (NIK)" spy tetap bisa cross-check NIK aslinya kalau
+ * perlu. NIK yg tidak ketemu di Data Karyawan (akun lama/dihapus) fallback
+ * ke NIK polos apa adanya -- jangan sampai baris histori lama malah kosong.
+ */
+export function formatInputBy(employees: EmployeeOption[] | undefined, nik: string | null | undefined): string {
+  const trimmed = (nik ?? "").trim();
+  if (!trimmed) return "-";
+  const found = (employees ?? []).find((e) => e.employeeId.trim() === trimmed);
+  return found ? `${found.fullName} (${trimmed})` : trimmed;
+}
+
+/**
  * Dropdown pencarian nama karyawan, mirip TankSelect tapi menampilkan
  * Employee ID + Job Position + Departemen di tiap baris saran -- supaya
  * user tidak bingung kalau ada 2 orang dengan nama yang sama. Pakai dropdown kustom

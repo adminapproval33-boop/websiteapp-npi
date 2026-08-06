@@ -18,6 +18,7 @@ import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { tankManualInputRouter } from "./modules/tankManualInput/tankManualInput.routes";
 import { productionOrderManualInputRouter } from "./modules/productionOrderManualInput/productionOrderManualInput.routes";
 import { productionLabelRouter } from "./modules/productionLabel/productionLabel.routes";
+import { maintenanceRouter } from "./modules/maintenance/maintenance.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -47,6 +48,7 @@ export function createApp() {
   app.use("/api/tank-manual-input", tankManualInputRouter);
   app.use("/api/production-order-manual-input", productionOrderManualInputRouter);
   app.use("/api/production-label", productionLabelRouter);
+  app.use("/api/maintenance", maintenanceRouter);
 
   app.use(errorHandler);
 

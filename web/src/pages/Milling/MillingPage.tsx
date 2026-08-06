@@ -5,7 +5,7 @@ import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import MesinSelect from "../../components/MesinSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -912,7 +912,7 @@ export default function MillingPage({
                 { key: "visco", label: "Visco", render: (r) => r.visco },
                 { key: "suhu", label: "Suhu", render: (r) => r.suhu },
                 { key: "remark", label: "Remark", render: (r) => r.log.remark },
-                { key: "inputBy", label: "Input By", render: (r) => r.log.inputBy },
+                { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.log.inputBy) },
                 { key: "attachments", label: "Lampiran", render: (r) => (r.log.attachments.length ? `${r.log.attachments.length} file` : "-") },
                 {
                   key: "actions",

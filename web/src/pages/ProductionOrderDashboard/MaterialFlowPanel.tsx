@@ -162,6 +162,15 @@ export default function MaterialFlowPanel({
     return blocking?.name ?? null;
   }
 
+  /** Tahap yg py gerbang "Wajib?" di backend (2026-08-06, instruksi eksplisit
+   * user, lihat checkStageApplicableGate di lib/stageGate.ts) -- HANYA Premix/
+   * Milling/Aftermix/Colour Matching. QC & Packing selalu wajib mutlak (tidak
+   * relevan). Approval SENGAJA tidak diikutkan -- gerbang AdminQc-nya sudah
+   * dihapus total (2026-08-06, instruksi eksplisit user sebelumnya: Approval
+   * bebas diinput spt Packing), jadi peringatan di sini tidak boleh
+   * menyiratkan Approval masih terkunci Wajib/Tidak. */
+  const STAGES_WITH_APPLICABILITY_GATE = new Set(["Premix", "Milling", "Aftermix", "Colour Matching"]);
+
   function renderStageRow(s: (typeof STAGE_ROWS)[number]) {
     const isRequired = checked![s.field];
     const done = statusByName.get(s.name);
@@ -202,6 +211,10 @@ export default function MaterialFlowPanel({
               style={{ padding: "3px 10px", fontSize: "0.78rem" }}
               title={`Buka Input ${s.name}`}
               onClick={() => {
+                if (STAGES_WITH_APPLICABILITY_GATE.has(s.name) && !isRequired) {
+                  window.alert(`Material ini tidak memakai proses ${s.name}.`);
+                  return;
+                }
                 const blocking = findBlockingStage(s.name);
                 if (blocking) {
                   window.alert(`Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa input ${s.name}.`);

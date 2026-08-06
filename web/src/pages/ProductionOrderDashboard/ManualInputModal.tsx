@@ -6,7 +6,7 @@ import DataTable from "../../components/DataTable";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import MaterialFlowPanel from "./MaterialFlowPanel";
 
@@ -285,7 +285,7 @@ export default function ManualInputModal() {
                 render: (r) => (r.members ?? []).join(", ") || "-",
                 csvValue: (r) => (r.members ?? []).join(", "),
               },
-              { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+              { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
               ...(canEditOrDelete
                 ? [
                     {

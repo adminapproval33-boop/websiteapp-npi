@@ -4,7 +4,6 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
-import { hasAdminQcApprovalType } from "../../lib/stageGate";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -44,16 +43,22 @@ const saveSchema = z
     finishApp: optionalDate,
     remark: z.string().optional(),
   })
-  .superRefine(async (data, ctx) => {
+  .superRefine((data, ctx) => {
     // Order/Material Number/Material Description/Batch/Order Qty/Plant/IU
     // Plant/Code Tanki/Mrp Pic/Sales Pic sudah wajib TANPA SYARAT lewat skema
     // di atas. Admin QC Stage/Lot Passed/QC to App/QC Passed TIDAK ada di
     // modul/tabel ini -- itu di menu & tabel AdminQc terpisah (2026-07-28,
-    // sesuai instruksi eksplisit user). Rangkaian Production/
-    // Technical Input Column (Prepare Date -> Send To Tech -> Submit Tech ->
-    // Submit Cust -> Finish App) TETAP mewajibkan "QC to App" sudah terisi
-    // lebih dulu, tapi SEKARANG dicek dgn lookup tabel AdminQc by Order
-    // (bukan kolom di record Approval ini sendiri lagi).
+    // sesuai instruksi eksplisit user).
+    //
+    // DIREVISI 2026-08-06 (instruksi eksplisit user: Approval tidak boleh
+    // bergantung pada proses/tim lain, sama seperti Packing): rangkaian
+    // Production/Technical Input Column (Prepare Date -> Send To Tech ->
+    // Submit Tech -> Submit Cust -> Finish App) TETAP saling cascading (tiap
+    // field belakangan mewajibkan field2 sebelumnya di form INI SENDIRI
+    // sudah terisi -- validasi internal, sama pola dgn "Member wajib kalau
+    // Start/Finish diisi" di packing.routes.ts), TAPI lookup ke tabel AdminQc
+    // ("QC to App wajib diisi dulu") DIHAPUS TOTAL -- itu dependensi ke
+    // modul/tim lain, bukan lagi syarat sejak revisi ini.
     const has = {
       prepareProduksi: data.prepareProduksi != null,
       sprayMan: Boolean(data.sprayMan && data.sprayMan.trim()),
@@ -67,29 +72,17 @@ const saveSchema = z
       custSegmen: Boolean(data.custSegmen && data.custSegmen.trim()),
       techName: Boolean(data.techName && data.techName.trim()),
       finishApp: data.finishApp != null,
-      qcToApproval: false, // diisi di bawah lewat lookup AdminQc, kalau perlu
     };
 
     function requireField(cond: boolean, path: keyof typeof has, label: string, trigger: string) {
       if (!cond) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message: `${label} wajib diisi kalau ${trigger} sudah diisi.` });
     }
 
-    const needsQcCheck = has.prepareProduksi || has.sendToTech || has.technicalDateReceiving || has.submitToCustomer || has.finishApp;
-    if (needsQcCheck) {
-      const latestAdminQc = await prisma.adminQc.findFirst({
-        where: { order: data.order },
-        orderBy: { timestamp: "desc" },
-      });
-      has.qcToApproval = latestAdminQc?.qcToApproval != null;
-    }
-
     const cumulativeTiers: { active: boolean; trigger: string; fields: [keyof typeof has, string][] }[] = [
-      { active: has.prepareProduksi, trigger: "Prepare Date", fields: [["qcToApproval", "QC to App (Input Admin QC)"]] },
       {
         active: has.sendToTech,
         trigger: "Send To Tech",
         fields: [
-          ["qcToApproval", "QC to App (Input Admin QC)"],
           ["prepareProduksi", "Prepare Date"],
           ["sprayMan", "Spray Man"],
           ["wetSample", "Wet Sample"],
@@ -101,7 +94,6 @@ const saveSchema = z
         active: has.technicalDateReceiving,
         trigger: "Submit Tech",
         fields: [
-          ["qcToApproval", "QC to App (Input Admin QC)"],
           ["prepareProduksi", "Prepare Date"],
           ["sprayMan", "Spray Man"],
           ["wetSample", "Wet Sample"],
@@ -114,7 +106,6 @@ const saveSchema = z
         active: has.submitToCustomer,
         trigger: "Submit Cust",
         fields: [
-          ["qcToApproval", "QC to App (Input Admin QC)"],
           ["prepareProduksi", "Prepare Date"],
           ["sprayMan", "Spray Man"],
           ["wetSample", "Wet Sample"],
@@ -131,7 +122,6 @@ const saveSchema = z
         active: has.finishApp,
         trigger: "Finish App",
         fields: [
-          ["qcToApproval", "QC to App (Input Admin QC)"],
           ["prepareProduksi", "Prepare Date"],
           ["sprayMan", "Spray Man"],
           ["wetSample", "Wet Sample"],
@@ -347,18 +337,15 @@ approvalRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    // Urutan tahap baku (2026-07-31, instruksi eksplisit bos user): Approval
-    // baru boleh diinput kalau Order ini sudah masuk "List Antrian Approval"
-    // (Admin QC Stage terbaru = Approval/Joint Lot) -- gerbang BARU ini
-    // terpisah dari tier-validation internal (QC to App dkk) yg sudah ada di
-    // atas. Baris BARU saja (PUT/Edit tetap bebas).
-    if (!(await hasAdminQcApprovalType(parsed.data.order))) {
-      res.status(400).json({
-        success: false,
-        message: `Order ${parsed.data.order} belum masuk Antrian Approval (Admin QC Stage belum "Approval"/"Joint Lot") -- tidak bisa diinput ke Approval dulu.`,
-      });
-      return;
-    }
+    // DIREVISI 2026-08-06 (instruksi eksplisit user, konsisten dgn Packing --
+    // lihat komentar sama di packing.routes.ts): Approval SEKARANG bebas
+    // diinput Order apapun kapan saja, TANPA menunggu tahap sebelumnya
+    // selesai secara administrasi (sebelumnya wajib Admin QC Stage sudah
+    // "Approval"/"Joint Lot" dulu, lihat hasAdminQcApprovalType di
+    // lib/stageGate.ts -- gerbang itu sudah dihapus dari sini). Tab "List
+    // Antrian Approval" TETAP ada sbg daftar bantu/saran (lihat GET /queue di
+    // bawah, query independen, tidak terpengaruh perubahan ini) -- cuma
+    // sudah bukan lagi syarat wajib utk bisa Save baris baru.
     const created = await prisma.approvalSchedule.create({
       data: { ...parsed.data, inputBy: req.auth!.nik },
     });

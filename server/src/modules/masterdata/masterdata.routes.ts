@@ -395,6 +395,27 @@ masterDataRouter.get(
   })
 );
 
+/// Checkbox "Damaged" di tabel Master Data > Tanki (2026-08-06, instruksi
+/// eksplisit user) -- dicentang lewat MasterDataPage.tsx, yg lalu langsung
+/// mengarahkan user ke Form Input Maintenance (menu baru) supaya
+/// perbaikannya tercatat. Tanki `damaged=true` dikeluarkan dari hitungan
+/// Kosong/Terisi di Dashboard Tank Monitoring & Dashboard Produktivitas
+/// (lihat buildTankStatusMap/buildProduktivitasData di dashboard.routes.ts).
+masterDataRouter.put(
+  "/tanks/:code/damaged",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const code = String(req.params.code);
+    const damaged = Boolean(req.body.damaged);
+    const updated = await prisma.masterTank.update({ where: { code }, data: { damaged } }).catch(() => null);
+    if (!updated) {
+      res.status(404).json({ success: false, message: "Code Tanki tidak ditemukan." });
+      return;
+    }
+    res.json({ success: true, message: "Status Damaged berhasil diperbarui.", data: updated });
+  })
+);
+
 masterDataRouter.post(
   "/tanks/import",
   requireFullAccess,

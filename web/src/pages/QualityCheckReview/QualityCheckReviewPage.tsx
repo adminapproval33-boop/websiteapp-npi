@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { SpecVerdict, SPEC_VERDICT_LABEL, SPEC_VERDICT_COLOR } from "../../lib/specEval";
 
@@ -44,6 +45,7 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
  * semua data.
  */
 export default function QualityCheckReviewPage() {
+  const { data: employees } = useEmployeeOptions();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -149,7 +151,7 @@ export default function QualityCheckReviewPage() {
                 csvValue: (r) => SPEC_VERDICT_LABEL[r.verdict],
               },
               { key: "pic", label: "PIC", render: (r) => r.pic ?? "-" },
-              { key: "inputBy", label: "Input By", render: (r) => r.inputBy },
+              { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
             ]}
           />
         </div>

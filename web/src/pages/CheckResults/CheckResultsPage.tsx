@@ -11,6 +11,7 @@ import { ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { openCheckSheetPrintWindow } from "../../lib/printCheckSheet";
+import { openPackingKeepSampelPrintWindow } from "../../lib/printPackingKeepSampel";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
@@ -479,6 +480,23 @@ export default function CheckResultsPage({
     openCheckSheetPrintWindow({ ...form, parameters: params, specInformation, inputBy: user?.nik ?? "" });
   }
 
+  /** Print Lembar Inspeksi Paking (F-DTQP-LP-020) + 2x Lembar Keep Sampel
+   * (F-DTQP-KS-019) sekaligus dalam 1 lembar A4 -- versi sementara, meniru
+   * format kertas fisik. Field yang datanya sudah ada di form (Nama Produk/Kode
+   * Material/No Batch/No Tangki/Customer) otomatis terisi, sisanya dicetak
+   * kosong utk diisi tangan spt kertas aslinya. Tidak mensyaratkan field wajib
+   * Check Sheet (IU Plant/Remark) krn form ini tidak memakainya. */
+  function printPackingKeepSampel() {
+    openPackingKeepSampelPrintWindow({
+      materialDescription: form.materialDescription,
+      materialNumber: form.materialNumber,
+      batch: form.batch,
+      codeTanki: form.codeTanki,
+      customer: form.customer,
+      order: form.order,
+    });
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
@@ -564,7 +582,10 @@ export default function CheckResultsPage({
               </h3>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button type="button" className="btn btn-success" onClick={printCurrentForm}>
-                  Print Cek Sheet
+                  Print CS
+                </button>
+                <button type="button" className="btn btn-success" onClick={printPackingKeepSampel}>
+                  Print LIP &amp; KS
                 </button>
                 <button className="btn" type="submit" disabled={saveMutation.isPending || params.length === 0}>
                   {saveMutation.isPending ? "Menyimpan..." : "Save"}

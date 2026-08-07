@@ -148,17 +148,23 @@ export default function MaterialFlowPanel({
   const statusByName = new Map(stages.map((s) => [s.name, s.done]));
 
   /** Cek urutan sebelum benar2 buka pop-up tahap X (2026-07-31, instruksi
-   * eksplisit user): kalau ADA tahap SEBELUM X (di urutan Proses Bar, `stages`
-   * -- sudah terurut Premix->Milling->...->Packing) yg belum "done", tolak &
-   * kasih tahu tahap mana yg harus diinput dulu -- BUKAN langsung buka form
-   * lalu baru gagal pas Save (gerbang aslinya tetap di backend, lib/
-   * stageGate.ts -- ini cuma kasih tahu di awal drpd bikin admin isi form
-   * dulu baru ketahuan ditolak). Tahap yg TIDAK WAJIB (tidak ada di `stages`)
-   * dibiarkan lewat -- bukan bagian urutan resmi Material ini. */
+   * eksplisit user; DIREVISI 2026-08-07 -- "proses berurutan hanya berlaku
+   * utk produksi saja"): kalau ADA tahap PRODUKSI SEBELUM X (di urutan Proses
+   * Bar, `stages` -- sudah terurut Premix->Milling->...->Packing) yg belum
+   * "done", tolak & kasih tahu tahap mana yg harus diinput dulu -- BUKAN
+   * langsung buka form lalu baru gagal pas Save (gerbang aslinya tetap di
+   * backend, lib/stageGate.ts -- ini cuma kasih tahu di awal drpd bikin admin
+   * isi form dulu baru ketahuan ditolak). QC/Approval/Packing SENDIRI tidak
+   * pernah diblokir menunggu tahap sebelumnya (sama seperti backend: gerbang
+   * checkQcGate/hasAdminQcQcPassed/hasAdminQcApprovalType sudah dihapus total),
+   * dan tahap produksi yg TIDAK WAJIB (tidak ada di `stages`) dibiarkan lewat
+   * -- bukan bagian urutan resmi Material ini. */
+  const PRODUCTION_STAGES = new Set(["Premix", "Milling", "Aftermix", "Colour Matching"]);
   function findBlockingStage(stageName: string): string | null {
+    if (!PRODUCTION_STAGES.has(stageName)) return null;
     const idx = stages.findIndex((s) => s.name === stageName);
     if (idx <= 0) return null;
-    const blocking = stages.slice(0, idx).find((s) => !s.done);
+    const blocking = stages.slice(0, idx).find((s) => PRODUCTION_STAGES.has(s.name) && !s.done);
     return blocking?.name ?? null;
   }
 

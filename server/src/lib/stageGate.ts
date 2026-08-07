@@ -29,12 +29,16 @@ import { prisma } from "./prisma";
  * log di tahap itu) supaya tidak mendadak memblokir semua input utk Material
  * yg belum sempat terdaftar.
  *
- * Packing (DIREVISI 2026-08-03) & Approval (DIREVISI 2026-08-06) SUDAH
- * TIDAK gerbang AdminQc lagi -- keduanya sekarang bebas diinput Order
- * apapun kapan saja tanpa syarat administratif dari tahap sebelumnya,
- * instruksi eksplisit user. Fungsi gerbangnya (hasAdminQcQcPassed utk
- * Packing, hasAdminQcApprovalType utk Approval) sudah dihapus total dari
- * file ini -- lihat komentar di packing.routes.ts/approval.routes.ts.
+ * Packing (DIREVISI 2026-08-03), Approval (DIREVISI 2026-08-06), & QC
+ * (DIREVISI 2026-08-07) SUDAH TIDAK bergerbang lagi -- ketiganya sekarang
+ * bebas diinput Order apapun kapan saja tanpa syarat administratif dari
+ * tahap sebelumnya, instruksi eksplisit user: "proses berurutan hanya
+ * berlaku untuk produksi saja". Urutan-wajib SEKARANG cuma berlaku di
+ * ANTARA tahap produksi (Premix/Milling/Aftermix/Colour Matching --
+ * checkMillingGate/checkAftermixGate/checkColourMatchingGate di bawah).
+ * Fungsi gerbang QC/Packing/Approval yg lama (checkQcGate,
+ * hasAdminQcQcPassed, hasAdminQcApprovalType) sudah dihapus total dari file
+ * ini -- lihat komentar di checkResults.routes.ts/packing.routes.ts/approval.routes.ts.
  */
 
 async function latestPremix(order: string) {
@@ -207,10 +211,3 @@ export function checkColourMatchingGate(order: string, materialNumber: string | 
   return gateAgainst(order, materialNumber, ["aftermix", "milling", "premix"]);
 }
 
-/** Prasyarat QC (2026-07-31, instruksi eksplisit user: QC wajib dilalui
- * SEMUA proses, tidak ada pengecualian) -- tahap produksi TERAKHIR yg
- * relevan utk Material ini (Colour Matching, turun ke Aftermix, Milling,
- * Premix) harus "-DN". */
-export function checkQcGate(order: string, materialNumber: string | null | undefined): Promise<StageGateResult> {
-  return gateAgainst(order, materialNumber, ["colourMatching", "aftermix", "milling", "premix"]);
-}

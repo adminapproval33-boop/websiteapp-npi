@@ -7,6 +7,7 @@ import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedReq
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const colourMatchingRouter = Router();
 colourMatchingRouter.use(requireAuth);
@@ -223,6 +224,10 @@ colourMatchingRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     // Material ini benar2 memakai tahap Colour Matching? (2026-08-06,
     // instruksi eksplisit user -- gerbang BARU, terpisah dari gerbang
     // prasyarat di bawah. Lihat komentar checkStageApplicableGate di
@@ -276,6 +281,10 @@ colourMatchingRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const id = Number(req.params.id);

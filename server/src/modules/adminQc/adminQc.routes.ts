@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const adminQcRouter = Router();
 adminQcRouter.use(requireAuth);
@@ -88,6 +89,10 @@ adminQcRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     const created = await prisma.adminQc.create({
       data: { ...parsed.data, inputBy: req.auth!.nik },
     });
@@ -107,6 +112,10 @@ adminQcRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const adminQcId = req.params.adminQcId;

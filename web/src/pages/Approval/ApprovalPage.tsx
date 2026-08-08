@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
@@ -180,6 +180,7 @@ export default function ApprovalPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "approval") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
@@ -435,6 +436,10 @@ export default function ApprovalPage({
     }
     if (!isKnownEmployeeName(employees, form.techName)) {
       setError("Tech Name tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownTankCode(tanks, form.codeTanki)) {
+      setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return;
     }
     saveMutation.mutate();

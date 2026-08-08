@@ -6,6 +6,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
@@ -146,6 +147,10 @@ packingRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     // DIREVISI 2026-08-03 (instruksi eksplisit user): Packing SEKARANG bebas
     // diinput kapan saja, TANPA menunggu tahap sebelumnya selesai secara
     // administrasi (sebelumnya wajib QC Passed di Admin QC dulu, lihat
@@ -178,6 +183,10 @@ packingRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const id = Number(req.params.id);

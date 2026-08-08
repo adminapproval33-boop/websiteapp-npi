@@ -2,7 +2,7 @@ import { CSSProperties, Fragment, FormEvent, MouseEvent as ReactMouseEvent, useE
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import MesinSelect from "../../components/MesinSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, {
@@ -318,6 +318,7 @@ export default function MillingPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "milling") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
@@ -646,6 +647,14 @@ export default function MillingPage({
     }
     if (!isKnownEmployeeName(employees, form.leader)) {
       setError("Leader tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownTankCode(tanks, form.codeTanki1)) {
+      setError("Code Tanki 1 (Couple) tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownTankCode(tanks, form.codeTanki2)) {
+      setError("Code Tanki 2 (Moving) tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return;
     }
     saveMutation.mutate();

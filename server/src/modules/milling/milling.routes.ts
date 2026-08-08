@@ -7,6 +7,7 @@ import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedReq
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
@@ -87,6 +88,19 @@ const saveSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["finish"], message: "Finish hanya boleh diisi kalau Start sudah diisi." });
     }
   });
+
+/** Milling py DUA kolom Code Tanki (Couple/Moving) -- validasi keduanya
+ * sekaligus thd Master Data Tanki, kembalikan pesan error pertama yg gagal
+ * (atau null kalau semua valid/kosong). */
+async function validateTankFields(data: { codeTanki1: string; codeTanki2?: string | null }): Promise<string | null> {
+  if (data.codeTanki1 && !(await isValidTankCode(data.codeTanki1))) {
+    return "Code Tanki 1 (Couple) tidak ditemukan di Master Data Tanki. Pilih dari daftar.";
+  }
+  if (data.codeTanki2 && !(await isValidTankCode(data.codeTanki2))) {
+    return "Code Tanki 2 (Moving) tidak ditemukan di Master Data Tanki. Pilih dari daftar.";
+  }
+  return null;
+}
 
 /// Data terakhir untuk Order ini di Milling -- dipakai supaya begitu Order
 /// yang sama diketik lagi, semua kolom yang sudah pernah diisi langsung muncul.
@@ -240,6 +254,11 @@ millingRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    const tankError = await validateTankFields(parsed.data);
+    if (tankError) {
+      res.status(400).json({ success: false, message: tankError });
+      return;
+    }
     // Material ini benar2 memakai tahap Milling? (2026-08-06, instruksi
     // eksplisit user -- gerbang BARU, terpisah dari gerbang prasyarat di
     // bawah. Lihat komentar checkStageApplicableGate di lib/stageGate.ts.)
@@ -291,6 +310,11 @@ millingRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const tankError = await validateTankFields(parsed.data);
+    if (tankError) {
+      res.status(400).json({ success: false, message: tankError });
       return;
     }
     const id = Number(req.params.id);

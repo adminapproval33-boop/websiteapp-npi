@@ -818,3 +818,63 @@ model ProductionLabel {
   @@index([order])
   @@map("production_labels")
 }
+
+/// Menu "Papan Info" (2026-08-08, instruksi eksplisit user) -- feed internal
+/// spt media sosial: tiap user login bisa posting teks (+lampiran opsional),
+/// semua user lain bisa lihat, komentar, & like. SENGAJA TIDAK masuk
+/// MENU_KEYS/requireMenuView/requireMenuInput (lihat menuAccess.ts) --
+/// terbuka utk SEMUA user yg login apa pun level akses per-menu-nya (ini
+/// papan komunikasi internal, bukan menu input data produksi). `authorNik`
+/// SENGAJA field bebas (bukan relasi FK ke User) -- pola sama dgn `inputBy`
+/// di semua model lain, supaya konsisten & tidak perlu ubah model User.
+model Post {
+  id          String           @id @default(uuid())
+  authorNik   String
+  content     String
+  timestamp   DateTime         @default(now())
+  attachments PostAttachment[]
+  comments    PostComment[]
+  likes       PostLike[]
+
+  @@index([timestamp])
+  @@map("posts")
+}
+
+model PostAttachment {
+  id         Int      @id @default(autoincrement())
+  postId     String
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  fileName   String
+  filePath   String
+  fileType   String?
+  uploadedBy String
+  timestamp  DateTime @default(now())
+
+  @@index([postId])
+  @@map("post_attachments")
+}
+
+model PostComment {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorNik String
+  content   String
+  timestamp DateTime @default(now())
+
+  @@index([postId])
+  @@map("post_comments")
+}
+
+/// Like per (postId, nik) -- unique constraint dipakai sbg gerbang toggle
+/// (create=like, delete=unlike) di POST /posts/:id/like, bukan cuma validasi.
+model PostLike {
+  id        Int      @id @default(autoincrement())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  nik       String
+  timestamp DateTime @default(now())
+
+  @@unique([postId, nik])
+  @@map("post_likes")
+}

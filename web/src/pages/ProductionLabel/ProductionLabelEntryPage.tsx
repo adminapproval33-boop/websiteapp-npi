@@ -3,7 +3,7 @@ import { toDataURL } from "qrcode";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import BarcodeSvg from "../../components/BarcodeSvg";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import { formatDateDDMMYYYY } from "../../lib/datetime";
 import "../../styles/printLabel.css";
@@ -11,6 +11,16 @@ import "../../styles/printLabel.css";
 /** Paste/Kepala Warna/Assorted -- dropdown manual (2026-08-04, instruksi
  * eksplisit user), tidak ada sumber datanya di modul manapun. */
 const PASTE_TYPE_OPTIONS = ["Paste", "Kepala Warna", "Assorted"];
+
+/** Code Tanki di menu ini SATU-SATUNYA yg boleh berisi gabungan "A / B"
+ * (autofill dari MillingLog.codeTanki1/2 yg beda, lihat getLatestCrossModule
+ * di productionLabel.routes.ts) -- validasi tiap bagian yg dipisah " / "
+ * sendiri2, bukan seluruh string sekaligus (2026-08-08). */
+function isKnownTankCodeOrJoined(tanks: string[] | undefined, value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return trimmed.split(" / ").every((part) => isKnownTankCode(tanks, part));
+}
 
 interface CrossModuleData {
   codeTanki: string | null;
@@ -55,6 +65,7 @@ interface CrossModuleData {
  * Klik Cetak Label -> simpan dulu sbg baris History baru (POST
  * /production-label, lihat menu Label History) baru window.print(). */
 export default function ProductionLabelEntryPage() {
+  const { data: tanks } = useTankOptions();
   const [order, setOrder] = useState("");
   const [data, setData] = useState<OrderRefData | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -166,6 +177,10 @@ export default function ProductionLabelEntryPage() {
 
   async function handlePrint() {
     if (!data) return;
+    if (!isKnownTankCodeOrJoined(tanks, codeTanki)) {
+      setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
     setSaving(true);
     setError("");
     setMessage("");

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const productionLabelRouter = Router();
 productionLabelRouter.use(requireAuth);
@@ -63,7 +64,11 @@ async function getLatestCrossModule(order: string) {
   if (milling) {
     candidates.push({
       timestamp: milling.timestamp,
-      codeTanki: [milling.codeTanki1, milling.codeTanki2].filter(Boolean).join(" / ") || null,
+      // Dedupe dulu (2026-08-08, bug fix): kalau Couple & Moving kebetulan
+      // tanki fisik yg SAMA (codeTanki1 === codeTanki2), gabungan tanpa
+      // dedupe menghasilkan "X / X" yg membingungkan di Production Label --
+      // tanki yg beda2 tetap tampil keduanya spt sebelumnya.
+      codeTanki: Array.from(new Set([milling.codeTanki1, milling.codeTanki2].filter(Boolean))).join(" / ") || null,
       iuPlant: milling.iuPlant,
       remark: milling.remark,
     });
@@ -89,6 +94,19 @@ async function getLatestCrossModule(order: string) {
   candidates.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
   const { codeTanki, iuPlant, remark } = candidates[0];
   return { codeTanki, iuPlant, remark };
+}
+
+/** Validasi Code Tanki -- SENGAJA dipisah dari isValidTankCode polos krn
+ * field ini SATU-SATUNYA yg boleh berisi gabungan 2 tanki "A / B" (autofill
+ * dari MillingLog.codeTanki1/2 yg beda, lihat getLatestCrossModule di atas)
+ * -- tiap bagian yg dipisah " / " divalidasi sendiri-sendiri thd Master
+ * Data Tanki, bukan seluruh string sekaligus. */
+async function isValidTankCodeOrJoined(value: string): Promise<boolean> {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  const parts = trimmed.split(" / ").map((p) => p.trim());
+  const results = await Promise.all(parts.map((p) => isValidTankCode(p)));
+  return results.every(Boolean);
 }
 
 productionLabelRouter.get(
@@ -119,6 +137,10 @@ productionLabelRouter.post(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCodeOrJoined(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const created = await prisma.productionLabel.create({

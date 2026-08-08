@@ -2,7 +2,7 @@ import { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useRef, useState }
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
@@ -174,6 +174,7 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
 
 export default function AdminQcPage() {
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "adminQc") === "VIEW";
   const queryClient = useQueryClient();
@@ -475,6 +476,10 @@ export default function AdminQcPage() {
     e.preventDefault();
     setMessage("");
     setError("");
+    if (!isKnownTankCode(tanks, form.codeTanki)) {
+      setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
     saveMutation.mutate();
   }
 

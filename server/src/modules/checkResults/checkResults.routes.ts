@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { isValidTankCode } from "../../lib/tankCode";
 
 /** Sanitasi `picNik` per baris Spec Parameter -- 1 query batch utk semua NIK
  * sekaligus (pola sama dgn sanitizeMembers di lib/employeeNik.ts, tapi
@@ -157,6 +158,10 @@ checkResultsRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     // DIREVISI 2026-08-07 (instruksi eksplisit user): QC SEKARANG bebas
     // diinput kapan saja, TANPA menunggu tahap produksi sebelumnya selesai
     // secara administrasi -- sama seperti Packing (2026-08-03) dan Approval
@@ -186,6 +191,10 @@ checkResultsRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const checkId = req.params.checkId;

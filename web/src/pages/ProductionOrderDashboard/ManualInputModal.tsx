@@ -4,7 +4,7 @@ import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import DataTable from "../../components/DataTable";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, {
   formatInputBy,
@@ -58,6 +58,7 @@ export default function ManualInputModal() {
   const canEditOrDelete = user?.access === "FULL_ACCESS";
   const queryClient = useQueryClient();
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
 
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -108,6 +109,10 @@ export default function ManualInputModal() {
     e.preventDefault();
     if (!isKnownEmployeeName(employees, form.spvProduksi) || !isKnownEmployeeName(employees, form.leader)) {
       setError("SPV Produksi/Leader harus dipilih dari Data Karyawan.");
+      return;
+    }
+    if (!isKnownTankCode(tanks, form.codeTanki)) {
+      setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return;
     }
     setError("");

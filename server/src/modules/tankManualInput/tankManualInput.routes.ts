@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const tankManualInputRouter = Router();
 tankManualInputRouter.use(requireAuth);
@@ -34,6 +35,10 @@ tankManualInputRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (!(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     const created = await prisma.tankManualInput.create({
       data: { ...parsed.data, inputBy: req.auth!.nik },
     });
@@ -48,6 +53,10 @@ tankManualInputRouter.put(
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (!(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const existing = await prisma.tankManualInput.findUnique({ where: { id: req.params.id } });

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, {
   formatInputBy,
@@ -241,6 +241,7 @@ export default function PremixAftermixPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, section === "PREMIX" ? "premix" : "aftermix") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
@@ -841,6 +842,10 @@ export default function PremixAftermixPage({
     }
     if (!isKnownEmployeeName(employees, form.leader)) {
       setError("Leader tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    if (!isKnownTankCode(tanks, form.codeTanki)) {
+      setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return;
     }
     saveMutation.mutate();

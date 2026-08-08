@@ -22,6 +22,17 @@ function normalizeHeader(h: unknown): string {
   return String(h ?? "").trim().toLowerCase();
 }
 
+/** Employee ID murni angka SELALU 6 digit (2026-08-08, instruksi eksplisit
+ * user) -- export SAP kadang membuang leading zero ("1017" bukannya
+ * "001017"), padahal `User.nik` (akun login) & referensi NIK di modul lain
+ * SELALU 6 digit, jadi Employee ID yg belum di-pad gagal cocok saat dicari
+ * by NIK (mis. kolom "Input By", validasi nama di EmployeeNameSelect). ID
+ * yg SUDAH >=6 digit atau punya prefix non-angka (mis. "R-002262") DIBIARKAN
+ * apa adanya -- cuma nambah leading zero, tidak pernah memotong/mengubah format lain. */
+function normalizeEmployeeId(raw: string): string {
+  return /^\d+$/.test(raw) && raw.length < 6 ? raw.padStart(6, "0") : raw;
+}
+
 function findColumn(headers: string[], ...candidates: string[]): number {
   for (const candidate of candidates) {
     const idx = headers.indexOf(candidate.toLowerCase());
@@ -879,7 +890,7 @@ masterDataRouter.post(
     const rawRecords = rows
       .slice(1)
       .map((row) => ({
-        employeeId: String(row[col.employeeId] ?? "").trim(),
+        employeeId: normalizeEmployeeId(String(row[col.employeeId] ?? "").trim()),
         fullName: String(row[col.fullName] ?? "").trim(),
         organization: col.organization !== -1 ? String(row[col.organization] ?? "").trim() : null,
         jobPosition: col.jobPosition !== -1 ? String(row[col.jobPosition] ?? "").trim() : null,

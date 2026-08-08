@@ -5,6 +5,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik } from "../../lib/employeeNik";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -342,6 +343,10 @@ approvalRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     // DIREVISI 2026-08-06 (instruksi eksplisit user, konsisten dgn Packing --
     // lihat komentar sama di packing.routes.ts): Approval SEKARANG bebas
     // diinput Order apapun kapan saja, TANPA menunggu tahap sebelumnya
@@ -371,6 +376,10 @@ approvalRouter.put(
     const parsed = await saveSchema.safeParseAsync(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
     const approvalId = req.params.approvalId;

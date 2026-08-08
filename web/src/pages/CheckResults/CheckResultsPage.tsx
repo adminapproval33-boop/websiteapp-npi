@@ -2,7 +2,7 @@ import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useEf
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions, resolveEmployeeId } from "../../components/EmployeeNameSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
@@ -217,6 +217,7 @@ export default function CheckResultsPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "checkResults") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
@@ -477,6 +478,7 @@ export default function CheckResultsPage({
   function validateRequiredFields(): string | null {
     if (!form.iuPlant.trim()) return "IU Plant wajib diisi sebelum Save/Print.";
     if (!form.codeTanki.trim()) return "Code Tanki wajib diisi sebelum Save/Print.";
+    if (!isKnownTankCode(tanks, form.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
     if (!form.customer.trim()) return "Customer wajib diisi sebelum Save/Print.";
     if (!form.remark.trim()) return "Remark wajib diisi sebelum Save/Print.";
     const invalidPic = params.find((p) => !isKnownEmployeeName(employees, p.pic));

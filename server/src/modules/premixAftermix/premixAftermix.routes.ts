@@ -8,6 +8,7 @@ import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -395,6 +396,10 @@ premixAftermixRouter.post(
       return;
     }
     if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     // Material ini benar2 memakai tahap ini? (2026-08-06, instruksi eksplisit
     // user -- gerbang BARU, terpisah dari gerbang prasyarat di bawah. Lihat
     // komentar checkStageApplicableGate di lib/stageGate.ts.) Baris BARU saja
@@ -452,6 +457,10 @@ premixAftermixRouter.put(
       return;
     }
     if (!checkSectionMenuInput(req, res, parsed.data.section)) return;
+    if (parsed.data.codeTanki && !(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
     const id = Number(req.params.id);
     const existing = await prisma.premixAftermixLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");

@@ -31,6 +31,12 @@ export function isKnownEmployeeName(employees: EmployeeOption[] | undefined, nam
   return employees.some((e) => e.fullName.trim().toLowerCase() === trimmed.toLowerCase());
 }
 
+function exactNameMatches(employees: EmployeeOption[] | undefined, name: string): EmployeeOption[] {
+  const trimmed = name.trim().toLowerCase();
+  if (!trimmed || !employees) return [];
+  return employees.filter((e) => e.fullName.trim().toLowerCase() === trimmed);
+}
+
 /**
  * Format kolom "Input By" di semua menu History (2026-08-06, instruksi
  * eksplisit user: NIK saja tidak cukup krn user tidak hapal NIK siapa
@@ -47,6 +53,68 @@ export function formatInputBy(employees: EmployeeOption[] | undefined, nik: stri
   return found ? `${found.fullName} (${trimmed})` : trimmed;
 }
 
+export interface MemberEntry {
+  name: string;
+  nik: string | null;
+}
+
+/**
+ * Kolom Member (Json?) dulu disimpan sbg string[] polos -- sekarang jadi
+ * {name, nik}[] supaya NIK anggota yg dipilih dari dropdown ikut tersimpan
+ * (2026-08-08, fix bug NIK ketuker antar karyawan bernama sama). Fungsi ini
+ * menormalkan kedua bentuk (baris lama string[] maupun baris baru
+ * {name,nik}[]) jadi satu tipe seragam, spy baris histori lama tetap bisa
+ * dibaca tanpa error.
+ */
+export function normalizeMembers(raw: unknown): MemberEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MemberEntry[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string") {
+      const name = entry.trim();
+      if (name) out.push({ name, nik: null });
+    } else if (entry && typeof entry === "object" && "name" in entry) {
+      const name = String((entry as { name: unknown }).name ?? "").trim();
+      if (!name) continue;
+      const nikRaw = (entry as { nik?: unknown }).nik;
+      const nik = typeof nikRaw === "string" && nikRaw.trim() ? nikRaw.trim() : null;
+      out.push({ name, nik });
+    }
+  }
+  return out;
+}
+
+/**
+ * Cari Employee ID (NIK) utk sebuah nama -- utamakan `nik` yg sudah
+ * tersimpan (sumber pasti, hasil pilihan user dari dropdown saat disimpan).
+ * Kalau baris lama belum punya `nik` tersimpan (data sebelum fix ini),
+ * fallback ke pencocokan nama seperti sebelumnya (bisa ambigu kalau ada 2
+ * karyawan nama sama -- itu sebabnya baris baru harus selalu bawa `nik`).
+ */
+export function resolveEmployeeId(
+  employees: EmployeeOption[] | undefined,
+  name: string | null | undefined,
+  nik: string | null | undefined
+): string | undefined {
+  const trimmedNik = (nik ?? "").trim();
+  if (trimmedNik) return trimmedNik;
+  const trimmedName = (name ?? "").trim().toLowerCase();
+  if (!trimmedName || !employees) return undefined;
+  return employees.find((e) => e.fullName.trim().toLowerCase() === trimmedName)?.employeeId;
+}
+
+/** Format "Nama (NIK)" utk ditampilkan di History/export, pakai `resolveEmployeeId`. */
+export function displayNameWithNik(
+  employees: EmployeeOption[] | undefined,
+  name: string | null | undefined,
+  nik: string | null | undefined
+): string {
+  const trimmedName = (name ?? "").trim();
+  if (!trimmedName) return "";
+  const id = resolveEmployeeId(employees, name, nik);
+  return id ? `${trimmedName} (${id})` : trimmedName;
+}
+
 /**
  * Dropdown pencarian nama karyawan, mirip TankSelect tapi menampilkan
  * Employee ID + Job Position + Departemen di tiap baris saran -- supaya
@@ -54,6 +122,13 @@ export function formatInputBy(employees: EmployeeOption[] | undefined, nik: stri
  * (bukan <datalist> bawaan) lewat portal ke <body> supaya tidak terpotong
  * oleh `overflow: hidden` milik .excel-block, dan bisa render info lebih
  * dari sekadar teks polos. Tetap bisa diketik bebas seperti komponen lain.
+ *
+ * `onChange` membawa argumen ke-2 (`employeeId`) berisi NIK karyawan yg
+ * benar-benar dipilih dari dropdown -- sebelumnya cuma nama teks yg
+ * dikirim balik ke parent, jadi kalau ada 2 karyawan nama sama (mis. 2
+ * "Sulaeman" NIK beda) sistem tidak pernah tahu yg mana yg dipilih user
+ * (2026-08-08 bug fix). Ketik manual selalu mengosongkan NIK (null) sampai
+ * `onBlur` berhasil mencocokkan persis 1 nama, atau user klik saran.
  */
 export default function EmployeeNameSelect({
   value,
@@ -63,15 +138,18 @@ export default function EmployeeNameSelect({
   bare = false,
   label = "Nama",
   placeholder,
+  employeeId,
 }: {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string, employeeId?: string | null) => void;
   id: string;
   required?: boolean;
   /** Jika true, render input polos saja (tanpa wrapper .field + label) supaya bisa dibungkus komponen layout lain, mis. ExcelField. */
   bare?: boolean;
   label?: string;
   placeholder?: string;
+  /** NIK yg sedang tercatat di parent utk field ini (dari DB saat edit, atau hasil pilihan dropdown sebelumnya). */
+  employeeId?: string | null;
 }) {
   const { data: employees } = useEmployeeOptions();
   const [open, setOpen] = useState(false);
@@ -112,6 +190,21 @@ export default function EmployeeNameSelect({
   }, [employees, value]);
 
   const isInvalid = !isKnownEmployeeName(employees, value);
+  const exactMatches = useMemo(() => exactNameMatches(employees, value), [employees, value]);
+  const isAmbiguous = exactMatches.length >= 2;
+
+  function handleBlur() {
+    // Kalau parent belum punya NIK utk field ini dan ketikan user cocok
+    // persis dgn SATU karyawan, coba resolve otomatis (mis. user ketik
+    // manual/paste tanpa klik saran, tapi namanya tidak kembar). Jangan
+    // jalan kalau parent SUDAH punya NIK (mis. baris lama hasil edit) --
+    // supaya blur ulang tidak menimpa NIK yg sudah benar dgn hasil re-cek
+    // yg ambigu.
+    if (employeeId) return;
+    if (exactMatches.length === 1) {
+      onChange(value, exactMatches[0].employeeId);
+    }
+  }
 
   const dropdown =
     open && rect && filtered.length > 0
@@ -136,7 +229,7 @@ export default function EmployeeNameSelect({
                 key={emp.employeeId}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  onChange(emp.fullName);
+                  onChange(emp.fullName, emp.employeeId);
                   setOpen(false);
                 }}
                 style={{ padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
@@ -162,10 +255,11 @@ export default function EmployeeNameSelect({
         id={id}
         value={value}
         onChange={(e) => {
-          onChange(e.target.value);
+          onChange(e.target.value, null);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={handleBlur}
         required={required}
         placeholder={placeholder}
         autoComplete="off"
@@ -175,6 +269,11 @@ export default function EmployeeNameSelect({
       {dropdown}
       {isInvalid && (
         <div style={{ fontSize: "0.7rem", color: "var(--danger)", marginTop: 2 }}>Nama tidak ada di Data Karyawan.</div>
+      )}
+      {!isInvalid && isAmbiguous && !employeeId && (
+        <div style={{ fontSize: "0.7rem", color: "var(--danger)", marginTop: 2 }}>
+          Nama ini dipakai oleh beberapa karyawan -- pilih dari daftar saran.
+        </div>
       )}
     </div>
   );

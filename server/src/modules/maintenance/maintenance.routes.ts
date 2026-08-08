@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { sanitizeNik } from "../../lib/employeeNik";
 
 /**
  * Menu "Maintenance" (2026-08-06, instruksi eksplisit user) -- dipicu dari
@@ -35,8 +36,10 @@ const saveSchema = z
     codeTanki: z.string().trim().min(1, "Code Tanki/Objek wajib diisi."),
     description: z.string().trim().min(1, "Deskripsi Kerusakan wajib diisi."),
     reportedBy: z.string().trim().min(1, "Pelapor wajib diisi."),
+    reportedByNik: z.string().trim().optional().nullable(),
     priority: z.string().optional(),
     technician: z.string().optional(),
+    technicianNik: z.string().trim().optional().nullable(),
     scheduledDate: optionalDate,
     start: optionalDate,
     finish: optionalDate,
@@ -128,8 +131,12 @@ maintenanceRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    const [reportedByNik, technicianNik] = await Promise.all([
+      sanitizeNik(parsed.data.reportedByNik),
+      sanitizeNik(parsed.data.technicianNik),
+    ]);
     const created = await prisma.maintenanceLog.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: { ...parsed.data, reportedByNik, technicianNik, inputBy: req.auth!.nik },
     });
     res.status(201).json({ success: true, message: "Data Maintenance berhasil disimpan.", data: created });
   })
@@ -229,7 +236,14 @@ maintenanceRouter.put(
     const existing = await prisma.maintenanceLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Maintenance tidak ditemukan.");
 
-    const updated = await prisma.maintenanceLog.update({ where: { id }, data: parsed.data });
+    const [reportedByNik, technicianNik] = await Promise.all([
+      sanitizeNik(parsed.data.reportedByNik),
+      sanitizeNik(parsed.data.technicianNik),
+    ]);
+    const updated = await prisma.maintenanceLog.update({
+      where: { id },
+      data: { ...parsed.data, reportedByNik, technicianNik },
+    });
     res.json({ success: true, message: "Data Maintenance berhasil diperbarui.", data: updated });
   })
 );

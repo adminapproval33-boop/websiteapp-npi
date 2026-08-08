@@ -6,7 +6,13 @@ import DataTable from "../../components/DataTable";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import MaterialFlowPanel from "./MaterialFlowPanel";
 
@@ -23,8 +29,10 @@ interface ManualRow {
   start: string | null;
   finish: string | null;
   spvProduksi: string;
+  spvProduksiNik: string | null;
   leader: string | null;
-  members: string[] | null;
+  leaderNik: string | null;
+  members: (string | MemberEntry)[] | null;
   inputBy: string;
 }
 
@@ -39,8 +47,10 @@ const emptyForm = {
   start: "",
   finish: "",
   spvProduksi: "",
+  spvProduksiNik: null as string | null,
   leader: "",
-  members: [] as string[],
+  leaderNik: null as string | null,
+  members: [] as MemberEntry[],
 };
 
 export default function ManualInputModal() {
@@ -52,6 +62,7 @@ export default function ManualInputModal() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
 
@@ -116,8 +127,10 @@ export default function ManualInputModal() {
       start: toDateTimeLocalValue(row.start),
       finish: toDateTimeLocalValue(row.finish),
       spvProduksi: row.spvProduksi,
+      spvProduksiNik: row.spvProduksiNik ?? null,
       leader: row.leader ?? "",
-      members: row.members ?? [],
+      leaderNik: row.leaderNik ?? null,
+      members: normalizeMembers(row.members),
     });
   }
 
@@ -135,8 +148,9 @@ export default function ManualInputModal() {
       return;
     }
     setError("");
-    setForm((f) => ({ ...f, members: [...f.members, name] }));
+    setForm((f) => ({ ...f, members: [...f.members, { name, nik: memberNikInput }] }));
     setMemberNameInput("");
+    setMemberNikInput(null);
   }
 
   function removeMember(idx: number) {
@@ -197,13 +211,35 @@ export default function ManualInputModal() {
                 <label>Finish</label>
                 <input type="datetime-local" value={form.finish} onChange={(e) => setForm({ ...form, finish: e.target.value })} />
               </div>
-              <EmployeeNameSelect id="po-manual-spv" label="SPV Produksi" value={form.spvProduksi} onChange={(v) => setForm({ ...form, spvProduksi: v })} required />
-              <EmployeeNameSelect id="po-manual-leader" label="Leader" value={form.leader} onChange={(v) => setForm({ ...form, leader: v })} />
+              <EmployeeNameSelect
+                id="po-manual-spv"
+                label="SPV Produksi"
+                value={form.spvProduksi}
+                employeeId={form.spvProduksiNik}
+                onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                required
+              />
+              <EmployeeNameSelect
+                id="po-manual-leader"
+                label="Leader"
+                value={form.leader}
+                employeeId={form.leaderNik}
+                onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+              />
               <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <label>Member</label>
                 <div style={{ display: "flex", gap: 6 }}>
                   <div style={{ flex: 1 }}>
-                    <EmployeeNameSelect bare id="po-manual-member" value={memberNameInput} onChange={setMemberNameInput} />
+                    <EmployeeNameSelect
+                      bare
+                      id="po-manual-member"
+                      value={memberNameInput}
+                      employeeId={memberNikInput}
+                      onChange={(v, nik) => {
+                        setMemberNameInput(v);
+                        setMemberNikInput(nik ?? null);
+                      }}
+                    />
                   </div>
                   <button type="button" className="btn btn-outline" onClick={addMember}>
                     + Tambah
@@ -212,8 +248,8 @@ export default function ManualInputModal() {
                 {form.members.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {form.members.map((m, idx) => (
-                      <span key={`${m}-${idx}`} className="excel-member-chip">
-                        {m}
+                      <span key={`${m.name}-${idx}`} className="excel-member-chip">
+                        {m.name}
                         <button
                           type="button"
                           onClick={() => removeMember(idx)}
@@ -282,8 +318,8 @@ export default function ManualInputModal() {
               {
                 key: "members",
                 label: "Member",
-                render: (r) => (r.members ?? []).join(", ") || "-",
-                csvValue: (r) => (r.members ?? []).join(", "),
+                render: (r) => normalizeMembers(r.members).map((m) => m.name).join(", ") || "-",
+                csvValue: (r) => normalizeMembers(r.members).map((m) => m.name).join(", "),
               },
               { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
               ...(canEditOrDelete

@@ -5,6 +5,20 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 
+/** Sanitasi `picNik` per baris Spec Parameter -- 1 query batch utk semua NIK
+ * sekaligus (pola sama dgn sanitizeMembers di lib/employeeNik.ts, tapi
+ * bentuknya beda krn CheckResultParameter adalah baris relasional sendiri,
+ * bukan array di dalam kolom Json?). NIK yg tidak ketemu di Data Karyawan
+ * di-null-kan, nama (`pic`) tetap tersimpan apa adanya. */
+async function sanitizeParameterNiks<T extends { pic?: string | null; picNik?: string | null }>(parameters: T[]): Promise<T[]> {
+  const niks = Array.from(new Set(parameters.map((p) => (p.picNik ?? "").trim()).filter(Boolean)));
+  const found = niks.length
+    ? await prisma.masterEmployee.findMany({ where: { employeeId: { in: niks } }, select: { employeeId: true } })
+    : [];
+  const validNiks = new Set(found.map((f) => f.employeeId));
+  return parameters.map((p) => ({ ...p, picNik: p.picNik && validNiks.has(p.picNik.trim()) ? p.picNik.trim() : null }));
+}
+
 export const checkResultsRouter = Router();
 checkResultsRouter.use(requireAuth);
 checkResultsRouter.use(requireMenuView("checkResults"));
@@ -27,6 +41,7 @@ const parameterSchema = z
     start: optionalDate,
     finish: optionalDate,
     pic: z.string().optional(),
+    picNik: z.string().trim().optional().nullable(),
   })
   .superRefine((data, ctx) => {
     // Begitu Result sebuah Item Check diisi, Start/Finish/PIC baris itu WAJIB
@@ -150,8 +165,9 @@ checkResultsRouter.post(
     // Matching, lihat checkMillingGate/checkAftermixGate/checkColourMatchingGate
     // di lib/stageGate.ts) -- checkQcGate sudah dihapus total dari sini.
     const { parameters, ...header } = parsed.data;
+    const sanitizedParameters = await sanitizeParameterNiks(parameters);
     const created = await prisma.checkResult.create({
-      data: { ...header, inputBy: req.auth!.nik, parameters: { create: parameters } },
+      data: { ...header, inputBy: req.auth!.nik, parameters: { create: sanitizedParameters } },
       include: { parameters: true, appearanceFiles: true },
     });
     res.status(201).json({ success: true, message: "Check Results berhasil disimpan.", data: created });
@@ -177,11 +193,12 @@ checkResultsRouter.put(
     if (!existing) throw new HttpError(404, "Check Results tidak ditemukan.");
 
     const { parameters, ...header } = parsed.data;
+    const sanitizedParameters = await sanitizeParameterNiks(parameters);
     const updated = await prisma.$transaction(async (tx) => {
       await tx.checkResultParameter.deleteMany({ where: { checkId } });
       return tx.checkResult.update({
         where: { checkId },
-        data: { ...header, parameters: { create: parameters } },
+        data: { ...header, parameters: { create: sanitizedParameters } },
         include: { parameters: { orderBy: { no: "asc" } }, appearanceFiles: true },
       });
     });

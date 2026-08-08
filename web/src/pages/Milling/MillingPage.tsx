@@ -5,7 +5,15 @@ import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import MesinSelect from "../../components/MesinSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  displayNameWithNik,
+  resolveEmployeeId,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -74,7 +82,7 @@ interface QueueRow {
   codeTanki: string;
   spvProduksi: string;
   leader: string | null;
-  members: string[] | null;
+  members: (string | MemberEntry)[] | null;
   qtyPerMan: string | null;
   formReceived: string | null;
   start: string | null;
@@ -99,9 +107,11 @@ interface LogRow {
   start: string | null;
   finish: string | null;
   spvProduksi: string;
+  spvProduksiNik: string | null;
   leader: string | null;
+  leaderNik: string | null;
   qtyAct: string | null;
-  members: string[] | null;
+  members: (string | MemberEntry)[] | null;
   fineness: string[] | null;
   visco: string[] | null;
   suhu: string[] | null;
@@ -166,9 +176,11 @@ const emptyForm = {
   start: "",
   finish: "",
   spvProduksi: "",
+  spvProduksiNik: null as string | null,
   leader: "",
+  leaderNik: null as string | null,
   qtyAct: "",
-  members: [] as string[],
+  members: [] as MemberEntry[],
   fineness: [""],
   visco: [""],
   suhu: [""],
@@ -311,6 +323,7 @@ export default function MillingPage({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -433,9 +446,11 @@ export default function MillingPage({
         setForm((f) => ({
           ...f,
           spvProduksi: f.spvProduksi || latest.spvProduksi || "",
+          spvProduksiNik: f.spvProduksi ? f.spvProduksiNik : latest.spvProduksiNik ?? null,
           leader: f.leader || latest.leader || "",
+          leaderNik: f.leader ? f.leaderNik : latest.leaderNik ?? null,
           qtyAct: f.qtyAct || latest.qtyAct || "",
-          members: f.members.length > 0 ? f.members : latest.members ?? [],
+          members: f.members.length > 0 ? f.members : normalizeMembers(latest.members),
           codeTanki1: f.codeTanki1 || latest.codeTanki1 || "",
           codeMesin: f.codeMesin || latest.codeMesin || "",
           formReceived: f.formReceived || latest.formReceived || "",
@@ -488,9 +503,11 @@ export default function MillingPage({
         setForm((f) => ({
           ...f,
           spvProduksi: match.spvProduksi || f.spvProduksi,
+          spvProduksiNik: match.spvProduksiNik ?? f.spvProduksiNik,
           leader: match.leader ?? f.leader,
+          leaderNik: match.leaderNik ?? f.leaderNik,
           qtyAct: match.qtyAct ?? f.qtyAct,
-          members: match.members ?? f.members,
+          members: match.members ? normalizeMembers(match.members) : f.members,
           codeTanki1: match.codeTanki1 ?? f.codeTanki1,
           formReceived: match.formReceived ?? f.formReceived,
           start: match.start ?? f.start,
@@ -518,8 +535,9 @@ export default function MillingPage({
       return;
     }
     setError("");
-    setForm((f) => ({ ...f, members: [...f.members, name] }));
+    setForm((f) => ({ ...f, members: [...f.members, { name, nik: memberNikInput }] }));
     setMemberInput("");
+    setMemberNikInput(null);
   }
 
   function removeLastMember() {
@@ -572,9 +590,11 @@ export default function MillingPage({
       start: row.start ?? "",
       finish: row.finish ?? "",
       spvProduksi: row.spvProduksi,
+      spvProduksiNik: row.spvProduksiNik ?? null,
       leader: row.leader ?? "",
+      leaderNik: row.leaderNik ?? null,
       qtyAct: row.qtyAct ?? "",
-      members: row.members ?? [],
+      members: normalizeMembers(row.members),
       fineness: normalizeReadings(row.fineness),
       visco: normalizeReadings(row.visco),
       suhu: normalizeReadings(row.suhu),
@@ -639,12 +659,6 @@ export default function MillingPage({
   const filteredQueue = (queueQuery.data ?? []).filter((row) =>
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
-
-  function findEmployee(name: string | null) {
-    const trimmed = (name ?? "").trim().toLowerCase();
-    if (!trimmed) return undefined;
-    return (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === trimmed);
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -740,10 +754,23 @@ export default function MillingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
-                  <EmployeeNameSelect bare id="milling-spv" value={form.spvProduksi} onChange={(v) => setForm({ ...form, spvProduksi: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id="milling-spv"
+                    value={form.spvProduksi}
+                    employeeId={form.spvProduksiNik}
+                    onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
-                  <EmployeeNameSelect bare id="milling-leader" value={form.leader} onChange={(v) => setForm({ ...form, leader: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="milling-leader"
+                    value={form.leader}
+                    employeeId={form.leaderNik}
+                    onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Qty Act" color="orange" widthPx={colWidths.qtyAct} onResizeStart={beginResize("qtyAct")}>
                   <input value={form.qtyAct} onChange={(e) => setForm({ ...form, qtyAct: e.target.value })} />
@@ -751,7 +778,17 @@ export default function MillingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
-                  <EmployeeNameSelect bare id="milling-member" value={memberInput} onChange={setMemberInput} placeholder="Nama anggota" />
+                  <EmployeeNameSelect
+                    bare
+                    id="milling-member"
+                    value={memberInput}
+                    employeeId={memberNikInput}
+                    onChange={(v, nik) => {
+                      setMemberInput(v);
+                      setMemberNikInput(nik ?? null);
+                    }}
+                    placeholder="Nama anggota"
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -785,7 +822,7 @@ export default function MillingPage({
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m}
+                          {m.name}
                         </span>
                       ))}
                     </div>
@@ -869,19 +906,24 @@ export default function MillingPage({
                 { key: "orderQty", label: "Order Qty", render: (r) => r.log.orderQty },
                 { key: "plant", label: "Plant", render: (r) => r.log.plant },
                 { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.log.spvProduksi },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.log.spvProduksi)?.employeeId },
+                {
+                  key: "spvEmployeeId",
+                  label: "SPV Employee ID",
+                  render: (r) => resolveEmployeeId(employees, r.log.spvProduksi, r.log.spvProduksiNik),
+                },
                 { key: "leader", label: "Leader", render: (r) => r.log.leader },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.log.leader)?.employeeId },
+                {
+                  key: "leaderEmployeeId",
+                  label: "Leader Employee ID",
+                  render: (r) => resolveEmployeeId(employees, r.log.leader, r.log.leaderNik),
+                },
                 { key: "qtyAct", label: "Qty Act", render: (r) => r.log.qtyAct },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.log.members ?? [];
-                    const list = members.map((m) => {
-                      const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId})` : m;
-                    });
+                    const members = normalizeMembers(r.log.members);
+                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
                     return [String(members.length), ...list].join(" | ");
                   },
                 },
@@ -981,7 +1023,7 @@ export default function MillingPage({
                 {
                   key: "members",
                   label: "Member (Premix)",
-                  render: (r) => (r.members ?? []).join(", "),
+                  render: (r) => normalizeMembers(r.members).map((m) => m.name).join(", "),
                 },
                 { key: "qtyPerMan", label: "Qty/Man (Liter)", render: (r) => r.qtyPerMan },
                 {

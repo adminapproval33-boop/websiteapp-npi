@@ -20,8 +20,18 @@ export interface StoredSession {
   avatarPath?: string | null;
 }
 
+// Pakai localStorage (bukan sessionStorage) SENGAJA (2026-08-08, instruksi
+// eksplisit user) -- supaya 1 login dibagi ke SEMUA tab di browser yang sama
+// (localStorage lintas-tab, sessionStorage per-tab sendiri-sendiri). Tanpa
+// ini, tiap tab baru dianggap "login baru" oleh gerbang 1-NIK-1-sesi-aktif
+// (lihat AuthContext.tsx/auth.routes.ts), jadi buka tab ke-2/ke-3 selalu
+// kena peringatan konflik walau fisiknya 1 orang di 1 browser yang sama.
+// Konsekuensinya: sesi TETAP tersimpan walau browser ditutup-buka lagi
+// (beda dari sessionStorage yg otomatis hilang) -- baru benar2 habis lewat
+// Logout eksplisit atau nganggur melebihi TTL sesi (sliding, lihat
+// SESSION_TTL_MINUTES di server/.env).
 export function loadSession(): StoredSession | null {
-  const raw = sessionStorage.getItem(SESSION_KEY);
+  const raw = localStorage.getItem(SESSION_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredSession;
@@ -31,11 +41,11 @@ export function loadSession(): StoredSession | null {
 }
 
 export function saveSession(session: StoredSession) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 export function clearSession() {
-  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(SESSION_KEY);
 }
 
 /** URL untuk link <a href> ke file lampiran -- menyertakan token lewat query string karena link biasa tidak mengirim header Authorization. */

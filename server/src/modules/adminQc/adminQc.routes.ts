@@ -32,16 +32,19 @@ const saveSchema = z
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    // Cabang syarat dari pilihan Admin QC Stage -- SAMA PERSIS dgn logika yg
-    // dulu ada di approval.routes.ts sebelum Admin QC dipisah jadi tabel &
-    // menu sendiri (2026-07-28, sesuai instruksi eksplisit user). "Improve"
-    // tidak nambah syarat apa pun di luar baseline (sudah wajib dari Zod di
-    // atas).
+    // Cabang syarat dari pilihan Admin QC Stage (direvisi 2026-08-08, instruksi
+    // eksplisit user -- "Lot Packing" DIPISAH dari "Joint Lot", TIDAK lagi
+    // mewajibkan QC to App krn barangnya langsung Packing, tidak lewat
+    // Approval). "Improve" tidak nambah syarat apa pun di luar baseline
+    // (sudah wajib dari Zod di atas).
     const hasLotPassed = data.lotPassed != null;
     const hasQcToApproval = data.qcToApproval != null;
     const hasQcPassed = data.qcPassed != null;
 
-    if (data.typeLot === "Joint Lot" || data.typeLot === "Lot Packing") {
+    if (data.typeLot === "Lot Packing") {
+      if (!hasLotPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lotPassed"], message: "Lot Passed wajib diisi kalau Admin QC Stage sudah diisi." });
+      if (!hasQcPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcPassed"], message: "QC Passed wajib diisi kalau Admin QC Stage sudah diisi." });
+    } else if (data.typeLot === "Joint Lot") {
       if (!hasLotPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lotPassed"], message: "Lot Passed wajib diisi kalau Admin QC Stage sudah diisi." });
       if (!hasQcToApproval) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcToApproval"], message: "QC to App wajib diisi kalau Admin QC Stage sudah diisi." });
       if (!hasQcPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcPassed"], message: "QC Passed wajib diisi kalau Admin QC Stage sudah diisi." });

@@ -72,8 +72,10 @@ export default function MaintenanceFormPage() {
         codeTanki: row.codeTanki,
         description: row.description,
         reportedBy: row.reportedBy,
+        reportedByNik: row.reportedByNik ?? null,
         priority: row.priority ?? "",
         technician: row.technician ?? "",
+        technicianNik: row.technicianNik ?? null,
         scheduledDate: toDateValue(row.scheduledDate ?? ""),
         start: toDateTimeLocalValue(row.start),
         finish: toDateTimeLocalValue(row.finish),
@@ -172,10 +174,23 @@ export default function MaintenanceFormPage() {
               </select>
             </ExcelField>
             <ExcelField label="Pelapor" widthPx={colWidths.reportedBy} onResizeStart={beginResize("reportedBy")}>
-              <EmployeeNameSelect bare id="maintenance-reported-by" value={form.reportedBy} onChange={(v) => setForm({ ...form, reportedBy: v })} required />
+              <EmployeeNameSelect
+                bare
+                id="maintenance-reported-by"
+                value={form.reportedBy}
+                employeeId={form.reportedByNik}
+                onChange={(v, nik) => setForm({ ...form, reportedBy: v, reportedByNik: nik ?? null })}
+                required
+              />
             </ExcelField>
             <ExcelField label="Teknisi / PIC Maintenance" widthPx={colWidths.technician} onResizeStart={beginResize("technician")}>
-              <EmployeeNameSelect bare id="maintenance-technician" value={form.technician} onChange={(v) => setForm({ ...form, technician: v })} />
+              <EmployeeNameSelect
+                bare
+                id="maintenance-technician"
+                value={form.technician}
+                employeeId={form.technicianNik}
+                onChange={(v, nik) => setForm({ ...form, technician: v, technicianNik: nik ?? null })}
+              />
             </ExcelField>
           </ExcelRow>
           <ExcelRow>

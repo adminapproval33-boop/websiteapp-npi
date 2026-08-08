@@ -16,8 +16,10 @@ export interface MaintenanceRow {
   codeTanki: string;
   description: string;
   reportedBy: string;
+  reportedByNik: string | null;
   priority: string | null;
   technician: string | null;
+  technicianNik: string | null;
   scheduledDate: string | null;
   sequence: number;
   start: string | null;
@@ -42,8 +44,10 @@ export const emptyMaintenanceForm = {
   codeTanki: "",
   description: "",
   reportedBy: "",
+  reportedByNik: null as string | null,
   priority: "",
   technician: "",
+  technicianNik: null as string | null,
   scheduledDate: "",
   start: "",
   finish: "",

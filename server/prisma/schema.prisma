@@ -51,11 +51,17 @@ model User {
 /// Sesi login, menggantikan CacheService token di versi lama.
 /// Sliding expiration ditegakkan di middleware (bukan di DB).
 model Session {
-  token     String   @id @default(uuid())
-  nik       String
-  user      User     @relation(fields: [nik], references: [nik], onDelete: Cascade)
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  token         String   @id @default(uuid())
+  nik           String
+  user          User     @relation(fields: [nik], references: [nik], onDelete: Cascade)
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  /// Diisi kalau sesi ini diakhiri PAKSA (bukan expired alami) -- mis. user
+  /// login dari perangkat lain (2026-08-08, instruksi eksplisit user: 1 NIK
+  /// cuma boleh 1 sesi aktif, spt SAP). Dibaca sekali oleh validateSession()
+  /// saat sesi ini dipakai lagi, supaya pesan errornya jelas ("diakhiri krn
+  /// login di perangkat lain") bukan cuma "sesi berakhir" generik.
+  revokedReason String?
 
   @@index([nik])
   @@map("sessions")
@@ -203,8 +209,10 @@ model ProductionOrderManualInput {
   start               DateTime?
   finish              DateTime?
   spvProduksi         String
+  spvProduksiNik      String?
   leader              String?
-  /// array nama anggota, mis. ["Budi","Sari"]
+  leaderNik           String?
+  /// array nama anggota, mis. ["Budi","Sari"] atau [{"name":"Budi","nik":"001"}]
   members             Json?
   inputBy             String
 
@@ -246,10 +254,12 @@ model MillingLog {
   start               DateTime?
   finish              DateTime?
   spvProduksi         String
+  spvProduksiNik      String?
   leader              String?
+  leaderNik           String?
   /// Qty Aktual hasil Milling -- diisi manual, beda dari Order Qty (rencana)
   qtyAct              String?
-  /// array nama anggota, mis. ["Budi","Sari"]
+  /// array nama anggota, mis. ["Budi","Sari"] atau [{"name":"Budi","nik":"001"}]
   members             Json?
   /// 10 slot bacaan tetap, disimpan sbg array (boleh string kosong utk slot yg belum diisi)
   fineness            Json?
@@ -291,12 +301,14 @@ model PremixAftermixLog {
   plant               String?
   iuPlant             String?
   spvProduksi         String
-  /// array nama anggota, mis. ["Budi","Sari"]
+  spvProduksiNik      String?
+  /// array nama anggota, mis. ["Budi","Sari"] atau [{"name":"Budi","nik":"001"}]
   members             Json?
   /// Order Qty dibagi jumlah member (otomatis)
   qtyPerMan           String?
   start               DateTime?
   leader              String?
+  leaderNik           String?
   finish              DateTime?
   codeTanki           String
   formReceived        DateTime?
@@ -358,34 +370,37 @@ model PwoSchedule {
 
 /// Planning Schedule > Colour Matching.
 model ColourMatchingLog {
-  id                  Int                        @id @default(autoincrement())
-  timestamp           DateTime                   @default(now())
-  order               String
-  materialNumber      String?
-  materialDescription String?
-  batch               String
-  orderQty            String?
-  plant               String?
-  iuPlant             String?
-  codeTanki           String
-  typesOfProducts     String?
-  baseColor           String?
+  id                   Int                        @id @default(autoincrement())
+  timestamp            DateTime                   @default(now())
+  order                String
+  materialNumber       String?
+  materialDescription  String?
+  batch                String
+  orderQty             String?
+  plant                String?
+  iuPlant              String?
+  codeTanki            String
+  typesOfProducts      String?
+  baseColor            String?
   /// 1 No Order (form ini) dibagi jumlah member (otomatis) -- bukan dari Order Qty
-  formPerMan          String?
-  formReceived        DateTime?
-  start               DateTime?
-  finish              DateTime?
-  spvName             String
+  formPerMan           String?
+  formReceived         DateTime?
+  start                DateTime?
+  finish               DateTime?
+  spvName              String
+  spvNik               String?
   /// SPV Colour Matching (2026-08-03, instruksi eksplisit user) -- nullable
   /// di DB supaya baris histori lama (sebelum kolom ini ada) tidak pecah,
   /// tapi WAJIB diisi utk save baru/edit lewat validasi Zod di route.
-  spvColourMatching   String?
-  leaderName          String?
-  /// array nama anggota, mis. ["Budi","Sari"] (gaya Premix/Aftermix)
-  members             Json?
-  remark              String?
-  inputBy             String
-  attachments         ColourMatchingAttachment[]
+  spvColourMatching    String?
+  spvColourMatchingNik String?
+  leaderName           String?
+  leaderNik            String?
+  /// array nama anggota, mis. ["Budi","Sari"] atau [{"name":"Budi","nik":"001"}] (gaya Premix/Aftermix)
+  members              Json?
+  remark               String?
+  inputBy              String
+  attachments          ColourMatchingAttachment[]
 
   @@index([order])
   @@map("colour_matching_logs")
@@ -426,8 +441,10 @@ model BongkaranLog {
   orderQty            String?
   plant               String?
   spvName             String
+  spvNik              String?
   leaderName          String?
-  /// array nama anggota, mis. ["Budi","Sari"] (gaya Premix/Aftermix/Colour Matching)
+  leaderNik           String?
+  /// array nama anggota, mis. ["Budi","Sari"] atau [{"name":"Budi","nik":"001"}] (gaya Premix/Aftermix/Colour Matching)
   members             Json?
   /// Milestone AWAL (2026-08-03, instruksi eksplisit user) -- ditambahkan
   /// belakangan, menyusul field "Send To PQE" yg sudah ada duluan. TIDAK
@@ -483,8 +500,10 @@ model MaintenanceLog {
   codeTanki     String
   description   String
   reportedBy    String
+  reportedByNik String?
   priority      String?
   technician    String?
+  technicianNik String?
   scheduledDate DateTime?
   sequence      Int                     @default(0)
   start         DateTime?
@@ -635,6 +654,7 @@ model CheckResultParameter {
   start     DateTime?
   finish    DateTime?
   pic       String?
+  picNik    String?
 
   @@index([checkId])
   @@map("check_result_parameters")
@@ -676,9 +696,12 @@ model ApprovalSchedule {
   iuPlant                String?
   codeTanki              String?
   mrpPic                 String?
+  mrpPicNik              String?
   salesPic               String?
+  salesPicNik            String?
   prepareProduksi        DateTime?
   sprayMan               String?
+  sprayManNik            String?
   wetSample              String?
   panel                  String?
   lotCoa                 DateTime?
@@ -688,6 +711,7 @@ model ApprovalSchedule {
   customer               String?
   custSegmen             String?
   techName               String?
+  techNameNik            String?
   finishApp              DateTime?
   remark                 String?
   attachments            ApprovalAttachment[]

@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
@@ -25,10 +27,14 @@ const saveSchema = z
     plant: z.string().optional(),
     iuPlant: z.string().optional(),
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
-    members: z.array(z.string()).optional(),
+    spvNik: z.string().trim().optional().nullable(),
+    members: z
+      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+      .optional(),
     formReceived: optionalDate,
     start: optionalDate,
     leaderName: z.string().optional(),
+    leaderNik: z.string().trim().optional().nullable(),
     qtyPerMan: z.string().optional(),
     totalQty: z.string().optional(),
     qtyPcs: z.string().optional(),
@@ -148,8 +154,13 @@ packingRouter.post(
     // Actions" di Production Order Monitoring apa adanya (lihat
     // latestPackingLabelByOrder di dashboard.routes.ts, tidak bergantung sama
     // sekali pada status Admin QC).
+    const [spvNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
     const created = await prisma.packingLog.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: { ...parsed.data, spvNik, leaderNik, members: members as unknown as Prisma.InputJsonValue, inputBy: req.auth!.nik },
     });
     res.status(201).json({ success: true, message: "Data Packing berhasil disimpan.", data: created });
   })
@@ -173,7 +184,15 @@ packingRouter.put(
     const existing = await prisma.packingLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Packing tidak ditemukan.");
 
-    const updated = await prisma.packingLog.update({ where: { id }, data: parsed.data });
+    const [spvNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const updated = await prisma.packingLog.update({
+      where: { id },
+      data: { ...parsed.data, spvNik, leaderNik, members: members as unknown as Prisma.InputJsonValue },
+    });
     res.json({ success: true, message: "Data Packing berhasil diperbarui.", data: updated });
   })
 );

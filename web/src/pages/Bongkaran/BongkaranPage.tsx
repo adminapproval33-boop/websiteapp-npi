@@ -2,7 +2,15 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  displayNameWithNik,
+  resolveEmployeeId,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -57,8 +65,10 @@ interface HistoryRow {
   orderQty: string | null;
   plant: string | null;
   spvName: string;
+  spvNik: string | null;
   leaderName: string | null;
-  members: string[] | null;
+  leaderNik: string | null;
+  members: (string | MemberEntry)[] | null;
   formReceived: string | null;
   sendToPqe: string | null;
   remark: string | null;
@@ -74,8 +84,10 @@ const emptyForm = {
   orderQty: "",
   plant: "",
   spvName: "",
+  spvNik: null as string | null,
   leaderName: "",
-  members: [] as string[],
+  leaderNik: null as string | null,
+  members: [] as MemberEntry[],
   formReceived: "",
   sendToPqe: "",
   remark: "",
@@ -101,6 +113,7 @@ export default function BongkaranPage({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -194,8 +207,10 @@ export default function BongkaranPage({
         setForm((f) => ({
           ...f,
           spvName: f.spvName || latest.spvName || "",
+          spvNik: f.spvName ? f.spvNik : latest.spvNik ?? null,
           leaderName: f.leaderName || latest.leaderName || "",
-          members: f.members.length > 0 ? f.members : latest.members ?? [],
+          leaderNik: f.leaderName ? f.leaderNik : latest.leaderNik ?? null,
+          members: f.members.length > 0 ? f.members : normalizeMembers(latest.members),
           formReceived: f.formReceived || toDateTimeLocalValue(latest.formReceived),
           sendToPqe: f.sendToPqe || toDateTimeLocalValue(latest.sendToPqe),
           remark: f.remark || latest.remark || "",
@@ -231,8 +246,9 @@ export default function BongkaranPage({
       return;
     }
     setError("");
-    setForm((f) => ({ ...f, members: [...f.members, name] }));
+    setForm((f) => ({ ...f, members: [...f.members, { name, nik: memberNikInput }] }));
     setMemberInput("");
+    setMemberNikInput(null);
   }
 
   function removeLastMember() {
@@ -249,8 +265,10 @@ export default function BongkaranPage({
       orderQty: row.orderQty ?? "",
       plant: row.plant ?? "",
       spvName: row.spvName,
+      spvNik: row.spvNik ?? null,
       leaderName: row.leaderName ?? "",
-      members: row.members ?? [],
+      leaderNik: row.leaderNik ?? null,
+      members: normalizeMembers(row.members),
       formReceived: toDateTimeLocalValue(row.formReceived),
       sendToPqe: toDateTimeLocalValue(row.sendToPqe),
       remark: row.remark ?? "",
@@ -310,11 +328,6 @@ export default function BongkaranPage({
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
 
-  function findEmployee(name: string | null) {
-    const trimmed = (name ?? "").trim().toLowerCase();
-    if (!trimmed) return undefined;
-    return (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === trimmed);
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -366,10 +379,23 @@ export default function BongkaranPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
-                  <EmployeeNameSelect bare id="bongkaran-spv" value={form.spvName} onChange={(v) => setForm({ ...form, spvName: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id="bongkaran-spv"
+                    value={form.spvName}
+                    employeeId={form.spvNik}
+                    onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
-                  <EmployeeNameSelect bare id="bongkaran-leader" value={form.leaderName} onChange={(v) => setForm({ ...form, leaderName: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="bongkaran-leader"
+                    value={form.leaderName}
+                    employeeId={form.leaderNik}
+                    onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
                   <input
@@ -384,7 +410,17 @@ export default function BongkaranPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
-                  <EmployeeNameSelect bare id="bongkaran-member" value={memberInput} onChange={setMemberInput} placeholder="Nama anggota" />
+                  <EmployeeNameSelect
+                    bare
+                    id="bongkaran-member"
+                    value={memberInput}
+                    employeeId={memberNikInput}
+                    onChange={(v, nik) => {
+                      setMemberInput(v);
+                      setMemberNikInput(nik ?? null);
+                    }}
+                    placeholder="Nama anggota"
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -418,7 +454,7 @@ export default function BongkaranPage({
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m}
+                          {m.name}
                         </span>
                       ))}
                     </div>
@@ -490,18 +526,19 @@ export default function BongkaranPage({
                 { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "spvName", label: "SPV Produksi", render: (r) => r.spvName },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvName)?.employeeId },
+                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => resolveEmployeeId(employees, r.spvName, r.spvNik) },
                 { key: "leaderName", label: "Leader", render: (r) => r.leaderName },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leaderName)?.employeeId },
+                {
+                  key: "leaderEmployeeId",
+                  label: "Leader Employee ID",
+                  render: (r) => resolveEmployeeId(employees, r.leaderName, r.leaderNik),
+                },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.members ?? [];
-                    const list = members.map((m) => {
-                      const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId})` : m;
-                    });
+                    const members = normalizeMembers(r.members);
+                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
                     return [String(members.length), ...list].join(" | ");
                   },
                 },

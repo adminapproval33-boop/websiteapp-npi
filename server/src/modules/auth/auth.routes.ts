@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { hashPassword, verifyPassword } from "../../lib/password";
-import { createSession, revokeSession } from "../../lib/session";
+import { createSession, hasActiveSession, revokeSession, revokeSessionsForUser } from "../../lib/session";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth, AuthedRequest } from "../../middleware/auth";
 import { clearFailures, isLocked, registerFailure } from "../../lib/loginAttempts";
@@ -14,6 +14,12 @@ export const authRouter = Router();
 const loginSchema = z.object({
   nik: z.string().trim().min(1),
   password: z.string().min(1),
+  // 1 NIK cuma boleh 1 sesi aktif (2026-08-08, instruksi eksplisit user, spt
+  // SAP) -- kalau ada sesi lain yg masih aktif, login PERTAMA ditolak (409)
+  // supaya frontend bisa tampilkan konfirmasi dulu ke user. `force: true`
+  // dikirim ulang SETELAH user mengonfirmasi, artinya "akhiri sesi lain itu
+  // dan lanjutkan login di sini".
+  force: z.boolean().optional().default(false),
 });
 
 authRouter.post(
@@ -45,6 +51,19 @@ authRouter.post(
     }
 
     clearFailures(nik);
+
+    if (await hasActiveSession(user.nik)) {
+      if (!parsed.data.force) {
+        res.status(409).json({
+          success: false,
+          conflict: true,
+          message: "Akun ini sedang aktif di perangkat/browser lain. Lanjutkan login akan mengakhiri sesi tersebut.",
+        });
+        return;
+      }
+      await revokeSessionsForUser(user.nik, "login dari perangkat/browser lain");
+    }
+
     const token = await createSession(user.nik);
 
     res.json({

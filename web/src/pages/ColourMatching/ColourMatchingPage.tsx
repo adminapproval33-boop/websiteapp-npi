@@ -4,7 +4,15 @@ import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  displayNameWithNik,
+  resolveEmployeeId,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -59,7 +67,7 @@ interface QueueRow {
   codeTanki: string;
   spvProduksi: string;
   leader: string | null;
-  members: string[] | null;
+  members: (string | MemberEntry)[] | null;
   qtyPerMan: string | null;
   formReceived: string | null;
   start: string | null;
@@ -85,9 +93,12 @@ interface HistoryRow {
   start: string | null;
   finish: string | null;
   spvName: string;
+  spvNik: string | null;
   spvColourMatching: string | null;
+  spvColourMatchingNik: string | null;
   leaderName: string | null;
-  members: string[] | null;
+  leaderNik: string | null;
+  members: (string | MemberEntry)[] | null;
   remark: string | null;
   inputBy: string;
   attachments: { id: number; fileName: string; filePath: string }[];
@@ -109,9 +120,12 @@ const emptyForm = {
   start: "",
   finish: "",
   spvName: "",
+  spvNik: null as string | null,
   spvColourMatching: "",
+  spvColourMatchingNik: null as string | null,
   leaderName: "",
-  members: [] as string[],
+  leaderNik: null as string | null,
+  members: [] as MemberEntry[],
   remark: "",
 };
 
@@ -135,6 +149,7 @@ export default function ColourMatchingPage({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberInput, setMemberInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -252,12 +267,15 @@ export default function ColourMatchingPage({
         // data baru akan menimpa/replace data lama saat Save.
         setEditingId(latest.id);
         setForm((f) => {
-          const members = f.members.length > 0 ? f.members : latest.members ?? [];
+          const members = f.members.length > 0 ? f.members : normalizeMembers(latest.members);
           return {
             ...f,
             spvName: f.spvName || latest.spvName || "",
+            spvNik: f.spvName ? f.spvNik : latest.spvNik ?? null,
             spvColourMatching: f.spvColourMatching || latest.spvColourMatching || "",
+            spvColourMatchingNik: f.spvColourMatching ? f.spvColourMatchingNik : latest.spvColourMatchingNik ?? null,
             leaderName: f.leaderName || latest.leaderName || "",
+            leaderNik: f.leaderName ? f.leaderNik : latest.leaderNik ?? null,
             members,
             typesOfProducts: f.typesOfProducts || latest.typesOfProducts || "",
             baseColor: f.baseColor || latest.baseColor || "",
@@ -316,10 +334,11 @@ export default function ColourMatchingPage({
     }
     setError("");
     setForm((f) => {
-      const members = [...f.members, name];
+      const members = [...f.members, { name, nik: memberNikInput }];
       return { ...f, members, formPerMan: computeFormPerMan(members.length) };
     });
     setMemberInput("");
+    setMemberNikInput(null);
   }
 
   function removeLastMember() {
@@ -347,9 +366,12 @@ export default function ColourMatchingPage({
       start: row.start ?? "",
       finish: row.finish ?? "",
       spvName: row.spvName,
+      spvNik: row.spvNik ?? null,
       spvColourMatching: row.spvColourMatching ?? "",
+      spvColourMatchingNik: row.spvColourMatchingNik ?? null,
       leaderName: row.leaderName ?? "",
-      members: row.members ?? [],
+      leaderNik: row.leaderNik ?? null,
+      members: normalizeMembers(row.members),
       remark: row.remark ?? "",
     });
     setTab("input");
@@ -429,11 +451,6 @@ export default function ColourMatchingPage({
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
 
-  function findEmployee(name: string | null) {
-    const trimmed = (name ?? "").trim().toLowerCase();
-    if (!trimmed) return undefined;
-    return (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === trimmed);
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -501,19 +518,34 @@ export default function ColourMatchingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
-                  <EmployeeNameSelect bare id="colour-matching-spv" value={form.spvName} onChange={(v) => setForm({ ...form, spvName: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id="colour-matching-spv"
+                    value={form.spvName}
+                    employeeId={form.spvNik}
+                    onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="SPV Colour Matching" widthPx={colWidths.spvColourMatching} onResizeStart={beginResize("spvColourMatching")}>
                   <EmployeeNameSelect
                     bare
                     id="colour-matching-spv-cm"
                     value={form.spvColourMatching}
-                    onChange={(v) => setForm({ ...form, spvColourMatching: v })}
+                    employeeId={form.spvColourMatchingNik}
+                    onChange={(v, nik) => setForm({ ...form, spvColourMatching: v, spvColourMatchingNik: nik ?? null })}
                     required
                   />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
-                  <EmployeeNameSelect bare id="colour-matching-leader" value={form.leaderName} onChange={(v) => setForm({ ...form, leaderName: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id="colour-matching-leader"
+                    value={form.leaderName}
+                    employeeId={form.leaderNik}
+                    onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
                   <input
@@ -546,7 +578,17 @@ export default function ColourMatchingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
-                  <EmployeeNameSelect bare id="colour-matching-member" value={memberInput} onChange={setMemberInput} placeholder="Nama anggota" />
+                  <EmployeeNameSelect
+                    bare
+                    id="colour-matching-member"
+                    value={memberInput}
+                    employeeId={memberNikInput}
+                    onChange={(v, nik) => {
+                      setMemberInput(v);
+                      setMemberNikInput(nik ?? null);
+                    }}
+                    placeholder="Nama anggota"
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -580,7 +622,7 @@ export default function ColourMatchingPage({
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m}
+                          {m.name}
                         </span>
                       ))}
                     </div>
@@ -653,24 +695,25 @@ export default function ColourMatchingPage({
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "spvName", label: "SPV Produksi", render: (r) => r.spvName },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvName)?.employeeId },
+                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => resolveEmployeeId(employees, r.spvName, r.spvNik) },
                 { key: "spvColourMatching", label: "SPV Colour Matching", render: (r) => r.spvColourMatching },
                 {
                   key: "spvColourMatchingEmployeeId",
                   label: "SPV Colour Matching Employee ID",
-                  render: (r) => findEmployee(r.spvColourMatching)?.employeeId,
+                  render: (r) => resolveEmployeeId(employees, r.spvColourMatching, r.spvColourMatchingNik),
                 },
                 { key: "leaderName", label: "Leader", render: (r) => r.leaderName },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leaderName)?.employeeId },
+                {
+                  key: "leaderEmployeeId",
+                  label: "Leader Employee ID",
+                  render: (r) => resolveEmployeeId(employees, r.leaderName, r.leaderNik),
+                },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.members ?? [];
-                    const list = members.map((m) => {
-                      const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId})` : m;
-                    });
+                    const members = normalizeMembers(r.members);
+                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
                     return [String(members.length), ...list].join(" | ");
                   },
                 },
@@ -766,7 +809,7 @@ export default function ColourMatchingPage({
                 {
                   key: "members",
                   label: "Member (Aftermix)",
-                  render: (r) => (r.members ?? []).join(", "),
+                  render: (r) => normalizeMembers(r.members).map((m) => m.name).join(", "),
                 },
                 { key: "qtyPerMan", label: "Qty/Man (Liter) (Aftermix)", render: (r) => r.qtyPerMan },
                 {

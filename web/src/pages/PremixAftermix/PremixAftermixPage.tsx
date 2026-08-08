@@ -5,7 +5,15 @@ import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  displayNameWithNik,
+  resolveEmployeeId,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import WeeklyScheduleCalendar, {
   ScheduleEvent,
@@ -69,7 +77,7 @@ interface QueueRow {
   codeMesin: string | null;
   spvProduksi: string;
   leader: string | null;
-  members: string[] | null;
+  members: (string | MemberEntry)[] | null;
   qtyAct: string | null;
   formReceived: string | null;
   start: string | null;
@@ -107,10 +115,12 @@ interface LogRow {
   plant: string | null;
   iuPlant: string | null;
   spvProduksi: string;
-  members: string[] | null;
+  spvProduksiNik: string | null;
+  members: (string | MemberEntry)[] | null;
   qtyPerMan: string | null;
   start: string | null;
   leader: string | null;
+  leaderNik: string | null;
   finish: string | null;
   codeTanki: string;
   formReceived: string | null;
@@ -128,10 +138,12 @@ const emptyForm = {
   plant: "",
   iuPlant: "",
   spvProduksi: "",
-  members: [] as string[],
+  spvProduksiNik: null as string | null,
+  members: [] as MemberEntry[],
   qtyPerMan: "",
   start: "",
   leader: "",
+  leaderNik: null as string | null,
   finish: "",
   codeTanki: "",
   formReceived: "",
@@ -234,6 +246,7 @@ export default function PremixAftermixPage({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -687,11 +700,13 @@ export default function PremixAftermixPage({
         // data baru akan menimpa/replace data lama saat Save.
         setEditingId(latest.id);
         setForm((f) => {
-          const members = f.members.length > 0 ? f.members : latest.members ?? [];
+          const members = f.members.length > 0 ? f.members : normalizeMembers(latest.members);
           return {
             ...f,
             spvProduksi: f.spvProduksi || latest.spvProduksi || "",
+            spvProduksiNik: f.spvProduksi ? f.spvProduksiNik : latest.spvProduksiNik ?? null,
             leader: f.leader || latest.leader || "",
+            leaderNik: f.leader ? f.leaderNik : latest.leaderNik ?? null,
             members,
             start: f.start || latest.start || "",
             finish: f.finish || latest.finish || "",
@@ -736,10 +751,11 @@ export default function PremixAftermixPage({
     }
     setError("");
     setForm((f) => {
-      const members = [...f.members, name];
+      const members = [...f.members, { name, nik: memberNikInput }];
       return { ...f, members, qtyPerMan: computeQtyPerMan(f.orderQty, members.length) };
     });
     setMemberNameInput("");
+    setMemberNikInput(null);
   }
 
   function removeLastMember() {
@@ -760,10 +776,12 @@ export default function PremixAftermixPage({
       plant: row.plant ?? "",
       iuPlant: row.iuPlant ?? "",
       spvProduksi: row.spvProduksi,
-      members: row.members ?? [],
+      spvProduksiNik: row.spvProduksiNik ?? null,
+      members: normalizeMembers(row.members),
       qtyPerMan: row.qtyPerMan ?? "",
       start: row.start ?? "",
       leader: row.leader ?? "",
+      leaderNik: row.leaderNik ?? null,
       finish: row.finish ?? "",
       codeTanki: row.codeTanki,
       formReceived: row.formReceived ?? "",
@@ -840,11 +858,6 @@ export default function PremixAftermixPage({
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
 
-  function findEmployee(name: string | null) {
-    const trimmed = (name ?? "").trim().toLowerCase();
-    if (!trimmed) return undefined;
-    return (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === trimmed);
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -927,10 +940,23 @@ export default function PremixAftermixPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
-                  <EmployeeNameSelect bare id={`${section}-spv`} value={form.spvProduksi} onChange={(v) => setForm({ ...form, spvProduksi: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id={`${section}-spv`}
+                    value={form.spvProduksi}
+                    employeeId={form.spvProduksiNik}
+                    onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
-                  <EmployeeNameSelect bare id={`${section}-leader`} value={form.leader} onChange={(v) => setForm({ ...form, leader: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id={`${section}-leader`}
+                    value={form.leader}
+                    employeeId={form.leaderNik}
+                    onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Qty/Man (Liter)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")}>
                   <input
@@ -942,7 +968,17 @@ export default function PremixAftermixPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
-                  <EmployeeNameSelect bare id={`${section}-member`} value={memberNameInput} onChange={setMemberNameInput} placeholder="Nama anggota" />
+                  <EmployeeNameSelect
+                    bare
+                    id={`${section}-member`}
+                    value={memberNameInput}
+                    employeeId={memberNikInput}
+                    onChange={(v, nik) => {
+                      setMemberNameInput(v);
+                      setMemberNikInput(nik ?? null);
+                    }}
+                    placeholder="Nama anggota"
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -976,7 +1012,7 @@ export default function PremixAftermixPage({
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m}
+                          {m.name}
                         </span>
                       ))}
                     </div>
@@ -1048,18 +1084,15 @@ export default function PremixAftermixPage({
                 { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "spvProduksi", label: "SPV Produksi", render: (r) => r.spvProduksi },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvProduksi)?.employeeId },
+                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => resolveEmployeeId(employees, r.spvProduksi, r.spvProduksiNik) },
                 { key: "leader", label: "Leader", render: (r) => r.leader },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leader)?.employeeId },
+                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => resolveEmployeeId(employees, r.leader, r.leaderNik) },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.members ?? [];
-                    const list = members.map((m) => {
-                      const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId})` : m;
-                    });
+                    const members = normalizeMembers(r.members);
+                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
                     return [String(members.length), ...list].join(" | ");
                   },
                 },
@@ -1224,7 +1257,7 @@ export default function PremixAftermixPage({
                 {
                   key: "members",
                   label: "Member (Milling)",
-                  render: (r) => (r.members ?? []).join(", "),
+                  render: (r) => normalizeMembers(r.members).map((m) => m.name).join(", "),
                 },
                 { key: "qtyAct", label: "Qty Act (Milling)", render: (r) => r.qtyAct },
                 {

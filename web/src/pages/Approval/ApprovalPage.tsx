@@ -25,9 +25,12 @@ interface ApprovalRow {
   iuPlant: string | null;
   codeTanki: string | null;
   mrpPic: string | null;
+  mrpPicNik: string | null;
   salesPic: string | null;
+  salesPicNik: string | null;
   prepareProduksi: string | null;
   sprayMan: string | null;
+  sprayManNik: string | null;
   wetSample: string | null;
   panel: string | null;
   lotCoa: string | null;
@@ -37,6 +40,7 @@ interface ApprovalRow {
   customer: string | null;
   custSegmen: string | null;
   techName: string | null;
+  techNameNik: string | null;
   finishApp: string | null;
   remark: string | null;
   inputBy: string;
@@ -101,9 +105,12 @@ const emptyForm = {
   iuPlant: "",
   codeTanki: "",
   mrpPic: "",
+  mrpPicNik: null as string | null,
   salesPic: "",
+  salesPicNik: null as string | null,
   prepareProduksi: "",
   sprayMan: "",
+  sprayManNik: null as string | null,
   wetSample: "",
   panel: "",
   lotCoa: "",
@@ -113,6 +120,7 @@ const emptyForm = {
   customer: "",
   custSegmen: "",
   techName: "",
+  techNameNik: null as string | null,
   finishApp: "",
   remark: "",
 };
@@ -285,15 +293,19 @@ export default function ApprovalPage({
           ...f,
           customer: f.customer || latest.customer || "",
           techName: f.techName || latest.techName || "",
+          techNameNik: f.techName ? f.techNameNik : latest.techNameNik ?? null,
           panel: f.panel || latest.panel || "",
           wetSample: f.wetSample || latest.wetSample || "",
           iuPlant: f.iuPlant || latest.iuPlant || "",
           codeTanki: f.codeTanki || latest.codeTanki || "",
           mrpPic: f.mrpPic || latest.mrpPic || "",
+          mrpPicNik: f.mrpPic ? f.mrpPicNik : latest.mrpPicNik ?? null,
           salesPic: f.salesPic || latest.salesPic || "",
+          salesPicNik: f.salesPic ? f.salesPicNik : latest.salesPicNik ?? null,
           remark: f.remark || latest.remark || "",
           prepareProduksi: f.prepareProduksi || latest.prepareProduksi || "",
           sprayMan: f.sprayMan || latest.sprayMan || "",
+          sprayManNik: f.sprayMan ? f.sprayManNik : latest.sprayManNik ?? null,
           lotCoa: f.lotCoa || latest.lotCoa || "",
           sendToTech: f.sendToTech || latest.sendToTech || "",
           technicalDateReceiving: f.technicalDateReceiving || latest.technicalDateReceiving || "",
@@ -378,9 +390,12 @@ export default function ApprovalPage({
       iuPlant: row.iuPlant ?? "",
       codeTanki: row.codeTanki ?? "",
       mrpPic: row.mrpPic ?? "",
+      mrpPicNik: row.mrpPicNik ?? null,
       salesPic: row.salesPic ?? "",
+      salesPicNik: row.salesPicNik ?? null,
       prepareProduksi: row.prepareProduksi ?? "",
       sprayMan: row.sprayMan ?? "",
+      sprayManNik: row.sprayManNik ?? null,
       wetSample: row.wetSample ?? "",
       panel: row.panel ?? "",
       lotCoa: row.lotCoa ?? "",
@@ -390,6 +405,7 @@ export default function ApprovalPage({
       customer: row.customer ?? "",
       custSegmen: row.custSegmen ?? "",
       techName: row.techName ?? "",
+      techNameNik: row.techNameNik ?? null,
       finishApp: row.finishApp ?? "",
       remark: row.remark ?? "",
     });
@@ -484,10 +500,22 @@ export default function ApprovalPage({
                   <TankSelect bare id="approval-tank-1" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
                 </ExcelField>
                 <ExcelField label="Mrp Pic" widthPx={colWidths.mrpPic} onResizeStart={beginResize("mrpPic")}>
-                  <EmployeeNameSelect bare id="approval-mrp-pic" value={form.mrpPic} onChange={(v) => setForm({ ...form, mrpPic: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="approval-mrp-pic"
+                    value={form.mrpPic}
+                    employeeId={form.mrpPicNik}
+                    onChange={(v, nik) => setForm({ ...form, mrpPic: v, mrpPicNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")}>
-                  <EmployeeNameSelect bare id="approval-sales-pic" value={form.salesPic} onChange={(v) => setForm({ ...form, salesPic: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="approval-sales-pic"
+                    value={form.salesPic}
+                    employeeId={form.salesPicNik}
+                    onChange={(v, nik) => setForm({ ...form, salesPic: v, salesPicNik: nik ?? null })}
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelSubHeader label="Production Input Column" color="production" />
@@ -496,7 +524,13 @@ export default function ApprovalPage({
                   <input type="datetime-local" value={toDateTimeLocalValue(form.prepareProduksi)} onChange={(e) => setForm({ ...form, prepareProduksi: e.target.value })} />
                 </ExcelField>
                 <ExcelField label="Spray Man" widthPx={colWidths.sprayMan} onResizeStart={beginResize("sprayMan")}>
-                  <EmployeeNameSelect bare id="approval-spray-man" value={form.sprayMan} onChange={(v) => setForm({ ...form, sprayMan: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="approval-spray-man"
+                    value={form.sprayMan}
+                    employeeId={form.sprayManNik}
+                    onChange={(v, nik) => setForm({ ...form, sprayMan: v, sprayManNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Wet Sample" widthPx={colWidths.wetSample} onResizeStart={beginResize("wetSample")}>
                   <input value={form.wetSample} onChange={(e) => setForm({ ...form, wetSample: e.target.value })} />
@@ -534,7 +568,13 @@ export default function ApprovalPage({
                   <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
                 </ExcelField>
                 <ExcelField label="Tech Name" widthPx={colWidths.techName} onResizeStart={beginResize("techName")}>
-                  <EmployeeNameSelect bare id="approval-tech-name" value={form.techName} onChange={(v) => setForm({ ...form, techName: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="approval-tech-name"
+                    value={form.techName}
+                    employeeId={form.techNameNik}
+                    onChange={(v, nik) => setForm({ ...form, techName: v, techNameNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Finish App" widthPx={colWidths.finishApp} onResizeStart={beginResize("finishApp")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.finishApp)} onChange={(e) => setForm({ ...form, finishApp: e.target.value })} />

@@ -4,7 +4,15 @@ import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  normalizeMembers,
+  displayNameWithNik,
+  resolveEmployeeId,
+  MemberEntry,
+} from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
@@ -56,10 +64,12 @@ interface HistoryRow {
   plant: string | null;
   iuPlant: string | null;
   spvName: string;
-  members: string[] | null;
+  spvNik: string | null;
+  members: (string | MemberEntry)[] | null;
   formReceived: string | null;
   start: string | null;
   leaderName: string | null;
+  leaderNik: string | null;
   qtyPerMan: string | null;
   totalQty: string | null;
   qtyPcs: string | null;
@@ -138,13 +148,15 @@ const emptyForm = {
   plant: "",
   iuPlant: "",
   spvName: "",
-  members: [] as string[],
+  spvNik: null as string | null,
+  members: [] as MemberEntry[],
   qtyPerMan: "",
   totalQty: "",
   qtyPcs: "",
   formReceived: "",
   start: "",
   leaderName: "",
+  leaderNik: null as string | null,
   finish: "",
   codeTanki: "",
   remark: "",
@@ -170,6 +182,7 @@ export default function PackingPage({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
+  const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -291,13 +304,15 @@ export default function PackingPage({
         // data baru akan menimpa/replace data lama saat Save.
         setEditingId(latest.id);
         setForm((f) => {
-          const members = f.members.length > 0 ? f.members : latest.members ?? [];
+          const members = f.members.length > 0 ? f.members : normalizeMembers(latest.members);
           const qtyPcs = f.qtyPcs || latest.qtyPcs || "";
           const totalQty = f.totalQty || latest.totalQty || "";
           return {
             ...f,
             spvName: f.spvName || latest.spvName || "",
+            spvNik: f.spvName ? f.spvNik : latest.spvNik ?? null,
             leaderName: f.leaderName || latest.leaderName || "",
+            leaderNik: f.leaderName ? f.leaderNik : latest.leaderNik ?? null,
             members,
             formReceived: f.formReceived || latest.formReceived || "",
             start: f.start || latest.start || "",
@@ -381,10 +396,11 @@ export default function PackingPage({
     }
     setError("");
     setForm((f) => {
-      const members = [...f.members, name];
+      const members = [...f.members, { name, nik: memberNikInput }];
       return { ...f, members, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, f.totalQty, members.length) };
     });
     setMemberNameInput("");
+    setMemberNikInput(null);
   }
 
   function removeLastMember() {
@@ -405,13 +421,15 @@ export default function PackingPage({
       plant: row.plant ?? "",
       iuPlant: row.iuPlant ?? "",
       spvName: row.spvName,
-      members: row.members ?? [],
+      spvNik: row.spvNik ?? null,
+      members: normalizeMembers(row.members),
       qtyPerMan: row.qtyPerMan ?? "",
       totalQty: row.totalQty ?? "",
       qtyPcs: row.qtyPcs ?? "",
       formReceived: row.formReceived ?? "",
       start: row.start ?? "",
       leaderName: row.leaderName ?? "",
+      leaderNik: row.leaderNik ?? null,
       finish: row.finish ?? "",
       codeTanki: row.codeTanki,
       remark: row.remark ?? "",
@@ -454,12 +472,6 @@ export default function PackingPage({
   const filteredQueue = (queueQuery.data ?? []).filter((row) =>
     queueSearch.trim() ? row.order.toLowerCase().includes(queueSearch.trim().toLowerCase()) : true
   );
-
-  function findEmployee(name: string | null) {
-    const trimmed = (name ?? "").trim().toLowerCase();
-    if (!trimmed) return undefined;
-    return (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === trimmed);
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -542,10 +554,23 @@ export default function PackingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
-                  <EmployeeNameSelect bare id="packing-spv" value={form.spvName} onChange={(v) => setForm({ ...form, spvName: v })} required />
+                  <EmployeeNameSelect
+                    bare
+                    id="packing-spv"
+                    value={form.spvName}
+                    employeeId={form.spvNik}
+                    onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
-                  <EmployeeNameSelect bare id="packing-leader" value={form.leaderName} onChange={(v) => setForm({ ...form, leaderName: v })} />
+                  <EmployeeNameSelect
+                    bare
+                    id="packing-leader"
+                    value={form.leaderName}
+                    employeeId={form.leaderNik}
+                    onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                  />
                 </ExcelField>
                 <ExcelField label="Qty/Pcs" color="orange" widthPx={colWidths.qtyPcs} onResizeStart={beginResize("qtyPcs")}>
                   <input
@@ -576,7 +601,17 @@ export default function PackingPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
-                  <EmployeeNameSelect bare id="packing-member" value={memberNameInput} onChange={setMemberNameInput} placeholder="Nama anggota" />
+                  <EmployeeNameSelect
+                    bare
+                    id="packing-member"
+                    value={memberNameInput}
+                    employeeId={memberNikInput}
+                    onChange={(v, nik) => {
+                      setMemberNameInput(v);
+                      setMemberNikInput(nik ?? null);
+                    }}
+                    placeholder="Nama anggota"
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -610,7 +645,7 @@ export default function PackingPage({
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m}
+                          {m.name}
                         </span>
                       ))}
                     </div>
@@ -684,18 +719,15 @@ export default function PackingPage({
                 { key: "plant", label: "Plant", render: (r) => r.plant },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "spvName", label: "SPV Produksi", render: (r) => r.spvName },
-                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => findEmployee(r.spvName)?.employeeId },
+                { key: "spvEmployeeId", label: "SPV Employee ID", render: (r) => resolveEmployeeId(employees, r.spvName, r.spvNik) },
                 { key: "leaderName", label: "Leader", render: (r) => r.leaderName },
-                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => findEmployee(r.leaderName)?.employeeId },
+                { key: "leaderEmployeeId", label: "Leader Employee ID", render: (r) => resolveEmployeeId(employees, r.leaderName, r.leaderNik) },
                 {
                   key: "members",
                   label: "Member",
                   render: (r) => {
-                    const members = r.members ?? [];
-                    const list = members.map((m) => {
-                      const emp = findEmployee(m);
-                      return emp ? `${m} (${emp.employeeId})` : m;
-                    });
+                    const members = normalizeMembers(r.members);
+                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
                     return [String(members.length), ...list].join(" | ");
                   },
                 },

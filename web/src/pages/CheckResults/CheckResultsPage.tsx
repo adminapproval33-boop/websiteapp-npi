@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect from "../../components/TankSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions, resolveEmployeeId } from "../../components/EmployeeNameSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
@@ -25,6 +25,7 @@ interface ParamRow {
   start: string;
   finish: string;
   pic: string;
+  picNik: string | null;
 }
 
 interface AppearanceFile {
@@ -88,6 +89,7 @@ interface HistoryFlatRow {
   finish: string;
   result: string;
   pic: string;
+  picNik: string | null;
   inputBy: string;
   raw: CheckRow;
 }
@@ -113,6 +115,7 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         finish: p?.finish ?? "",
         result: p?.result ?? "",
         pic: p?.pic ?? "",
+        picNik: p?.picNik ?? null,
         inputBy: r.inputBy,
         raw: r,
       });
@@ -131,6 +134,7 @@ function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
     start: "",
     finish: "",
     pic: "",
+    picNik: null,
   };
 }
 
@@ -331,6 +335,32 @@ export default function CheckResultsPage({
     }
   }
 
+  /** Ambil ULANG Information dari Product Spek terkait Material Number ini,
+   * TANPA menimpa `params` -- dipakai saat Edit record yang SUDAH ADA (beda
+   * dari `loadSpecForMaterial` yg juga menimpa Spec Parameters, cocok utk
+   * Order BARU). Information SENGAJA tidak disimpan di CheckResult sendiri,
+   * selalu di-refresh live dari Product Spek supaya kalau Product Spek-nya
+   * diedit belakangan (mis. ditambah info penanganan khusus), Check Results
+   * yang sudah tersimpan pun ikut menampilkan versi terbaru begitu dibuka
+   * lagi -- bukan cuma cuplikan lama saat Save (2026-08-08, instruksi
+   * eksplisit user: info Product Spek harus tersampaikan ke Check Results). */
+  async function refreshSpecInformation(materialNumber: string | null | undefined) {
+    const matNo = (materialNumber ?? "").trim();
+    if (!matNo) {
+      setLinkedSpecId(null);
+      setSpecInformation(null);
+      return;
+    }
+    try {
+      const res = await api.get<{ success: boolean; data: LinkedSpec }>(`/product-specs/by-material/${encodeURIComponent(matNo)}`);
+      setLinkedSpecId(res.data.specId);
+      setSpecInformation(res.data.information ?? null);
+    } catch {
+      setLinkedSpecId(null);
+      setSpecInformation(null);
+    }
+  }
+
   /** Cek apakah Order ini sudah pernah diinput & masuk ke History -- null kalau belum pernah. */
   async function findExistingCheckResult(order: string): Promise<CheckRow | null> {
     try {
@@ -428,11 +458,11 @@ export default function CheckResultsPage({
         start: p.start ?? "",
         finish: p.finish ?? "",
         pic: p.pic ?? "",
+        picNik: p.picNik ?? null,
       }))
     );
     setLastSavedCheckId(row.checkId);
-    setLinkedSpecId(null);
-    setSpecInformation(null);
+    void refreshSpecInformation(row.materialNumber);
     setSpecStatus("found");
     setTab("input");
     setMessage("");
@@ -653,7 +683,13 @@ export default function CheckResultsPage({
                         <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
                         <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
                         <td>
-                          <EmployeeNameSelect bare id={`pic-${idx}`} value={p.pic} onChange={(v) => updateParam(idx, { pic: v })} />
+                          <EmployeeNameSelect
+                            bare
+                            id={`pic-${idx}`}
+                            value={p.pic}
+                            employeeId={p.picNik}
+                            onChange={(v, nik) => updateParam(idx, { pic: v, picNik: nik ?? null })}
+                          />
                         </td>
                       </tr>
                     );
@@ -792,7 +828,8 @@ export default function CheckResultsPage({
                   label: "PIC",
                   render: (r) => {
                     if (!r.pic) return "-";
-                    const emp = (employees ?? []).find((e) => e.fullName.trim().toLowerCase() === r.pic.trim().toLowerCase());
+                    const id = resolveEmployeeId(employees, r.pic, r.picNik);
+                    const emp = id ? (employees ?? []).find((e) => e.employeeId === id) : undefined;
                     return emp ? `${r.pic} (${emp.employeeId} · ${emp.departemen ?? "-"})` : r.pic;
                   },
                 },

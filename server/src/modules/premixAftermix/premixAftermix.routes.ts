@@ -1,11 +1,13 @@
 import { Router, Response } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
+import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -41,10 +43,14 @@ const saveSchema = z
     plant: z.string().trim().min(1, "Plant wajib diisi."),
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     spvProduksi: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
-    members: z.array(z.string()).optional(),
+    spvProduksiNik: z.string().trim().optional().nullable(),
+    members: z
+      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+      .optional(),
     qtyPerMan: z.string().optional(),
     start: optionalDate,
     leader: z.string().trim().min(1, "Leader wajib diisi."),
+    leaderNik: z.string().trim().optional().nullable(),
     finish: optionalDate,
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     formReceived: requiredDate,
@@ -414,8 +420,19 @@ premixAftermixRouter.post(
         return;
       }
     }
+    const [spvProduksiNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvProduksiNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
     const created = await prisma.premixAftermixLog.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: {
+        ...parsed.data,
+        spvProduksiNik,
+        leaderNik,
+        members: members as unknown as Prisma.InputJsonValue,
+        inputBy: req.auth!.nik,
+      },
     });
     res.status(201).json({ success: true, message: "Data berhasil disimpan.", data: created });
   })
@@ -439,7 +456,15 @@ premixAftermixRouter.put(
     const existing = await prisma.premixAftermixLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");
 
-    const updated = await prisma.premixAftermixLog.update({ where: { id }, data: parsed.data });
+    const [spvProduksiNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvProduksiNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const updated = await prisma.premixAftermixLog.update({
+      where: { id },
+      data: { ...parsed.data, spvProduksiNik, leaderNik, members: members as unknown as Prisma.InputJsonValue },
+    });
     res.json({ success: true, message: "Data berhasil diperbarui.", data: updated });
   })
 );

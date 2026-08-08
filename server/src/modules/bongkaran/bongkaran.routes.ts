@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 
 export const bongkaranRouter = Router();
 bongkaranRouter.use(requireAuth);
@@ -32,8 +34,12 @@ const saveSchema = z.object({
   orderQty: z.string().optional(),
   plant: z.string().optional(),
   spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
+  spvNik: z.string().trim().optional().nullable(),
   leaderName: z.string().optional(),
-  members: z.array(z.string()).optional(),
+  leaderNik: z.string().trim().optional().nullable(),
+  members: z
+    .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+    .optional(),
   formReceived: optionalDate,
   /// Milestone "Selesai" tahap ini -- begitu terisi, kolom "Proses" di
   /// Production Order Monitoring berubah jadi "Produksi - PQE" (lihat
@@ -133,8 +139,13 @@ bongkaranRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
+    const [spvNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
     const created = await prisma.bongkaranLog.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: { ...parsed.data, spvNik, leaderNik, members: members as unknown as Prisma.InputJsonValue, inputBy: req.auth!.nik },
     });
     res.status(201).json({ success: true, message: "Data Bongkaran berhasil disimpan.", data: created });
   })
@@ -157,7 +168,15 @@ bongkaranRouter.put(
     const existing = await prisma.bongkaranLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Bongkaran tidak ditemukan.");
 
-    const updated = await prisma.bongkaranLog.update({ where: { id }, data: parsed.data });
+    const [spvNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const updated = await prisma.bongkaranLog.update({
+      where: { id },
+      data: { ...parsed.data, spvNik, leaderNik, members: members as unknown as Prisma.InputJsonValue },
+    });
     res.json({ success: true, message: "Data Bongkaran berhasil diperbarui.", data: updated });
   })
 );

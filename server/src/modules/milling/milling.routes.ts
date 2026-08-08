@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
+import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
@@ -47,9 +49,13 @@ const saveSchema = z
     start: optionalDate,
     finish: optionalDate,
     spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
+    spvProduksiNik: z.string().trim().optional().nullable(),
     leader: z.string().trim().min(1, "Leader wajib diisi."),
+    leaderNik: z.string().trim().optional().nullable(),
     qtyAct: z.string().optional(),
-    members: z.array(z.string()).optional(),
+    members: z
+      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+      .optional(),
     fineness: readings10,
     visco: readings10,
     suhu: readings10,
@@ -255,7 +261,20 @@ millingRouter.post(
       });
       return;
     }
-    const created = await prisma.millingLog.create({ data: { ...parsed.data, inputBy: req.auth!.nik } });
+    const [spvProduksiNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvProduksiNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const created = await prisma.millingLog.create({
+      data: {
+        ...parsed.data,
+        spvProduksiNik,
+        leaderNik,
+        members: members as unknown as Prisma.InputJsonValue,
+        inputBy: req.auth!.nik,
+      },
+    });
     res.status(201).json({ success: true, message: "Data Milling berhasil disimpan.", data: created });
   })
 );
@@ -278,7 +297,15 @@ millingRouter.put(
     const existing = await prisma.millingLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Milling tidak ditemukan.");
 
-    const updated = await prisma.millingLog.update({ where: { id }, data: parsed.data });
+    const [spvProduksiNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvProduksiNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const updated = await prisma.millingLog.update({
+      where: { id },
+      data: { ...parsed.data, spvProduksiNik, leaderNik, members: members as unknown as Prisma.InputJsonValue },
+    });
     res.json({ success: true, message: "Data Milling berhasil diperbarui.", data: updated });
   })
 );

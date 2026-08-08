@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
+import { sanitizeNik } from "../../lib/employeeNik";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -28,9 +29,12 @@ const saveSchema = z
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     mrpPic: z.string().trim().min(1, "Mrp Pic wajib diisi."),
+    mrpPicNik: z.string().trim().optional().nullable(),
     salesPic: z.string().trim().min(1, "Sales Pic wajib diisi."),
+    salesPicNik: z.string().trim().optional().nullable(),
     prepareProduksi: optionalDate,
     sprayMan: z.string().optional(),
+    sprayManNik: z.string().trim().optional().nullable(),
     wetSample: z.string().optional(),
     panel: z.string().optional(),
     lotCoa: optionalDate,
@@ -40,6 +44,7 @@ const saveSchema = z
     customer: z.string().optional(),
     custSegmen: z.string().optional(),
     techName: z.string().optional(),
+    techNameNik: z.string().trim().optional().nullable(),
     finishApp: optionalDate,
     remark: z.string().optional(),
   })
@@ -346,8 +351,14 @@ approvalRouter.post(
     // Antrian Approval" TETAP ada sbg daftar bantu/saran (lihat GET /queue di
     // bawah, query independen, tidak terpengaruh perubahan ini) -- cuma
     // sudah bukan lagi syarat wajib utk bisa Save baris baru.
+    const [mrpPicNik, salesPicNik, sprayManNik, techNameNik] = await Promise.all([
+      sanitizeNik(parsed.data.mrpPicNik),
+      sanitizeNik(parsed.data.salesPicNik),
+      sanitizeNik(parsed.data.sprayManNik),
+      sanitizeNik(parsed.data.techNameNik),
+    ]);
     const created = await prisma.approvalSchedule.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: { ...parsed.data, mrpPicNik, salesPicNik, sprayManNik, techNameNik, inputBy: req.auth!.nik },
     });
     res.status(201).json({ success: true, message: "Data Approval berhasil disimpan.", data: created });
   })
@@ -366,7 +377,16 @@ approvalRouter.put(
     const existing = await prisma.approvalSchedule.findUnique({ where: { approvalId } });
     if (!existing) throw new HttpError(404, "Data Approval tidak ditemukan.");
 
-    const updated = await prisma.approvalSchedule.update({ where: { approvalId }, data: parsed.data });
+    const [mrpPicNik, salesPicNik, sprayManNik, techNameNik] = await Promise.all([
+      sanitizeNik(parsed.data.mrpPicNik),
+      sanitizeNik(parsed.data.salesPicNik),
+      sanitizeNik(parsed.data.sprayManNik),
+      sanitizeNik(parsed.data.techNameNik),
+    ]);
+    const updated = await prisma.approvalSchedule.update({
+      where: { approvalId },
+      data: { ...parsed.data, mrpPicNik, salesPicNik, sprayManNik, techNameNik },
+    });
     res.json({ success: true, message: "Data Approval berhasil diperbarui.", data: updated });
   })
 );

@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
+import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 
 export const colourMatchingRouter = Router();
 colourMatchingRouter.use(requireAuth);
@@ -42,9 +44,14 @@ const saveSchema = z
     start: optionalDate,
     finish: optionalDate,
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
+    spvNik: z.string().trim().optional().nullable(),
     spvColourMatching: z.string().trim().min(1, "Nama SPV Colour Matching wajib diisi."),
+    spvColourMatchingNik: z.string().trim().optional().nullable(),
     leaderName: z.string().trim().min(1, "Nama Leader wajib diisi."),
-    members: z.array(z.string()).optional(),
+    leaderNik: z.string().trim().optional().nullable(),
+    members: z
+      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+      .optional(),
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {
@@ -237,8 +244,21 @@ colourMatchingRouter.post(
       });
       return;
     }
+    const [spvNik, spvColourMatchingNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.spvColourMatchingNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
     const created = await prisma.colourMatchingLog.create({
-      data: { ...parsed.data, inputBy: req.auth!.nik },
+      data: {
+        ...parsed.data,
+        spvNik,
+        spvColourMatchingNik,
+        leaderNik,
+        members: members as unknown as Prisma.InputJsonValue,
+        inputBy: req.auth!.nik,
+      },
     });
     res.status(201).json({ success: true, message: "Data Colour Matching berhasil disimpan.", data: created });
   })
@@ -262,7 +282,22 @@ colourMatchingRouter.put(
     const existing = await prisma.colourMatchingLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Colour Matching tidak ditemukan.");
 
-    const updated = await prisma.colourMatchingLog.update({ where: { id }, data: parsed.data });
+    const [spvNik, spvColourMatchingNik, leaderNik, members] = await Promise.all([
+      sanitizeNik(parsed.data.spvNik),
+      sanitizeNik(parsed.data.spvColourMatchingNik),
+      sanitizeNik(parsed.data.leaderNik),
+      sanitizeMembers(parsed.data.members),
+    ]);
+    const updated = await prisma.colourMatchingLog.update({
+      where: { id },
+      data: {
+        ...parsed.data,
+        spvNik,
+        spvColourMatchingNik,
+        leaderNik,
+        members: members as unknown as Prisma.InputJsonValue,
+      },
+    });
     res.json({ success: true, message: "Data Colour Matching berhasil diperbarui.", data: updated });
   })
 );

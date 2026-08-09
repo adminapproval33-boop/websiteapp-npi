@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, Outlet } from "react-router-dom";
 import Topbar from "./Topbar";
 import Sidebar from "./Sidebar";
+import ChatWidget from "../components/ChatWidget";
 
 export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,9 +25,10 @@ export default function AppLayout() {
         </main>
       </div>
       <footer className="statusbar">
-        <span>Websiteapp NPI — Website Edition</span>
+        <span>Websiteapp-NPI Website Edition.&nbsp;&nbsp;&nbsp;Developed by teguh.agri@nipseapaint.com</span>
         <span>Status: Online</span>
       </footer>
+      <ChatWidget />
     </div>
   );
 }

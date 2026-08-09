@@ -597,7 +597,7 @@ export default function AdminQcPage() {
                 </thead>
                 <tbody>
                   {params.map((p, idx) => {
-                    const verdict = evaluateSpec(p.standard, p.result);
+                    const verdict = evaluateSpec(p.standard, p.result, p.parameter);
                     return (
                       <tr key={idx}>
                         <td style={{ width: 40 }}>{p.no}</td>

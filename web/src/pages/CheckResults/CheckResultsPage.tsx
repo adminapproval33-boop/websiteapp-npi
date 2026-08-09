@@ -26,6 +26,8 @@ interface ParamRow {
   finish: string;
   pic: string;
   picNik: string | null;
+  /** Saran dari tim teknikal kalau Item Check ini "NG" -- mau diapakan produknya. */
+  suggestion: string;
 }
 
 interface AppearanceFile {
@@ -90,6 +92,7 @@ interface HistoryFlatRow {
   result: string;
   pic: string;
   picNik: string | null;
+  suggestion: string;
   inputBy: string;
   raw: CheckRow;
 }
@@ -116,6 +119,7 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         result: p?.result ?? "",
         pic: p?.pic ?? "",
         picNik: p?.picNik ?? null,
+        suggestion: p?.suggestion ?? "",
         inputBy: r.inputBy,
         raw: r,
       });
@@ -135,6 +139,7 @@ function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
     finish: "",
     pic: "",
     picNik: null,
+    suggestion: "",
   };
 }
 
@@ -163,6 +168,7 @@ const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
   result: 90,
   verdict: 90,
   pic: 110,
+  suggestion: 200,
 };
 
 /** Lebar default (px) kolom "Order .. Remark" -- dipakai sbg fallback sebelum user pernah drag-resize. */
@@ -192,7 +198,7 @@ const HEADER_TABLE_COL_ROWS: string[][] = [
 /** Header tabel Spec Parameters dengan drag-handle di kanan utk mengubah lebar kolom bebas. */
 function ResizableHeader({ width, onResizeStart, children }: { width: number; onResizeStart: (e: ReactMouseEvent) => void; children: ReactNode }) {
   return (
-    <th style={{ width, position: "relative" }}>
+    <th style={{ width, position: "relative", textAlign: "center" }}>
       {children}
       <div
         onMouseDown={onResizeStart}
@@ -460,6 +466,7 @@ export default function CheckResultsPage({
         finish: p.finish ?? "",
         pic: p.pic ?? "",
         picNik: p.picNik ?? null,
+        suggestion: p.suggestion ?? "",
       }))
     );
     setLastSavedCheckId(row.checkId);
@@ -664,24 +671,25 @@ export default function CheckResultsPage({
                     <ResizableHeader width={specColWidths.start} onResizeStart={beginColResize("start")}>Start</ResizableHeader>
                     <ResizableHeader width={specColWidths.finish} onResizeStart={beginColResize("finish")}>Finish</ResizableHeader>
                     <ResizableHeader width={specColWidths.pic} onResizeStart={beginColResize("pic")}>PIC</ResizableHeader>
+                    <ResizableHeader width={specColWidths.suggestion} onResizeStart={beginColResize("suggestion")}>Suggestion</ResizableHeader>
                   </tr>
                 </thead>
                 <tbody>
                   {params.map((p, idx) => {
-                    const verdict = evaluateSpec(p.standard, p.result);
+                    const verdict = evaluateSpec(p.standard, p.result, p.parameter);
                     return (
                       <tr key={idx}>
                         <td style={{ width: 40 }}>{p.no}</td>
                         <td>{p.parameter}</td>
-                        <td>{p.standard || "-"}</td>
+                        <td style={{ textAlign: "center" }}>{p.standard || "-"}</td>
                         <td>
                           <input
-                            style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%" }}
+                            style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%", textAlign: "center" }}
                             value={p.result}
                             onChange={(e) => updateParam(idx, { result: e.target.value })}
                           />
                         </td>
-                        <td>{SPEC_VERDICT_LABEL[verdict]}</td>
+                        <td style={{ textAlign: "center" }}>{SPEC_VERDICT_LABEL[verdict]}</td>
                         <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
                         <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
                         <td>
@@ -693,12 +701,20 @@ export default function CheckResultsPage({
                             onChange={(v, nik) => updateParam(idx, { pic: v, picNik: nik ?? null })}
                           />
                         </td>
+                        <td>
+                          <input
+                            style={{ width: "100%" }}
+                            placeholder="Acc or improve"
+                            value={p.suggestion}
+                            onChange={(e) => updateParam(idx, { suggestion: e.target.value })}
+                          />
+                        </td>
                       </tr>
                     );
                   })}
                   {params.length === 0 && (
                     <tr>
-                      <td colSpan={8}>Belum ada Spec Parameters.</td>
+                      <td colSpan={9}>Belum ada Spec Parameters.</td>
                     </tr>
                   )}
                 </tbody>
@@ -807,7 +823,7 @@ export default function CheckResultsPage({
                   key: "result",
                   label: "Result",
                   render: (r) => {
-                    const verdict = evaluateSpec(r.spec, r.result);
+                    const verdict = evaluateSpec(r.spec, r.result, r.itemCheck);
                     return (
                       <span style={{ background: SPEC_VERDICT_COLOR[verdict], padding: "1px 6px", borderRadius: 3, display: "inline-block" }}>
                         {r.result || "-"}
@@ -820,10 +836,10 @@ export default function CheckResultsPage({
                   key: "verdict",
                   label: "Verdict",
                   render: (r) => {
-                    const verdict = evaluateSpec(r.spec, r.result);
+                    const verdict = evaluateSpec(r.spec, r.result, r.itemCheck);
                     return <span>{SPEC_VERDICT_LABEL[verdict]}</span>;
                   },
-                  csvValue: (r) => SPEC_VERDICT_LABEL[evaluateSpec(r.spec, r.result)],
+                  csvValue: (r) => SPEC_VERDICT_LABEL[evaluateSpec(r.spec, r.result, r.itemCheck)],
                 },
                 {
                   key: "pic",
@@ -835,6 +851,7 @@ export default function CheckResultsPage({
                     return emp ? `${r.pic} (${emp.employeeId} · ${emp.departemen ?? "-"})` : r.pic;
                   },
                 },
+                { key: "suggestion", label: "Suggestion", render: (r) => r.suggestion || "-" },
                 { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 { key: "lotCoa", label: "Lot COA", render: (r) => r.lotCoa },
                 {

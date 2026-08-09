@@ -645,7 +645,7 @@ export default function ProductionOrderDashboardPage() {
                 </thead>
                 <tbody>
                   {qcDetailQuery.data.parameters.map((p) => {
-                    const verdict = evaluateSpec(p.standard, p.result);
+                    const verdict = evaluateSpec(p.standard, p.result, p.parameter);
                     return (
                       <tr key={p.no}>
                         <td>{p.parameter}</td>

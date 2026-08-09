@@ -22,4 +22,11 @@ export const env = {
   // beda kebutuhan dari batas lampiran dokumen biasa (MAX_UPLOAD_MB) yang sengaja
   // dijaga kecil.
   maxImportMb: Number(process.env.MAX_IMPORT_MB ?? 500),
+  // Mode maintenance (2026-08-09, instruksi eksplisit user): kalau "true",
+  // HANYA nik = maintenanceAllowedNik yang boleh login/pakai sesi -- semua
+  // user lain langsung ditolak di /login DAN di-logout paksa lewat requireAuth
+  // (lihat middleware/auth.ts) meskipun sesi mereka masih valid. Matikan lagi
+  // dengan set MAINTENANCE_MODE=false lalu restart server.
+  maintenanceMode: (process.env.MAINTENANCE_MODE ?? "false").toLowerCase() === "true",
+  maintenanceAllowedNik: process.env.MAINTENANCE_ALLOWED_NIK ?? "",
 };

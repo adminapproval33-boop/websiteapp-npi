@@ -8,6 +8,7 @@ import { requireAuth, AuthedRequest } from "../../middleware/auth";
 import { clearFailures, isLocked, registerFailure } from "../../lib/loginAttempts";
 import { createImageUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { HttpError } from "../../middleware/errorHandler";
+import { env } from "../../lib/env";
 
 export const authRouter = Router();
 
@@ -31,6 +32,17 @@ authRouter.post(
       return;
     }
     const { nik, password } = parsed.data;
+
+    // Mode maintenance (2026-08-09, instruksi eksplisit user): tolak SEMUA
+    // login selain nik yang di-whitelist, sebelum cek password sekalipun --
+    // supaya tidak ada celah timing/pesan yang membedakan NIK valid vs tidak.
+    if (env.maintenanceMode && nik !== env.maintenanceAllowedNik) {
+      res.status(423).json({
+        success: false,
+        message: "Sistem sedang dalam maintenance. Silakan coba lagi nanti.",
+      });
+      return;
+    }
 
     if (isLocked(nik)) {
       res.status(429).json({

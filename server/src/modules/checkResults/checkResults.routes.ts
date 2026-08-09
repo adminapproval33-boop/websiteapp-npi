@@ -43,6 +43,7 @@ const parameterSchema = z
     finish: optionalDate,
     pic: z.string().optional(),
     picNik: z.string().trim().optional().nullable(),
+    suggestion: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     // Begitu Result sebuah Item Check diisi, Start/Finish/PIC baris itu WAJIB

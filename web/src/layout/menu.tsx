@@ -4,7 +4,6 @@ import { MENU_KEY_BY_PATH, getMenuLevel } from "../lib/menuAccess";
 import UserManagementPage from "../pages/Users/UserManagementPage";
 import MasterDataPage from "../pages/MasterData/MasterDataPage";
 import HomePage from "../pages/Home/HomePage";
-import PostsPage from "../pages/Posts/PostsPage";
 import ComingSoonPage from "../pages/ComingSoon/ComingSoonPage";
 import PremixAftermixPage from "../pages/PremixAftermix/PremixAftermixPage";
 import MillingPage from "../pages/Milling/MillingPage";
@@ -57,7 +56,6 @@ const OUT_OF_SCOPE =
   "Menu ini juga masih berupa placeholder di versi Apps Script sebelumnya (belum pernah diimplementasikan), jadi di luar cakupan migrasi saat ini.";
 
 export const menuTree: MenuNode[] = [
-  leaf("Papan Info", "/papan-info", <PostsPage />),
   group("Dashboard", [
     leaf("Dashboard Produktivitas", "/dashboard/produktivitas", <ProduktivitasDashboardPage />),
     leaf("Dashboard Approval", "/dashboard/approval", <ApprovalDashboardPage />),

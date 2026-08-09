@@ -4,7 +4,9 @@ import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import SymbolPicker from "../../components/SymbolPicker";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
+import { useActiveFieldInsert } from "../../lib/useActiveFieldInsert";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -103,6 +105,7 @@ export default function ProductSpekPage() {
   const [search, setSearch] = useState("");
   const [detailSpec, setDetailSpec] = useState<SpecRow | null>(null);
   const [showRemovePicker, setShowRemovePicker] = useState(false);
+  const { registerFocus, insert: insertSymbol } = useActiveFieldInsert();
 
   // Lebar kolom "No / Item Check / Spec" & "Material Number / Description" bisa di-drag bebas oleh user (px).
   const { widths: specColWidths, startResize: startResizeSpecCol } = useColResize([60, 320, 180]);
@@ -323,6 +326,7 @@ export default function ProductSpekPage() {
                       <input
                         value={form.materialDescription}
                         onChange={(e) => setForm({ ...form, materialDescription: e.target.value })}
+                        onFocus={(e) => registerFocus(e.currentTarget, (v) => setForm((f) => ({ ...f, materialDescription: v })))}
                         required
                         style={{ width: "100%" }}
                       />
@@ -335,6 +339,14 @@ export default function ProductSpekPage() {
             <h3 className="pp-section-title" style={{ marginTop: 18 }}>
               Spec Parameters
             </h3>
+            {/* Spacer selebar kolom No + Item Check supaya tombol Simbol jatuh
+                tepat sejajar dgn kolom Spec di tabel bawah (2026-08-09,
+                instruksi eksplisit user) -- ikut lebar kolom yg bisa
+                di-drag-resize (specColWidths), bukan angka tetap. */}
+            <div style={{ display: "flex", marginBottom: 6 }}>
+              <div style={{ width: specColWidths[0] + specColWidths[1], flexShrink: 0 }} />
+              <SymbolPicker onInsert={insertSymbol} />
+            </div>
             <div style={{ overflowX: "auto" }}>
               <table
                 className="data-table"
@@ -368,10 +380,22 @@ export default function ProductSpekPage() {
                     <tr key={idx}>
                       <td style={{ width: specColWidths[0], overflow: "hidden" }}>{p.no}</td>
                       <td style={{ width: specColWidths[1], overflow: "hidden" }}>
-                        <input value={p.itemCheck} onChange={(e) => updateParam(idx, { itemCheck: e.target.value })} required style={{ width: "100%" }} />
+                        <input
+                          value={p.itemCheck}
+                          onChange={(e) => updateParam(idx, { itemCheck: e.target.value })}
+                          onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { itemCheck: v }))}
+                          required
+                          style={{ width: "100%" }}
+                        />
                       </td>
                       <td style={{ width: specColWidths[2], overflow: "hidden" }}>
-                        <input value={p.standardSpec} onChange={(e) => updateParam(idx, { standardSpec: e.target.value })} placeholder='mis. "40-45" atau "<=28"' style={{ width: "100%" }} />
+                        <input
+                          value={p.standardSpec}
+                          onChange={(e) => updateParam(idx, { standardSpec: e.target.value })}
+                          onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { standardSpec: v }))}
+                          placeholder='mis. "40-45" atau "<=28"'
+                          style={{ width: "100%" }}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -403,7 +427,12 @@ export default function ProductSpekPage() {
 
             <div className="field" style={{ marginTop: 14 }}>
               <label>Information</label>
-              <textarea rows={6} value={form.information} onChange={(e) => setForm({ ...form, information: e.target.value })} />
+              <textarea
+                rows={6}
+                value={form.information}
+                onChange={(e) => setForm({ ...form, information: e.target.value })}
+                onFocus={(e) => registerFocus(e.currentTarget, (v) => setForm((f) => ({ ...f, information: v })))}
+              />
             </div>
 
             {error && <p className="error-text">{error}</p>}

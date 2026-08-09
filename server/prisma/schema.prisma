@@ -655,6 +655,11 @@ model CheckResultParameter {
   finish    DateTime?
   pic       String?
   picNik    String?
+  /// Saran dari tim teknikal (2026-08-09, instruksi eksplisit user) --
+  /// dipakai kalau Item Check ini "NG" (lihat lib/specEval.ts di frontend),
+  /// menampung rekomendasi produk ini mau diapakan. Bebas kosong, TIDAK
+  /// divalidasi wajib walau verdict-nya NG.
+  suggestion String?
 
   @@index([checkId])
   @@map("check_result_parameters")
@@ -877,4 +882,23 @@ model PostLike {
 
   @@unique([postId, nik])
   @@map("post_likes")
+}
+
+/// Chat 1-ke-1 antar user (2026-08-09, instruksi eksplisit user) -- dipicu
+/// dari daftar "User Online" di Topbar (lihat GET /chat/online, yang
+/// menganggap "online" = punya baris Session dgn expiresAt belum lewat).
+/// `senderNik`/`receiverNik` SENGAJA field bebas (bukan relasi FK ke User),
+/// pola sama dgn authorNik di Post.
+model Message {
+  id          String    @id @default(uuid())
+  senderNik   String
+  receiverNik String
+  content     String
+  timestamp   DateTime  @default(now())
+  /// null = belum dibaca. Diisi otomatis saat penerima buka GET /chat/:nik.
+  readAt      DateTime?
+
+  @@index([senderNik, receiverNik, timestamp])
+  @@index([receiverNik, senderNik, timestamp])
+  @@map("messages")
 }

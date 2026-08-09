@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { SessionError, validateSession } from "../lib/session";
 import { MENU_LABELS, MenuKey, getMenuLevel } from "../lib/menuAccess";
+import { env } from "../lib/env";
 
 export interface AuthedRequest extends Request {
   auth?: {
@@ -33,6 +34,13 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
     const user = await prisma.user.findUnique({ where: { nik } });
     if (!user) {
       throw new SessionError("Akun Anda sudah tidak terdaftar. Silakan login ulang.");
+    }
+    // Mode maintenance (2026-08-09): putus paksa sesi user lain yang SEDANG
+    // aktif juga, bukan cuma blokir login baru -- request berikutnya dari
+    // mereka langsung dianggap sesi berakhir, walau token-nya sendiri masih
+    // valid di DB.
+    if (env.maintenanceMode && user.nik !== env.maintenanceAllowedNik) {
+      throw new SessionError("Sistem sedang dalam maintenance. Silakan coba lagi nanti.");
     }
     req.auth = {
       nik: user.nik,

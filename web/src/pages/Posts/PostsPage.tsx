@@ -4,6 +4,7 @@ import { api, ApiError, fileUrl } from "../../api/client";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
 import { formatDateTime } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
+import Avatar from "../../components/Avatar";
 
 interface PostAttachment {
   id: number;
@@ -33,46 +34,6 @@ interface PostRow extends PostAuthor {
   likeCount: number;
   likedByMe: boolean;
   comments: PostCommentRow[];
-}
-
-function initialsOf(name: string): string {
-  return name
-    .split(" ")
-    .map((s) => s[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
-
-function Avatar({ name, avatarPath, size = 36 }: { name: string; avatarPath: string | null; size?: number }) {
-  if (avatarPath) {
-    return (
-      <img
-        src={fileUrl(avatarPath)}
-        alt={name}
-        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
-      />
-    );
-  }
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: "#e0e7ff",
-        color: "#4338ca",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 700,
-        fontSize: Math.round(size * 0.4),
-        flexShrink: 0,
-      }}
-    >
-      {initialsOf(name || "?")}
-    </div>
-  );
 }
 
 /**
@@ -159,7 +120,7 @@ export default function PostsPage() {
   const posts = postsQuery.data ?? [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 640, margin: "0 auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="panel">
         <div className="panel-header">Papan Info</div>
         <div className="panel-body">
@@ -169,7 +130,7 @@ export default function PostsPage() {
               <AutoGrowTextarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                placeholder="Tulis sesuatu untuk dibagikan..."
+                placeholder="Bagikan ide atau apa yang sedang Anda kerjakan..."
                 style={{ flex: 1 }}
               />
             </div>

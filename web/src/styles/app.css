@@ -103,6 +103,10 @@
     @apply p-5;
   }
 
+  .chat-contact-row:hover {
+    @apply bg-slate-100;
+  }
+
   .field-grid {
     @apply grid gap-3;
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));

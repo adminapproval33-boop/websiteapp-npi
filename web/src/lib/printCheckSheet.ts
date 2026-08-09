@@ -45,9 +45,9 @@ export function openCheckSheetPrintWindow(data: PrintCheckSheetData) {
   const rowsHtml = data.parameters
     .map(
       (p) =>
-        `<tr><td>${p.no}</td><td>${esc(p.parameter)}</td><td>${esc(p.standard)}</td><td>${esc(p.result)}</td><td>${esc(
-          p.pic
-        )}</td></tr>`
+        `<tr><td>${p.no}</td><td>${esc(p.parameter)}</td><td style="text-align:center">${esc(p.standard)}</td><td style="text-align:center">${esc(
+          p.result
+        )}</td><td>${esc(p.pic)}</td></tr>`
     )
     .join("");
 
@@ -92,7 +92,7 @@ th{background:#fff;color:#000;font-weight:700;}
 <tr><th style="width:11%">IU Plant *</th><td style="width:22%">${esc(data.iuPlant)}</td><th style="width:11%">Code Tanki *</th><td style="width:22%">${esc(data.codeTanki)}</td><th style="width:11%">Remark *</th><td style="width:23%">${esc(data.remark)}</td></tr>
 </tbody></table>
 <div class="section-title">Spec Parameters</div>
-<table><thead><tr><th style="width:6%">No</th><th style="width:40%">Item Check</th><th style="width:18%">Spec</th><th style="width:18%">Result</th><th style="width:18%">PIC</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+<table><thead><tr><th style="width:6%">No</th><th style="width:40%">Item Check</th><th style="width:18%;text-align:center">Spec</th><th style="width:18%;text-align:center">Result</th><th style="width:18%">PIC</th></tr></thead><tbody>${rowsHtml}</tbody></table>
 <div class="bottom-grid">
 <div class="bottom-left">
 <table class="ruled-table"><tbody>

@@ -621,6 +621,13 @@ model CheckResult {
   materialNumber      String?
   materialDescription String?
   batch               String?
+  /// Baris Order/Material Number/Batch KEDUA yang independen dari yang di
+  /// atas (2026-08-09, instruksi eksplisit user) -- field bebas terpisah,
+  /// TIDAK mempengaruhi Spec Parameters/IU Plant/dst yang tetap mengacu ke
+  /// `order`/`materialNumber` yang pertama.
+  order2              String?
+  materialNumber2     String?
+  batch2              String?
   customer            String?
   custSegmen          String?
   orderQty            String?

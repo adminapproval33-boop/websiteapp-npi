@@ -36,15 +36,15 @@ function packingInspectionBoxHtml(data: PrintPackingKeepSampelData): string {
 <td class="label">Filter</td><td class="colon">:</td><td class="val">&nbsp;</td>
 </tr>
 <tr>
-<td class="label">Material Number</td><td class="colon">:</td><td class="val">${esc(data.materialNumber)}</td>
+<td class="label">Material Number Pack</td><td class="colon">:</td><td class="val">${esc(data.materialNumber)}</td>
 <td class="label">Jumlah Paking</td><td class="colon">:</td><td class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;x&nbsp;</td>
 </tr>
 <tr>
-<td class="label">Batch</td><td class="colon">:</td><td class="val">${esc(data.batch)}</td>
+<td class="label">Batch Pack</td><td class="colon">:</td><td class="val">${esc(data.batch)}</td>
 <td class="label"></td><td class="colon"></td><td class="val">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;x&nbsp;</td>
 </tr>
 <tr>
-<td class="label">Order</td><td class="colon">:</td><td class="val">${esc(data.order)}</td>
+<td class="label">Order Pack</td><td class="colon">:</td><td class="val">${esc(data.order)}</td>
 <td class="label">Opr Paking</td><td class="colon">:</td><td class="val">&nbsp;</td>
 </tr>
 <tr>
@@ -72,12 +72,12 @@ function keepSampelBoxHtml(data: PrintPackingKeepSampelData): string {
 <td class="label">Customer</td><td class="colon">:</td><td class="val" colspan="3">${esc(data.customer)}</td>
 </tr>
 <tr class="divider">
-<td class="label">Material Number</td><td class="colon">:</td><td class="val">${esc(data.materialNumber)}</td>
+<td class="label">Material Number Pack</td><td class="colon">:</td><td class="val">${esc(data.materialNumber)}</td>
 <td class="label">No Lot</td><td class="colon">:</td><td class="val">&nbsp;</td>
 </tr>
 <tr>
-<td class="label">Batch</td><td class="colon">:</td><td class="val">${esc(data.batch)}</td>
-<td class="label">Order</td><td class="colon">:</td><td class="val">${esc(data.order)}</td>
+<td class="label">Batch Pack</td><td class="colon">:</td><td class="val">${esc(data.batch)}</td>
+<td class="label">Order Pack</td><td class="colon">:</td><td class="val">${esc(data.order)}</td>
 </tr>
 <tr class="divider">
 <td class="label">Pembuat</td><td class="colon">:</td><td class="val">&nbsp;</td>

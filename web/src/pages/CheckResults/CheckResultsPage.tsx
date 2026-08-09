@@ -43,6 +43,9 @@ interface CheckRow {
   materialNumber: string | null;
   materialDescription: string | null;
   batch: string | null;
+  order2: string | null;
+  materialNumber2: string | null;
+  batch2: string | null;
   customer: string | null;
   custSegmen: string | null;
   orderQty: string | null;
@@ -80,7 +83,11 @@ interface HistoryFlatRow {
   checkId: string;
   timestamp: string;
   order: string;
+  materialNumber: string | null;
   batch: string | null;
+  order2: string | null;
+  materialNumber2: string | null;
+  batch2: string | null;
   materialDescription: string | null;
   customer: string | null;
   iuPlant: string | null;
@@ -107,7 +114,11 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         checkId: r.checkId,
         timestamp: r.timestamp,
         order: r.order,
+        materialNumber: r.materialNumber,
         batch: r.batch,
+        order2: r.order2,
+        materialNumber2: r.materialNumber2,
+        batch2: r.batch2,
         materialDescription: r.materialDescription,
         customer: r.customer,
         iuPlant: r.iuPlant,
@@ -148,6 +159,9 @@ const emptyForm = {
   materialNumber: "",
   materialDescription: "",
   batch: "",
+  order2: "",
+  materialNumber2: "",
+  batch2: "",
   orderQty: "",
   plant: "",
   iuPlant: "",
@@ -177,6 +191,9 @@ const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
   materialNumber: 140,
   materialDescription: 280,
   batch: 120,
+  order2: 140,
+  materialNumber2: 140,
+  batch2: 120,
   orderQty: 120,
   plant: 100,
   iuPlant: 140,
@@ -191,6 +208,7 @@ const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
  * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah. */
 const HEADER_TABLE_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
+  ["order2", "materialNumber2", "batch2"],
   ["iuPlant", "codeTanki", "customer", "custSegmen", "lotCoa"],
   ["remark"],
 ];
@@ -415,6 +433,16 @@ export default function CheckResultsPage({
     }
   }
 
+  /** Baris "Order, Material Number, Batch" KEDUA (2026-08-09, instruksi
+   * eksplisit user) -- independen dari baris Order pertama di atasnya.
+   * SENGAJA cuma isi materialNumber2/batch2 dari hasil pencarian, TIDAK ikut
+   * memicu efek samping baris pertama (load Spec Parameters, deteksi Order
+   * sudah pernah diinput, saran IU Plant/Code Tanki, dst) -- baris ini
+   * murni field independen, bukan Order utama check result ini. */
+  function handleOrder2Found(data: OrderRefData) {
+    setForm((f) => ({ ...f, materialNumber2: data.materialNumber ?? "", batch2: data.batch ?? "" }));
+  }
+
   // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
   // sama di PremixAftermixPage.tsx.
   useEffect(() => {
@@ -445,6 +473,9 @@ export default function CheckResultsPage({
       materialNumber: row.materialNumber ?? "",
       materialDescription: row.materialDescription ?? "",
       batch: row.batch ?? "",
+      order2: row.order2 ?? "",
+      materialNumber2: row.materialNumber2 ?? "",
+      batch2: row.batch2 ?? "",
       orderQty: row.orderQty ?? "",
       plant: row.plant ?? "",
       iuPlant: row.iuPlant ?? "",
@@ -563,10 +594,10 @@ export default function CheckResultsPage({
             <div className="excel-block">
               {headerGuideX !== null && <div className="col-align-guide" style={{ left: headerGuideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")}>
+                <ExcelField label="Order Pack" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderColResize("materialNumber")}>
+                <ExcelField label="Material Number Pack" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderColResize("materialNumber")}>
                   <input value={form.materialNumber} readOnly />
                 </ExcelField>
                 <ExcelField
@@ -576,7 +607,7 @@ export default function CheckResultsPage({
                 >
                   <input value={form.materialDescription} readOnly />
                 </ExcelField>
-                <ExcelField label="Batch" widthPx={headerColWidths.batch} onResizeStart={beginHeaderColResize("batch")}>
+                <ExcelField label="Batch Pack" widthPx={headerColWidths.batch} onResizeStart={beginHeaderColResize("batch")}>
                   <input value={form.batch} readOnly />
                 </ExcelField>
                 <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderColResize("orderQty")}>
@@ -584,6 +615,17 @@ export default function CheckResultsPage({
                 </ExcelField>
                 <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderColResize("plant")}>
                   <input value={form.plant} readOnly />
+                </ExcelField>
+              </ExcelRow>
+              <ExcelRow>
+                <ExcelField label="Order Loose" widthPx={headerColWidths.order2} onResizeStart={beginHeaderColResize("order2")}>
+                  <OrderLookup bare value={form.order2} onChange={(v) => setForm({ ...form, order2: v })} onFound={handleOrder2Found} />
+                </ExcelField>
+                <ExcelField label="Material Number Loose" widthPx={headerColWidths.materialNumber2} onResizeStart={beginHeaderColResize("materialNumber2")}>
+                  <input value={form.materialNumber2} readOnly />
+                </ExcelField>
+                <ExcelField label="Batch Loose" widthPx={headerColWidths.batch2} onResizeStart={beginHeaderColResize("batch2")}>
+                  <input value={form.batch2} readOnly />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -610,8 +652,9 @@ export default function CheckResultsPage({
               </ExcelRow>
             </div>
             <p style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              * IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum bisa Save atau Print. Order, Material
-              Number, Material Description, Batch, Order Qty, dan Plant otomatis terisi dari hasil pencarian Order. Tarik
+              * IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum bisa Save atau Print. Order Pack, Material
+              Number Pack, Material Description, Batch Pack, Order Qty, dan Plant otomatis terisi dari hasil pencarian
+              Order Pack; Material Number Loose &amp; Batch Loose otomatis terisi dari hasil pencarian Order Loose. Tarik
               garis di sisi kanan tiap kolom untuk mengubah lebarnya.
             </p>
 
@@ -800,8 +843,12 @@ export default function CheckResultsPage({
                   render: (r) => formatDateTime(r.timestamp),
                   csvValue: (r) => toExcelDateTimeString(r.timestamp),
                 },
-                { key: "order", label: "Order", render: (r) => r.order },
-                { key: "batch", label: "Batch", render: (r) => r.batch },
+                { key: "order", label: "Order Pack", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number Pack", render: (r) => r.materialNumber || "-" },
+                { key: "batch", label: "Batch Pack", render: (r) => r.batch },
+                { key: "order2", label: "Order Loose", render: (r) => r.order2 || "-" },
+                { key: "materialNumber2", label: "Material Number Loose", render: (r) => r.materialNumber2 || "-" },
+                { key: "batch2", label: "Batch Loose", render: (r) => r.batch2 || "-" },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
                 { key: "customer", label: "Customer", render: (r) => r.customer },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },

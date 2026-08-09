@@ -5,7 +5,9 @@ import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import SymbolPicker from "../../components/SymbolPicker";
+import SpecVerdictCell from "../../components/SpecVerdictCell";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
+import { isSpecFormatValid } from "../../lib/specEval";
 import { useActiveFieldInsert } from "../../lib/useActiveFieldInsert";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
@@ -31,6 +33,7 @@ interface SpecRow {
 function emptyParam(no: number): SpecParameter {
   return { no, itemCheck: "", standardSpec: "", unit: "", remark: "" };
 }
+
 
 /** Lebar kolom tabel yang bisa di-drag bebas oleh user (dipakai utk tabel
  * Material Number/Description & Spec Parameters -- 1 hook dipakai 2x). */
@@ -108,7 +111,7 @@ export default function ProductSpekPage() {
   const { registerFocus, insert: insertSymbol } = useActiveFieldInsert();
 
   // Lebar kolom "No / Item Check / Spec" & "Material Number / Description" bisa di-drag bebas oleh user (px).
-  const { widths: specColWidths, startResize: startResizeSpecCol } = useColResize([60, 320, 180]);
+  const { widths: specColWidths, startResize: startResizeSpecCol } = useColResize([60, 320, 180, 100]);
   const { widths: headerColWidths, startResize: startResizeHeaderCol } = useColResize([280, 420]);
 
   const historyQuery = useQuery({
@@ -339,22 +342,44 @@ export default function ProductSpekPage() {
             <h3 className="pp-section-title" style={{ marginTop: 18 }}>
               Spec Parameters
             </h3>
-            {/* Spacer selebar kolom No + Item Check supaya tombol Simbol jatuh
-                tepat sejajar dgn kolom Spec di tabel bawah (2026-08-09,
-                instruksi eksplisit user) -- ikut lebar kolom yg bisa
-                di-drag-resize (specColWidths), bukan angka tetap. */}
-            <div style={{ display: "flex", marginBottom: 6 }}>
-              <div style={{ width: specColWidths[0] + specColWidths[1], flexShrink: 0 }} />
-              <SymbolPicker onInsert={insertSymbol} />
-            </div>
-            <div style={{ overflowX: "auto" }}>
+            {/* Freeze Panes (2026-08-09, instruksi eksplisit user) -- tabel
+                dibungkus kotak scroll sendiri (maxHeight) SUPAYA position:sticky
+                di bawah ini benar-benar nempel ke ATAS KOTAK INI saat scroll,
+                bukan ke .panel pembungkusnya (.panel py overflow:hidden global
+                di app.css, yg justru bikin sticky tidak jalan kalau areanya
+                bukan scroll container-nya sendiri). Tombol Simbol SENGAJA
+                dipindah jadi baris PALING ATAS di dalam <thead> yg sama (bukan
+                elemen sticky terpisah dgn hitungan offset top manual) --
+                dengan begitu, tombol Simbol & header kolom selalu ikut
+                nempel bareng sbg 1 unit, tidak perlu itung tinggi pxl toolbar
+                secara terpisah supaya tidak nabrak/ada celah. */}
+            <div style={{ overflow: "auto", maxHeight: 440, border: "1px solid var(--border)", borderRadius: 8 }}>
               <table
                 className="data-table"
-                style={{ width: specColWidths[0] + specColWidths[1] + specColWidths[2], tableLayout: "fixed" }}
+                style={{ width: specColWidths[0] + specColWidths[1] + specColWidths[2] + specColWidths[3], tableLayout: "fixed" }}
               >
-                <thead>
+                {/* `table-layout:fixed` menentukan lebar kolom dari baris
+                    PERTAMA tabel -- karena baris pertama sekarang baris
+                    toolbar Simbol (1 sel colSpan=4, bukan 4 sel per-kolom),
+                    lebar per-kolom jadi kacau tanpa <colgroup> eksplisit ini
+                    (2026-08-09, laporan bug eksplisit user: kolom "No" jadi
+                    tidak simetris/kelebaran). */}
+                <colgroup>
+                  {specColWidths.map((w, idx) => (
+                    <col key={idx} style={{ width: w }} />
+                  ))}
+                </colgroup>
+                <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                   <tr>
-                    {(["No", "Item Check", "Spec"] as const).map((label, idx) => (
+                    <td colSpan={4} style={{ background: "#fff", borderBottom: "1px solid var(--border)", padding: "6px 8px" }}>
+                      <div style={{ display: "flex" }}>
+                        <div style={{ width: specColWidths[0] + specColWidths[1], flexShrink: 0 }} />
+                        <SymbolPicker onInsert={insertSymbol} />
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    {(["No", "Item Check", "Spec", "Verdict"] as const).map((label, idx) => (
                       <th key={label} style={{ width: specColWidths[idx], position: "relative", userSelect: "none" }}>
                         {label}
                         <div
@@ -395,6 +420,13 @@ export default function ProductSpekPage() {
                           onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { standardSpec: v }))}
                           placeholder='mis. "40-45" atau "<=28"'
                           style={{ width: "100%" }}
+                        />
+                      </td>
+                      <td style={{ width: specColWidths[3], overflow: "hidden", textAlign: "center" }}>
+                        <SpecVerdictCell
+                          standardSpec={p.standardSpec}
+                          itemCheck={p.itemCheck}
+                          onApplySuggestion={(v) => updateParam(idx, { standardSpec: v })}
                         />
                       </td>
                     </tr>
@@ -473,6 +505,17 @@ export default function ProductSpekPage() {
                 { key: "no", label: "No", render: (r) => r.parameter.no },
                 { key: "itemCheck", label: "Item Check", render: (r) => r.parameter.itemCheck },
                 { key: "standardSpec", label: "Standard/Spec", render: (r) => r.parameter.standardSpec || "-" },
+                {
+                  key: "verdict",
+                  label: "Verdict",
+                  render: (r) => <SpecVerdictCell standardSpec={r.parameter.standardSpec} itemCheck={r.parameter.itemCheck} />,
+                  csvValue: (r) =>
+                    r.parameter.standardSpec.trim()
+                      ? isSpecFormatValid(r.parameter.standardSpec, r.parameter.itemCheck)
+                        ? "Valid"
+                        : "Invalid"
+                      : "-",
+                },
                 { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 {
                   key: "actions",
@@ -566,6 +609,7 @@ export default function ProductSpekPage() {
                 <th>No</th>
                 <th>Item Check</th>
                 <th>Standard/Spec</th>
+                <th>Verdict</th>
                 <th>Unit</th>
                 <th>Remark</th>
               </tr>
@@ -576,6 +620,9 @@ export default function ProductSpekPage() {
                   <td>{p.no}</td>
                   <td>{p.itemCheck}</td>
                   <td>{p.standardSpec || "-"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <SpecVerdictCell standardSpec={p.standardSpec} itemCheck={p.itemCheck} />
+                  </td>
                   <td>{p.unit || "-"}</td>
                   <td>{p.remark || "-"}</td>
                 </tr>

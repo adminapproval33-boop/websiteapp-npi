@@ -16,6 +16,8 @@ export interface PrintCheckSheetData {
   materialNumber: string;
   materialDescription: string;
   batch: string;
+  materialNumber2: string;
+  batch2: string;
   orderQty: string;
   plant: string;
   lotCoa: string;
@@ -80,16 +82,19 @@ th{background:#fff;color:#000;font-weight:700;}
 <div class="doc-code">Doc No. F-D TQP-FI-011<div class="print-date">Dicetak: ${esc(formatDateTime(new Date()))}</div></div>
 </div>
 <table style="margin-bottom:0"><tbody>
-<tr><th style="width:14%">Material Number</th><td style="width:36%">${esc(data.materialNumber)}</td><th style="width:14%">Material Description</th><td style="width:36%">${esc(data.materialDescription)}</td></tr>
+<tr><th style="width:11%">Order Pack</th><td style="width:22%">${esc(data.order)}</td><th style="width:11%">Material Description</th><td style="width:56%">${esc(data.materialDescription)}</td></tr>
 </tbody></table>
 <table style="margin-bottom:0"><tbody>
-<tr><th style="width:9%">Order</th><td style="width:16%">${esc(data.order)}</td><th style="width:9%">Batch</th><td style="width:16%">${esc(data.batch)}</td><th style="width:9%">Order Qty</th><td style="width:16%">${esc(data.orderQty)}</td><th style="width:9%">Plant</th><td style="width:16%">${esc(data.plant)}</td></tr>
+<tr><th style="width:11%">Material Number Pack</th><td style="width:22%">${esc(data.materialNumber)}</td><th style="width:11%">Batch Pack</th><td style="width:22%">${esc(data.batch)}</td><th style="width:11%">Order Qty</th><td style="width:23%">${esc(data.orderQty)}</td></tr>
+</tbody></table>
+<table style="margin-bottom:0"><tbody>
+<tr><th style="width:11%">Material Number Loose</th><td style="width:22%">${esc(data.materialNumber2)}</td><th style="width:11%">Batch Loose</th><td style="width:22%">${esc(data.batch2)}</td><th style="width:11%">Plant</th><td style="width:23%">${esc(data.plant)}</td></tr>
 </tbody></table>
 <table style="margin-bottom:0"><tbody>
 <tr><th style="width:11%">Customer</th><td style="width:22%">${esc(data.customer)}</td><th style="width:11%">Cust Segmen</th><td style="width:22%">${esc(data.custSegmen)}</td><th style="width:11%">Lot COA</th><td style="width:23%">${esc(data.lotCoa)}</td></tr>
 </tbody></table>
 <table><tbody>
-<tr><th style="width:11%">IU Plant *</th><td style="width:22%">${esc(data.iuPlant)}</td><th style="width:11%">Code Tanki *</th><td style="width:22%">${esc(data.codeTanki)}</td><th style="width:11%">Remark *</th><td style="width:23%">${esc(data.remark)}</td></tr>
+<tr><th style="width:11%">IU Plant</th><td style="width:22%">${esc(data.iuPlant)}</td><th style="width:11%">Code Tanki</th><td style="width:22%">${esc(data.codeTanki)}</td><th style="width:11%">Remark</th><td style="width:23%">${esc(data.remark)}</td></tr>
 </tbody></table>
 <div class="section-title">Spec Parameters</div>
 <table><thead><tr><th style="width:6%">No</th><th style="width:40%">Item Check</th><th style="width:18%;text-align:center">Spec</th><th style="width:18%;text-align:center">Result</th><th style="width:18%">PIC</th></tr></thead><tbody>${rowsHtml}</tbody></table>

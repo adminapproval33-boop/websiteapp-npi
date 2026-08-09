@@ -10,7 +10,7 @@ import "../../styles/printLabel.css";
 
 /** Paste/Kepala Warna/Assorted -- dropdown manual (2026-08-04, instruksi
  * eksplisit user), tidak ada sumber datanya di modul manapun. */
-const PASTE_TYPE_OPTIONS = ["Paste", "Kepala Warna", "Assorted"];
+const PASTE_TYPE_OPTIONS = ["Paste", "Kepala Warna", "Assorted", "Kode PASTE Tidak Ada"];
 
 /** Code Tanki di menu ini SATU-SATUNYA yg boleh berisi gabungan "A / B"
  * (autofill dari MillingLog.codeTanki1/2 yg beda, lihat getLatestCrossModule

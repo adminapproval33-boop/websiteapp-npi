@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -15,6 +15,7 @@ import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -125,6 +126,8 @@ export default function BongkaranPage({
     "bongkaranColWidths",
     BONGKARAN_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, BONGKARAN_COL_ROWS) });
 
   const historyQuery = useQuery({
     queryKey: ["bongkaran-history"],
@@ -358,27 +361,27 @@ export default function BongkaranPage({
             <ExcelBlock title="Production & MRP Schedule » Bongkaran, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Material description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                <ExcelField label="Material description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
+                <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")} {...gridNav("spvName")}>
                   <EmployeeNameSelect
                     bare
                     id="bongkaran-spv"
@@ -388,7 +391,7 @@ export default function BongkaranPage({
                     required
                   />
                 </ExcelField>
-                <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
+                <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")} {...gridNav("leaderName")}>
                   <EmployeeNameSelect
                     bare
                     id="bongkaran-leader"
@@ -397,19 +400,19 @@ export default function BongkaranPage({
                     onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
+                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")} {...gridNav("formReceived")}>
                   <input
                     type="datetime-local"
                     value={form.formReceived}
                     onChange={(e) => setForm({ ...form, formReceived: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Send To PQE" widthPx={colWidths.sendToPqe} onResizeStart={beginResize("sendToPqe")}>
+                <ExcelField label="Send To PQE" widthPx={colWidths.sendToPqe} onResizeStart={beginResize("sendToPqe")} {...gridNav("sendToPqe")}>
                   <input type="datetime-local" value={form.sendToPqe} onChange={(e) => setForm({ ...form, sendToPqe: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
+                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")} {...gridNav("member")}>
                   <EmployeeNameSelect
                     bare
                     id="bongkaran-member"

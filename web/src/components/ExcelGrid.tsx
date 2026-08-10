@@ -1,10 +1,10 @@
-import { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 
 export type ExcelColor = "orange" | "green" | "blue" | "gray";
 
 export function ExcelBlock({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="excel-block">
+    <div className="excel-block" data-nav-scope="">
       <div className="excel-section-title">{title}</div>
       {children}
     </div>
@@ -31,6 +31,8 @@ export function ExcelField({
   basis,
   widthPx,
   onResizeStart,
+  navKey,
+  onKeyDown,
   children,
 }: {
   label: string;
@@ -40,6 +42,13 @@ export function ExcelField({
   widthPx?: number;
   /** Jika diisi, tampilkan drag-handle di sisi kanan sel utk mengubah `widthPx`. */
   onResizeStart?: (e: ReactMouseEvent) => void;
+  /** Key sel ini di struktur `*_COL_ROWS` halaman pemanggil (SAMA dgn key yg
+   * dipakai `widthPx`/`onResizeStart` di atas) -- dipakai `onKeyDown` (lihat
+   * lib/excelGridNav.ts) utk tahu sel mana yg sedang fokus saat tombol panah
+   * ditekan. Wajib diisi bareng `onKeyDown` supaya navigasi panah ala Excel
+   * jalan; boleh dikosongkan kalau sel ini tidak ikut navigasi panah. */
+  navKey?: string;
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
   children: ReactNode;
 }) {
   const style: CSSProperties | undefined = widthPx
@@ -51,7 +60,7 @@ export function ExcelField({
     : undefined;
 
   return (
-    <div className={`excel-cell${color ? ` excel-${color}` : ""}`} style={style}>
+    <div className={`excel-cell${color ? ` excel-${color}` : ""}`} style={style} data-navkey={navKey} onKeyDown={onKeyDown}>
       <div className="excel-cell-label">{label}</div>
       <div className="excel-cell-body">{children}</div>
       {onResizeStart && (

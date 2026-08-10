@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -13,6 +13,7 @@ import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/
 import { openCheckSheetPrintWindow } from "../../lib/printCheckSheet";
 import { openPackingKeepSampelPrintWindow } from "../../lib/printPackingKeepSampel";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -266,6 +267,19 @@ export default function CheckResultsPage({
     guideX: headerGuideX,
     reset: resetHeaderColWidths,
   } = useResizableColWidths(HEADER_TABLE_DEFAULT_WIDTHS, "checkResultsHeaderColWidths", HEADER_TABLE_COL_ROWS);
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, HEADER_TABLE_COL_ROWS) });
+
+  /** Navigasi panah ala Excel utk tabel Spec Parameters (baris DINAMIS per
+   * `params`, beda dari form header di atas yg jumlah field-nya tetap) --
+   * "No"/"Item Check"/"Spec"/"Verdict" bukan target navigasi krn cuma teks
+   * biasa (bukan input), 2026-08-10 instruksi eksplisit user. */
+  const SPEC_ROW_COLUMNS = ["result", "start", "finish", "pic", "suggestion"] as const;
+  const specColRows = params.map((_, idx) => SPEC_ROW_COLUMNS.map((col) => `spec-${col}-${idx}`));
+  const specGridNav = (col: (typeof SPEC_ROW_COLUMNS)[number], idx: number) => ({
+    "data-navkey": `spec-${col}-${idx}`,
+    onKeyDown: (e: KeyboardEvent<HTMLTableCellElement>) => handleExcelGridKeyNav(e, specColRows),
+  });
 
   function resetAllColWidths() {
     resetHeaderColWidths();
@@ -591,62 +605,63 @@ export default function CheckResultsPage({
                 ↺ Reset Lebar Kolom
               </button>
             </div>
-            <div className="excel-block">
+            <div className="excel-block" data-nav-scope="">
               {headerGuideX !== null && <div className="col-align-guide" style={{ left: headerGuideX }} />}
               <ExcelRow>
-                <ExcelField label="Order Pack" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")}>
+                <ExcelField label="Order Pack" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number Pack" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderColResize("materialNumber")}>
+                <ExcelField label="Material Number Pack" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderColResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} readOnly />
                 </ExcelField>
                 <ExcelField
                   label="Material Description"
                   widthPx={headerColWidths.materialDescription}
                   onResizeStart={beginHeaderColResize("materialDescription")}
+                  {...gridNav("materialDescription")}
                 >
                   <input value={form.materialDescription} readOnly />
                 </ExcelField>
-                <ExcelField label="Batch Pack" widthPx={headerColWidths.batch} onResizeStart={beginHeaderColResize("batch")}>
+                <ExcelField label="Batch Pack" widthPx={headerColWidths.batch} onResizeStart={beginHeaderColResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} readOnly />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderColResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderColResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} readOnly />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderColResize("plant")}>
+                <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderColResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} readOnly />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Order Loose" widthPx={headerColWidths.order2} onResizeStart={beginHeaderColResize("order2")}>
+                <ExcelField label="Order Loose" widthPx={headerColWidths.order2} onResizeStart={beginHeaderColResize("order2")} {...gridNav("order2")}>
                   <OrderLookup bare value={form.order2} onChange={(v) => setForm({ ...form, order2: v })} onFound={handleOrder2Found} />
                 </ExcelField>
-                <ExcelField label="Material Number Loose" widthPx={headerColWidths.materialNumber2} onResizeStart={beginHeaderColResize("materialNumber2")}>
+                <ExcelField label="Material Number Loose" widthPx={headerColWidths.materialNumber2} onResizeStart={beginHeaderColResize("materialNumber2")} {...gridNav("materialNumber2")}>
                   <input value={form.materialNumber2} readOnly />
                 </ExcelField>
-                <ExcelField label="Batch Loose" widthPx={headerColWidths.batch2} onResizeStart={beginHeaderColResize("batch2")}>
+                <ExcelField label="Batch Loose" widthPx={headerColWidths.batch2} onResizeStart={beginHeaderColResize("batch2")} {...gridNav("batch2")}>
                   <input value={form.batch2} readOnly />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant *" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderColResize("iuPlant")}>
+                <ExcelField label="IU Plant *" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderColResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id="icr-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} required />
                 </ExcelField>
-                <ExcelField label="Code Tanki *" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderColResize("codeTanki")}>
+                <ExcelField label="Code Tanki *" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderColResize("codeTanki")} {...gridNav("codeTanki")}>
                   <TankSelect bare id="icr-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required />
                 </ExcelField>
-                <ExcelField label="Customer *" widthPx={headerColWidths.customer} onResizeStart={beginHeaderColResize("customer")}>
+                <ExcelField label="Customer *" widthPx={headerColWidths.customer} onResizeStart={beginHeaderColResize("customer")} {...gridNav("customer")}>
                   <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Cust Segmen" widthPx={headerColWidths.custSegmen} onResizeStart={beginHeaderColResize("custSegmen")}>
+                <ExcelField label="Cust Segmen" widthPx={headerColWidths.custSegmen} onResizeStart={beginHeaderColResize("custSegmen")} {...gridNav("custSegmen")}>
                   <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Lot COA" widthPx={headerColWidths.lotCoa} onResizeStart={beginHeaderColResize("lotCoa")}>
+                <ExcelField label="Lot COA" widthPx={headerColWidths.lotCoa} onResizeStart={beginHeaderColResize("lotCoa")} {...gridNav("lotCoa")}>
                   <input value={form.lotCoa} onChange={(e) => setForm({ ...form, lotCoa: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Remark *" widthPx={headerColWidths.remark} onResizeStart={beginHeaderColResize("remark")}>
+                <ExcelField label="Remark *" widthPx={headerColWidths.remark} onResizeStart={beginHeaderColResize("remark")} {...gridNav("remark")}>
                   <input value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} required />
                 </ExcelField>
               </ExcelRow>
@@ -702,7 +717,7 @@ export default function CheckResultsPage({
               </p>
             )}
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Tarik garis di sisi kanan header untuk mengubah lebar kolom.</p>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ overflowX: "auto" }} data-nav-scope="">
               <table className="data-table" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr>
@@ -725,7 +740,7 @@ export default function CheckResultsPage({
                         <td style={{ width: 40 }}>{p.no}</td>
                         <td>{p.parameter}</td>
                         <td style={{ textAlign: "center" }}>{p.standard || "-"}</td>
-                        <td>
+                        <td {...specGridNav("result", idx)}>
                           <input
                             style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%", textAlign: "center" }}
                             value={p.result}
@@ -733,9 +748,9 @@ export default function CheckResultsPage({
                           />
                         </td>
                         <td style={{ textAlign: "center" }}>{SPEC_VERDICT_LABEL[verdict]}</td>
-                        <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
-                        <td><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
-                        <td>
+                        <td {...specGridNav("start", idx)}><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
+                        <td {...specGridNav("finish", idx)}><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
+                        <td {...specGridNav("pic", idx)}>
                           <EmployeeNameSelect
                             bare
                             id={`pic-${idx}`}
@@ -744,7 +759,7 @@ export default function CheckResultsPage({
                             onChange={(v, nik) => updateParam(idx, { pic: v, picNik: nik ?? null })}
                           />
                         </td>
-                        <td>
+                        <td {...specGridNav("suggestion", idx)}>
                           <input
                             style={{ width: "100%" }}
                             placeholder="Acc or improve"

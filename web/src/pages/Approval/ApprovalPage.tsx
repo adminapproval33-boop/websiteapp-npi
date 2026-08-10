@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -10,6 +10,7 @@ import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../componen
 import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -195,6 +196,8 @@ export default function ApprovalPage({
     "approvalInputColWidths",
     APPROVAL_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, APPROVAL_COL_ROWS) });
 
   const [statusFilter, setStatusFilter] = useState("");
   const [filterCol, setFilterCol] = useState("order");
@@ -478,33 +481,33 @@ export default function ApprovalPage({
             <ExcelBlock title="Production & MRP Schedule » Approval, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")}>
+                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id="approval-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} />
                 </ExcelField>
-                <ExcelField label="Code Tanki" widthPx={colWidths.codeTankiRow2} onResizeStart={beginResize("codeTankiRow2")}>
+                <ExcelField label="Code Tanki" widthPx={colWidths.codeTankiRow2} onResizeStart={beginResize("codeTankiRow2")} {...gridNav("codeTankiRow2")}>
                   <TankSelect bare id="approval-tank-1" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
                 </ExcelField>
-                <ExcelField label="Mrp Pic" widthPx={colWidths.mrpPic} onResizeStart={beginResize("mrpPic")}>
+                <ExcelField label="Mrp Pic" widthPx={colWidths.mrpPic} onResizeStart={beginResize("mrpPic")} {...gridNav("mrpPic")}>
                   <EmployeeNameSelect
                     bare
                     id="approval-mrp-pic"
@@ -513,7 +516,7 @@ export default function ApprovalPage({
                     onChange={(v, nik) => setForm({ ...form, mrpPic: v, mrpPicNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")}>
+                <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")} {...gridNav("salesPic")}>
                   <EmployeeNameSelect
                     bare
                     id="approval-sales-pic"
@@ -525,10 +528,10 @@ export default function ApprovalPage({
               </ExcelRow>
               <ExcelSubHeader label="Production Input Column" color="production" />
               <ExcelRow>
-                <ExcelField label="Prepare Date" widthPx={colWidths.prepareDate} onResizeStart={beginResize("prepareDate")}>
+                <ExcelField label="Prepare Date" widthPx={colWidths.prepareDate} onResizeStart={beginResize("prepareDate")} {...gridNav("prepareDate")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.prepareProduksi)} onChange={(e) => setForm({ ...form, prepareProduksi: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Spray Man" widthPx={colWidths.sprayMan} onResizeStart={beginResize("sprayMan")}>
+                <ExcelField label="Spray Man" widthPx={colWidths.sprayMan} onResizeStart={beginResize("sprayMan")} {...gridNav("sprayMan")}>
                   <EmployeeNameSelect
                     bare
                     id="approval-spray-man"
@@ -537,42 +540,42 @@ export default function ApprovalPage({
                     onChange={(v, nik) => setForm({ ...form, sprayMan: v, sprayManNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Wet Sample" widthPx={colWidths.wetSample} onResizeStart={beginResize("wetSample")}>
+                <ExcelField label="Wet Sample" widthPx={colWidths.wetSample} onResizeStart={beginResize("wetSample")} {...gridNav("wetSample")}>
                   <input value={form.wetSample} onChange={(e) => setForm({ ...form, wetSample: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Panel" widthPx={colWidths.panel} onResizeStart={beginResize("panel")}>
+                <ExcelField label="Panel" widthPx={colWidths.panel} onResizeStart={beginResize("panel")} {...gridNav("panel")}>
                   <input value={form.panel} onChange={(e) => setForm({ ...form, panel: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Lot COA" widthPx={colWidths.lotCoa} onResizeStart={beginResize("lotCoa")}>
+                <ExcelField label="Lot COA" widthPx={colWidths.lotCoa} onResizeStart={beginResize("lotCoa")} {...gridNav("lotCoa")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.lotCoa)}
                     onChange={(e) => setForm({ ...form, lotCoa: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Send To Tech" widthPx={colWidths.sendToTech} onResizeStart={beginResize("sendToTech")}>
+                <ExcelField label="Send To Tech" widthPx={colWidths.sendToTech} onResizeStart={beginResize("sendToTech")} {...gridNav("sendToTech")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.sendToTech)} onChange={(e) => setForm({ ...form, sendToTech: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelSubHeader label="Technical Input Column" color="technical" />
               <ExcelRow>
-                <ExcelField label="Submit Tech" widthPx={colWidths.submitTech} onResizeStart={beginResize("submitTech")}>
+                <ExcelField label="Submit Tech" widthPx={colWidths.submitTech} onResizeStart={beginResize("submitTech")} {...gridNav("submitTech")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.technicalDateReceiving)}
                     onChange={(e) => setForm({ ...form, technicalDateReceiving: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Submit Cust" widthPx={colWidths.submitCust} onResizeStart={beginResize("submitCust")}>
+                <ExcelField label="Submit Cust" widthPx={colWidths.submitCust} onResizeStart={beginResize("submitCust")} {...gridNav("submitCust")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.submitToCustomer)} onChange={(e) => setForm({ ...form, submitToCustomer: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Customer" widthPx={colWidths.customer} onResizeStart={beginResize("customer")}>
+                <ExcelField label="Customer" widthPx={colWidths.customer} onResizeStart={beginResize("customer")} {...gridNav("customer")}>
                   <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Cust Segmen" widthPx={colWidths.custSegmen} onResizeStart={beginResize("custSegmen")}>
+                <ExcelField label="Cust Segmen" widthPx={colWidths.custSegmen} onResizeStart={beginResize("custSegmen")} {...gridNav("custSegmen")}>
                   <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Tech Name" widthPx={colWidths.techName} onResizeStart={beginResize("techName")}>
+                <ExcelField label="Tech Name" widthPx={colWidths.techName} onResizeStart={beginResize("techName")} {...gridNav("techName")}>
                   <EmployeeNameSelect
                     bare
                     id="approval-tech-name"
@@ -581,7 +584,7 @@ export default function ApprovalPage({
                     onChange={(v, nik) => setForm({ ...form, techName: v, techNameNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Finish App" widthPx={colWidths.finishApp} onResizeStart={beginResize("finishApp")}>
+                <ExcelField label="Finish App" widthPx={colWidths.finishApp} onResizeStart={beginResize("finishApp")} {...gridNav("finishApp")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.finishApp)} onChange={(e) => setForm({ ...form, finishApp: e.target.value })} />
                 </ExcelField>
               </ExcelRow>

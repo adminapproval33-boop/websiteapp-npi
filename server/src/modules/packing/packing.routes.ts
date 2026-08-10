@@ -30,7 +30,7 @@ const saveSchema = z
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
     spvNik: z.string().trim().optional().nullable(),
     members: z
-      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
+      .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable(), qtyPcs: z.string().trim().optional() }))
       .optional(),
     formReceived: optionalDate,
     start: optionalDate,

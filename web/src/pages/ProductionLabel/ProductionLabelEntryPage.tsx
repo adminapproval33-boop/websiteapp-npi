@@ -6,6 +6,7 @@ import BarcodeSvg from "../../components/BarcodeSvg";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import { formatDateDDMMYYYY } from "../../lib/datetime";
+import LabelHistoryPage from "./LabelHistoryPage";
 import "../../styles/printLabel.css";
 
 /** Paste/Kepala Warna/Assorted -- dropdown manual (2026-08-04, instruksi
@@ -66,6 +67,7 @@ interface CrossModuleData {
  * /production-label, lihat menu Label History) baru window.print(). */
 export default function ProductionLabelEntryPage() {
   const { data: tanks } = useTankOptions();
+  const [tab, setTab] = useState<"input" | "history">("input");
   const [order, setOrder] = useState("");
   const [data, setData] = useState<OrderRefData | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -212,6 +214,19 @@ export default function ProductionLabelEntryPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+          Production Label Entry
+        </button>
+        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+          History
+        </button>
+      </div>
+
+      {tab === "history" && <LabelHistoryPage />}
+
+      {tab === "input" && (
+        <>
       <div className="panel label-form-panel">
         <div className="panel-header">Production Label Entry</div>
         <div className="panel-body">
@@ -372,6 +387,8 @@ export default function ProductionLabelEntryPage() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

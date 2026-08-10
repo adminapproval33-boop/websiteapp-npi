@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -11,6 +11,7 @@ import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeName
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -205,6 +206,11 @@ export default function AdminQcPage() {
     "adminQcHeaderColWidths",
     HEADER_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts.
+   * "Admin QC Stage" pakai <select> native -- otomatis dilewati (lihat
+   * usesNativeArrowBehavior di excelGridNav.ts) supaya panah tetap bisa
+   * dipakai ganti opsi dropdown seperti biasa. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, HEADER_COL_ROWS) });
   const { widths: specColWidths, beginResize: beginSpecResize, reset: resetSpecColWidths } = useResizableColWidths(
     SPEC_TABLE_DEFAULT_WIDTHS,
     "adminQcSpecColWidths"
@@ -511,33 +517,33 @@ export default function AdminQcPage() {
             <ExcelBlock title="Portal Quality Control » Input Admin QC">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={headerColWidths.order} onResizeStart={beginHeaderResize("order")}>
+                <ExcelField label="Order" widthPx={headerColWidths.order} onResizeStart={beginHeaderResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Material Description" widthPx={headerColWidths.materialDescription} onResizeStart={beginHeaderResize("materialDescription")}>
+                <ExcelField label="Material Description" widthPx={headerColWidths.materialDescription} onResizeStart={beginHeaderResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Batch" widthPx={headerColWidths.batch} onResizeStart={beginHeaderResize("batch")}>
+                <ExcelField label="Batch" widthPx={headerColWidths.batch} onResizeStart={beginHeaderResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderResize("plant")}>
+                <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderResize("iuPlant")}>
+                <ExcelField label="IU Plant" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id="admin-qc-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} />
                 </ExcelField>
-                <ExcelField label="Code Tanki" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderResize("codeTanki")}>
+                <ExcelField label="Code Tanki" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderResize("codeTanki")} {...gridNav("codeTanki")}>
                   <TankSelect bare id="admin-qc-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
                 </ExcelField>
-                <ExcelField label="Admin QC Stage" widthPx={headerColWidths.typeLot} onResizeStart={beginHeaderResize("typeLot")}>
+                <ExcelField label="Admin QC Stage" widthPx={headerColWidths.typeLot} onResizeStart={beginHeaderResize("typeLot")} {...gridNav("typeLot")}>
                   <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })}>
                     <option value="">-- Pilih --</option>
                     <option value="Improve">Improve</option>
@@ -546,13 +552,13 @@ export default function AdminQcPage() {
                     <option value="Approval">Approval</option>
                   </select>
                 </ExcelField>
-                <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")}>
+                <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")} {...gridNav("lotPassed")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="QC to App" widthPx={headerColWidths.qcToApproval} onResizeStart={beginHeaderResize("qcToApproval")}>
+                <ExcelField label="QC to App" widthPx={headerColWidths.qcToApproval} onResizeStart={beginHeaderResize("qcToApproval")} {...gridNav("qcToApproval")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="QC Passed" widthPx={headerColWidths.qcPassed} onResizeStart={beginHeaderResize("qcPassed")}>
+                <ExcelField label="QC Passed" widthPx={headerColWidths.qcPassed} onResizeStart={beginHeaderResize("qcPassed")} {...gridNav("qcPassed")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} />
                 </ExcelField>
               </ExcelRow>

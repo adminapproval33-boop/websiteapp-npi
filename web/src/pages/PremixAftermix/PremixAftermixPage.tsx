@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
 import { api, ApiError } from "../../api/client";
@@ -27,6 +27,7 @@ import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -259,6 +260,8 @@ export default function PremixAftermixPage({
     `premixAftermixColWidths-${section}`,
     PREMIX_AFTERMIX_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, PREMIX_AFTERMIX_COL_ROWS) });
 
   const historyQuery = useQuery({
     queryKey: ["premix-aftermix-history", section],
@@ -893,49 +896,49 @@ export default function PremixAftermixPage({
             <ExcelBlock title={`Production & MRP Schedule » ${title}, Input Proses`}>
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => handleOrderQtyChange(e.target.value)} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")}>
+                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id={`${section}-iu-plant`} value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} required />
                 </ExcelField>
-                <ExcelField label="Code Tanki" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")}>
+                <ExcelField label="Code Tanki" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")} {...gridNav("codeTanki")}>
                   <TankSelect bare id={`${section}-tank`} value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
                 </ExcelField>
-                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
+                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")} {...gridNav("formReceived")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.formReceived)}
                     onChange={(e) => setForm({ ...form, formReceived: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")}>
+                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")} {...gridNav("start")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.start)}
                     onChange={(e) => setForm({ ...form, start: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
+                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")} {...gridNav("finish")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.finish)}
@@ -944,7 +947,7 @@ export default function PremixAftermixPage({
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
+                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")} {...gridNav("spvProduksi")}>
                   <EmployeeNameSelect
                     bare
                     id={`${section}-spv`}
@@ -954,7 +957,7 @@ export default function PremixAftermixPage({
                     required
                   />
                 </ExcelField>
-                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
+                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")} {...gridNav("leader")}>
                   <EmployeeNameSelect
                     bare
                     id={`${section}-leader`}
@@ -963,7 +966,7 @@ export default function PremixAftermixPage({
                     onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Qty/Man (Liter)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")}>
+                <ExcelField label="Qty/Man (Liter)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")} {...gridNav("qtyPerMan")}>
                   <input
                     value={form.qtyPerMan}
                     onChange={(e) => setForm({ ...form, qtyPerMan: e.target.value })}
@@ -972,7 +975,7 @@ export default function PremixAftermixPage({
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
+                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")} {...gridNav("member")}>
                   <EmployeeNameSelect
                     bare
                     id={`${section}-member`}

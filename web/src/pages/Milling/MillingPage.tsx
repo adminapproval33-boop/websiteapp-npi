@@ -1,4 +1,4 @@
-import { CSSProperties, Fragment, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import { CSSProperties, Fragment, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -18,6 +18,7 @@ import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -336,6 +337,11 @@ export default function MillingPage({
     "millingColWidths",
     MILLING_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts.
+   * Baris "passLabel/fineness/visco/suhu" di MILLING_COL_ROWS sengaja tidak
+   * ikut navigasi ini -- itu tabel Pass N terpisah (PassTable, bukan
+   * ExcelField), arrow key di situ tetap perilaku native. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, MILLING_COL_ROWS) });
 
   const historyQuery = useQuery({
     queryKey: ["milling-history"],
@@ -698,36 +704,36 @@ export default function MillingPage({
             <ExcelBlock title="Production & MRP Schedule » Milling, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")}>
+                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id="milling-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} required />
                 </ExcelField>
-                <ExcelField label="Code Tanki 1 (Couple)" widthPx={colWidths.codeTanki1} onResizeStart={beginResize("codeTanki1")}>
+                <ExcelField label="Code Tanki 1 (Couple)" widthPx={colWidths.codeTanki1} onResizeStart={beginResize("codeTanki1")} {...gridNav("codeTanki1")}>
                   <TankSelect bare id="milling-tank-1" value={form.codeTanki1} onChange={(v) => setForm({ ...form, codeTanki1: v })} required={false} />
                 </ExcelField>
-                <ExcelField label="Code Tanki 2 (Moving)" widthPx={colWidths.codeTanki2} onResizeStart={beginResize("codeTanki2")}>
+                <ExcelField label="Code Tanki 2 (Moving)" widthPx={colWidths.codeTanki2} onResizeStart={beginResize("codeTanki2")} {...gridNav("codeTanki2")}>
                   <TankSelect bare id="milling-tank-2" value={form.codeTanki2} onChange={(v) => setForm({ ...form, codeTanki2: v })} required={false} />
                 </ExcelField>
-                <ExcelField label="Code Mesin" widthPx={colWidths.codeMesin} onResizeStart={beginResize("codeMesin")}>
+                <ExcelField label="Code Mesin" widthPx={colWidths.codeMesin} onResizeStart={beginResize("codeMesin")} {...gridNav("codeMesin")}>
                   <MesinSelect
                     bare
                     id="milling-mesin"
@@ -739,21 +745,21 @@ export default function MillingPage({
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
+                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")} {...gridNav("formReceived")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.formReceived)}
                     onChange={(e) => setForm({ ...form, formReceived: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")}>
+                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")} {...gridNav("start")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.start)}
                     onChange={(e) => setForm({ ...form, start: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
+                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")} {...gridNav("finish")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.finish)}
@@ -762,7 +768,7 @@ export default function MillingPage({
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")}>
+                <ExcelField label="SPV Produksi" widthPx={colWidths.spvProduksi} onResizeStart={beginResize("spvProduksi")} {...gridNav("spvProduksi")}>
                   <EmployeeNameSelect
                     bare
                     id="milling-spv"
@@ -772,7 +778,7 @@ export default function MillingPage({
                     required
                   />
                 </ExcelField>
-                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")}>
+                <ExcelField label="Leader" widthPx={colWidths.leader} onResizeStart={beginResize("leader")} {...gridNav("leader")}>
                   <EmployeeNameSelect
                     bare
                     id="milling-leader"
@@ -781,12 +787,12 @@ export default function MillingPage({
                     onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Qty Act" color="orange" widthPx={colWidths.qtyAct} onResizeStart={beginResize("qtyAct")}>
+                <ExcelField label="Qty Act" color="orange" widthPx={colWidths.qtyAct} onResizeStart={beginResize("qtyAct")} {...gridNav("qtyAct")}>
                   <input value={form.qtyAct} onChange={(e) => setForm({ ...form, qtyAct: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
+                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")} {...gridNav("member")}>
                   <EmployeeNameSelect
                     bare
                     id="milling-member"

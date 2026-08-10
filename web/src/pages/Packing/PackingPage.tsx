@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -17,7 +17,36 @@ import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { computeQtyPerManFromPcsVolume } from "../../lib/qty";
+
+/** Total Qty/Pcs seluruh Member (2026-08-10, instruksi eksplisit user) --
+ * dulu 1 nilai Qty/Pcs dibagi rata per kepala, sekarang tiap Member punya
+ * Qty/Pcs sendiri; field header "Qty/Pcs"/"Qty/Man (Ltr)" jadi TOTAL hasil
+ * penjumlahan tiap Member, bukan lagi input manual dibagi rata. */
+function sumMembersQtyPcs(members: { qtyPcs?: string }[]): number {
+  return members.reduce((sum, m) => sum + (Number(m.qtyPcs) || 0), 0);
+}
+
+/** Total Qty/Man (Ltr) = Volume x total Qty/Pcs semua Member (bukan dibagi
+ * jumlah Member lagi -- setiap Member sudah bawa hasil kerjanya sendiri). */
+function computeTotalQtyPerMan(members: { qtyPcs?: string }[], volume: string): string {
+  const totalPcs = sumMembersQtyPcs(members);
+  if (totalPcs <= 0) return "";
+  return computeQtyPerManFromPcsVolume(String(totalPcs), volume, 1);
+}
+
+/** True kalau total Qty/Man (Ltr) sudah melebihi Order Qty -- Order Qty jadi
+ * batas atas total Qty/Man (Ltr) sesuai instruksi eksplisit user (2026-08-10):
+ * kalau Admin mau total-nya lebih besar, Order Qty-nya harus dinaikkan dulu.
+ * Order Qty kosong/bukan angka dianggap belum ada batas (tidak divalidasi). */
+function totalQtyPerManExceedsOrderQty(qtyPerManTotal: string, orderQty: string): boolean {
+  const total = Number(qtyPerManTotal);
+  const limit = Number(orderQty);
+  if (!qtyPerManTotal || Number.isNaN(total)) return false;
+  if (!orderQty.trim() || Number.isNaN(limit)) return false;
+  return total > limit;
+}
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
@@ -49,8 +78,8 @@ const PACKING_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription"],
   ["batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki", "formReceived", "start", "finish"],
-  ["spvName", "leaderName", "qtyPcs", "totalQty", "qtyPerMan"],
-  ["member"],
+  ["spvName", "leaderName"],
+  ["member", "qtyPcs", "totalQty", "qtyPerMan"],
 ];
 
 interface HistoryRow {
@@ -184,6 +213,7 @@ export default function PackingPage({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");
   const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
+  const [memberQtyPcsInput, setMemberQtyPcsInput] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -195,6 +225,8 @@ export default function PackingPage({
     "packingColWidths",
     PACKING_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, PACKING_COL_ROWS) });
 
   const historyQuery = useQuery({
     queryKey: ["packing-history"],
@@ -271,9 +303,10 @@ export default function PackingPage({
         batch: data.batch ?? "",
         orderQty,
         plant: data.plant ?? "",
-        // Qty/Man (Ltr) = (Qty/Pcs x Volume) ÷ jumlah Member, sesuai instruksi
-        // eksplisit user (2026-07-26).
-        qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, totalQty, f.members.length),
+        // Qty/Man (Ltr) = Volume x total Qty/Pcs semua Member (2026-08-10,
+        // direvisi dari versi lama yg dibagi rata per kepala -- lihat
+        // computeTotalQtyPerMan).
+        qtyPerMan: computeTotalQtyPerMan(f.members, totalQty),
         totalQty,
       };
     });
@@ -306,8 +339,13 @@ export default function PackingPage({
         setEditingId(latest.id);
         setForm((f) => {
           const members = f.members.length > 0 ? f.members : normalizeMembers(latest.members);
-          const qtyPcs = f.qtyPcs || latest.qtyPcs || "";
+          const memberPcsSum = sumMembersQtyPcs(members);
           const totalQty = f.totalQty || latest.totalQty || "";
+          // Baris lama (sebelum Qty/Pcs per-Member) belum punya qtyPcs di tiap
+          // Member -- fallback ke nilai total lama yg tersimpan supaya data
+          // historis tetap tampil apa adanya, bukan tiba-tiba jadi 0.
+          const qtyPcs = memberPcsSum > 0 ? String(memberPcsSum) : f.qtyPcs || latest.qtyPcs || "";
+          const qtyPerMan = memberPcsSum > 0 ? computeTotalQtyPerMan(members, totalQty) : f.qtyPerMan || latest.qtyPerMan || "";
           return {
             ...f,
             spvName: f.spvName || latest.spvName || "",
@@ -321,7 +359,7 @@ export default function PackingPage({
             remark: f.remark || latest.remark || "",
             qtyPcs,
             totalQty,
-            qtyPerMan: computeQtyPerManFromPcsVolume(qtyPcs, totalQty, members.length),
+            qtyPerMan,
           };
         });
       } else {
@@ -395,19 +433,43 @@ export default function PackingPage({
       setError("Nama Member tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
     }
+    // Qty/Pcs WAJIB per-Member (2026-08-10, instruksi eksplisit user) -- supaya
+    // hasil kerja tiap orang dicatat apa adanya, bukan dibagi rata ke semua
+    // Member walau hasilnya beda-beda.
+    const qtyPcs = memberQtyPcsInput.trim();
+    if (!qtyPcs || Number.isNaN(Number(qtyPcs))) {
+      setError("Qty/Pcs untuk Member ini wajib diisi (angka) sebelum ditambahkan.");
+      return;
+    }
+    const prospectiveMembers = [...form.members, { name, nik: memberNikInput, qtyPcs }];
+    const prospectiveQtyPerMan = computeTotalQtyPerMan(prospectiveMembers, form.totalQty);
+    if (totalQtyPerManExceedsOrderQty(prospectiveQtyPerMan, form.orderQty)) {
+      setError(
+        `Total Qty/Man (Ltr) akan menjadi ${prospectiveQtyPerMan} Ltr, melebihi Order Qty (${form.orderQty}). Naikkan Order Qty dulu kalau memang ingin lebih.`
+      );
+      return;
+    }
     setError("");
     setForm((f) => {
-      const members = [...f.members, { name, nik: memberNikInput }];
-      return { ...f, members, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, f.totalQty, members.length) };
+      const members = [...f.members, { name, nik: memberNikInput, qtyPcs }];
+      return { ...f, members, qtyPcs: String(sumMembersQtyPcs(members)), qtyPerMan: computeTotalQtyPerMan(members, f.totalQty) };
     });
     setMemberNameInput("");
     setMemberNikInput(null);
+    setMemberQtyPcsInput("");
   }
 
   function removeLastMember() {
     setForm((f) => {
       const members = f.members.slice(0, -1);
-      return { ...f, members, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, f.totalQty, members.length) };
+      return { ...f, members, qtyPcs: String(sumMembersQtyPcs(members)), qtyPerMan: computeTotalQtyPerMan(members, f.totalQty) };
+    });
+  }
+
+  function removeMemberAt(idx: number) {
+    setForm((f) => {
+      const members = f.members.filter((_, i) => i !== idx);
+      return { ...f, members, qtyPcs: String(sumMembersQtyPcs(members)), qtyPerMan: computeTotalQtyPerMan(members, f.totalQty) };
     });
   }
 
@@ -467,6 +529,12 @@ export default function PackingPage({
       setError("Member wajib diisi kalau Start atau Finish sudah diisi.");
       return;
     }
+    if (totalQtyPerManExceedsOrderQty(form.qtyPerMan, form.orderQty)) {
+      setError(
+        `Total Qty/Man (Ltr) (${form.qtyPerMan} Ltr) melebihi Order Qty (${form.orderQty}). Naikkan Order Qty dulu kalau memang ingin lebih.`
+      );
+      return;
+    }
     saveMutation.mutate();
   }
 
@@ -507,49 +575,49 @@ export default function PackingPage({
             <ExcelBlock title="Production & MRP Schedule » Packing, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
-                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
-                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
                 </ExcelField>
-                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
-                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")} {...gridNav("orderQty")}>
                   <input value={form.orderQty} onChange={(e) => handleOrderQtyChange(e.target.value)} />
                 </ExcelField>
-                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
                   <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")}>
+                <ExcelField label="IU Plant" widthPx={colWidths.iuPlant} onResizeStart={beginResize("iuPlant")} {...gridNav("iuPlant")}>
                   <IuPlantSelect bare id="packing-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} />
                 </ExcelField>
-                <ExcelField label="Code Tanki" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")}>
+                <ExcelField label="Code Tanki" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")} {...gridNav("codeTanki")}>
                   <TankSelect bare id="packing-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
                 </ExcelField>
-                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")}>
+                <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")} {...gridNav("formReceived")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.formReceived)}
                     onChange={(e) => setForm({ ...form, formReceived: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")}>
+                <ExcelField label="Start" widthPx={colWidths.start} onResizeStart={beginResize("start")} {...gridNav("start")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.start)}
                     onChange={(e) => setForm({ ...form, start: e.target.value })}
                   />
                 </ExcelField>
-                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
+                <ExcelField label="Finish" widthPx={colWidths.finish} onResizeStart={beginResize("finish")} {...gridNav("finish")}>
                   <input
                     type="datetime-local"
                     value={toDateTimeLocalValue(form.finish)}
@@ -558,7 +626,7 @@ export default function PackingPage({
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")}>
+                <ExcelField label="SPV Produksi" widthPx={colWidths.spvName} onResizeStart={beginResize("spvName")} {...gridNav("spvName")}>
                   <EmployeeNameSelect
                     bare
                     id="packing-spv"
@@ -568,7 +636,7 @@ export default function PackingPage({
                     required
                   />
                 </ExcelField>
-                <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")}>
+                <ExcelField label="Leader" widthPx={colWidths.leaderName} onResizeStart={beginResize("leaderName")} {...gridNav("leaderName")}>
                   <EmployeeNameSelect
                     bare
                     id="packing-leader"
@@ -577,35 +645,9 @@ export default function PackingPage({
                     onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
                   />
                 </ExcelField>
-                <ExcelField label="Qty/Pcs" color="orange" widthPx={colWidths.qtyPcs} onResizeStart={beginResize("qtyPcs")}>
-                  <input
-                    value={form.qtyPcs}
-                    onChange={(e) => {
-                      const qtyPcs = e.target.value;
-                      setForm((f) => ({ ...f, qtyPcs, qtyPerMan: computeQtyPerManFromPcsVolume(qtyPcs, f.totalQty, f.members.length) }));
-                    }}
-                  />
-                </ExcelField>
-                <ExcelField label="Volume" color="orange" widthPx={colWidths.totalQty} onResizeStart={beginResize("totalQty")}>
-                  <input
-                    value={form.totalQty}
-                    onChange={(e) => {
-                      const totalQty = e.target.value;
-                      setForm((f) => ({ ...f, totalQty, qtyPerMan: computeQtyPerManFromPcsVolume(f.qtyPcs, totalQty, f.members.length) }));
-                    }}
-                    title="Otomatis: Volume dari Referensi Order/PO (SAP-COOISPI), fallback ke Order Qty -- bisa diubah manual bila perlu"
-                  />
-                </ExcelField>
-                <ExcelField label="Qty/Man (Ltr)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")}>
-                  <input
-                    value={form.qtyPerMan}
-                    onChange={(e) => setForm({ ...form, qtyPerMan: e.target.value })}
-                    title="Otomatis: (Qty/Pcs x Volume) ÷ jumlah Member -- bisa diubah manual bila perlu"
-                  />
-                </ExcelField>
               </ExcelRow>
               <ExcelRow>
-                <ExcelField label="Member" widthPx={colWidths.member} onResizeStart={beginResize("member")}>
+                <ExcelField label="Member" color="orange" widthPx={colWidths.member} onResizeStart={beginResize("member")} {...gridNav("member")}>
                   <EmployeeNameSelect
                     bare
                     id="packing-member"
@@ -616,6 +658,31 @@ export default function PackingPage({
                       setMemberNikInput(nik ?? null);
                     }}
                     placeholder="Nama anggota"
+                  />
+                </ExcelField>
+                <ExcelField label="Qty/Pcs" color="orange" widthPx={colWidths.qtyPcs} onResizeStart={beginResize("qtyPcs")} {...gridNav("qtyPcs")}>
+                  <input
+                    value={memberQtyPcsInput}
+                    onChange={(e) => setMemberQtyPcsInput(e.target.value)}
+                    placeholder="Hasil Member ini"
+                    title="Qty/Pcs hasil kerja Member yang akan ditambahkan (bukan total tim) -- setiap Member dicatat sendiri-sendiri, tidak dibagi rata"
+                  />
+                </ExcelField>
+                <ExcelField label="Volume" color="orange" widthPx={colWidths.totalQty} onResizeStart={beginResize("totalQty")} {...gridNav("totalQty")}>
+                  <input
+                    value={form.totalQty}
+                    onChange={(e) => {
+                      const totalQty = e.target.value;
+                      setForm((f) => ({ ...f, totalQty, qtyPerMan: computeTotalQtyPerMan(f.members, totalQty) }));
+                    }}
+                    title="Otomatis: Volume dari Referensi Order/PO (SAP-COOISPI), fallback ke Order Qty -- bisa diubah manual bila perlu"
+                  />
+                </ExcelField>
+                <ExcelField label="Qty/Man (Ltr)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")} {...gridNav("qtyPerMan")}>
+                  <input
+                    value={computeQtyPerManFromPcsVolume(memberQtyPcsInput, form.totalQty, 1)}
+                    readOnly
+                    title="Preview hasil Member yang akan ditambahkan = Qty/Pcs x Volume (klik + utk simpan ke daftar Member)"
                   />
                 </ExcelField>
               </ExcelRow>
@@ -646,14 +713,34 @@ export default function PackingPage({
               </ExcelRow>
               {form.members.length > 0 && (
                 <ExcelRow>
-                  <div className="excel-member-cell" style={{ flexBasis: "50%", maxWidth: "50%" }}>
+                  <div className="excel-member-cell" style={{ flexBasis: "100%", maxWidth: "100%" }}>
                     <div className="excel-member-list">
                       {form.members.map((m, idx) => (
                         <span key={idx} className="excel-member-chip">
-                          {m.name}
+                          <span>
+                            {m.name} — {m.qtyPcs || "0"} pcs — {computeQtyPerManFromPcsVolume(m.qtyPcs || "0", form.totalQty, 1) || "0"} Ltr
+                          </span>
+                          <button
+                            type="button"
+                            title="Hapus Member ini"
+                            aria-label="Hapus Member ini"
+                            onClick={() => removeMemberAt(idx)}
+                            style={{ border: "none", background: "none", color: "var(--danger)", cursor: "pointer", fontWeight: 700 }}
+                          >
+                            ×
+                          </button>
                         </span>
                       ))}
                     </div>
+                    <div style={{ marginTop: 6, fontSize: "0.82rem", fontWeight: 600 }}>
+                      Total: {form.qtyPcs || 0} Pcs = {form.qtyPerMan || 0} Ltr ({form.members.length} member) -- dihitung per orang, tidak dibagi rata.
+                    </div>
+                    {totalQtyPerManExceedsOrderQty(form.qtyPerMan, form.orderQty) && (
+                      <div style={{ marginTop: 4, fontSize: "0.82rem", fontWeight: 600, color: "var(--danger)" }}>
+                        ⚠ Total Qty/Man (Ltr) ({form.qtyPerMan} Ltr) sudah melebihi Order Qty ({form.orderQty}). Naikkan
+                        dulu Order Qty kalau memang ingin totalnya lebih besar.
+                      </div>
+                    )}
                   </div>
                 </ExcelRow>
               )}
@@ -732,7 +819,7 @@ export default function PackingPage({
                   label: "Member",
                   render: (r) => {
                     const members = normalizeMembers(r.members);
-                    const list = members.map((m) => displayNameWithNik(employees, m.name, m.nik));
+                    const list = members.map((m) => `${displayNameWithNik(employees, m.name, m.nik)} (${m.qtyPcs || "0"} pcs)`);
                     return [String(members.length), ...list].join(" | ");
                   },
                 },

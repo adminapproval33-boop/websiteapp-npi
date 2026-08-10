@@ -65,6 +65,7 @@ body{font-family:"Segoe UI",Arial,Helvetica,sans-serif;font-size:12px;color:#000
 table{width:100%;border-collapse:collapse;margin-bottom:12px;table-layout:fixed;}
 th,td{border:1px solid #000;padding:4px 7px;font-size:11px;text-align:left;word-break:break-word;overflow-wrap:break-word;color:#000;}
 th{background:#fff;color:#000;font-weight:700;}
+.info-tbl th{white-space:nowrap;}
 .section-title{font-weight:700;font-size:12px;color:#000;margin:12px 0 6px;padding-bottom:3px;border-bottom:1.5px solid #000;}
 .bottom-grid{display:flex;align-items:flex-start;gap:14px;margin-top:16px;}
 .bottom-left{flex:1;display:flex;flex-direction:column;border-right:1px solid #000;padding-right:14px;height:2.5cm;}
@@ -81,20 +82,22 @@ th{background:#fff;color:#000;font-weight:700;}
 <h1>CHECK SHEET QUALITY CONTROL</h1>
 <div class="doc-code">Doc No. F-D TQP-FI-011<div class="print-date">Dicetak: ${esc(formatDateTime(new Date()))}</div></div>
 </div>
-<table style="margin-bottom:0"><tbody>
-<tr><th style="width:11%">Order Pack</th><td style="width:22%">${esc(data.order)}</td><th style="width:11%">Material Description</th><td style="width:56%">${esc(data.materialDescription)}</td></tr>
+<table class="info-tbl" style="margin-bottom:0"><colgroup>
+<col style="width:35mm"><col style="width:40mm"><col style="width:35mm"><col style="width:80mm">
+</colgroup><tbody>
+<tr><th>Order Pack</th><td>${esc(data.order)}</td><th>Material Description</th><td>${esc(data.materialDescription)}</td></tr>
 </tbody></table>
-<table style="margin-bottom:0"><tbody>
-<tr><th style="width:11%">Material Number Pack</th><td style="width:22%">${esc(data.materialNumber)}</td><th style="width:11%">Batch Pack</th><td style="width:22%">${esc(data.batch)}</td><th style="width:11%">Order Qty</th><td style="width:23%">${esc(data.orderQty)}</td></tr>
+<table class="info-tbl" style="margin-bottom:0"><colgroup>
+<col style="width:35mm"><col style="width:40mm"><col style="width:23mm"><col style="width:25mm"><col style="width:18mm"><col style="width:15mm"><col style="width:19mm"><col style="width:15mm">
+</colgroup><tbody>
+<tr><th>Material Number Pack</th><td>${esc(data.materialNumber)}</td><th>Batch Pack</th><td>${esc(data.batch)}</td><th>Order Qty</th><td>${esc(data.orderQty)}</td><th>Plant</th><td>${esc(data.plant)}</td></tr>
 </tbody></table>
-<table style="margin-bottom:0"><tbody>
-<tr><th style="width:11%">Material Number Loose</th><td style="width:22%">${esc(data.materialNumber2)}</td><th style="width:11%">Batch Loose</th><td style="width:22%">${esc(data.batch2)}</td><th style="width:11%">Plant</th><td style="width:23%">${esc(data.plant)}</td></tr>
-</tbody></table>
-<table style="margin-bottom:0"><tbody>
-<tr><th style="width:11%">Customer</th><td style="width:22%">${esc(data.customer)}</td><th style="width:11%">Cust Segmen</th><td style="width:22%">${esc(data.custSegmen)}</td><th style="width:11%">Lot COA</th><td style="width:23%">${esc(data.lotCoa)}</td></tr>
-</tbody></table>
-<table><tbody>
-<tr><th style="width:11%">IU Plant</th><td style="width:22%">${esc(data.iuPlant)}</td><th style="width:11%">Code Tanki</th><td style="width:22%">${esc(data.codeTanki)}</td><th style="width:11%">Remark</th><td style="width:23%">${esc(data.remark)}</td></tr>
+<table class="info-tbl"><colgroup>
+<col style="width:35mm"><col style="width:40mm"><col style="width:23mm"><col style="width:25mm"><col style="width:18mm"><col style="width:49mm">
+</colgroup><tbody>
+<tr><th>Material Number Loose</th><td>${esc(data.materialNumber2)}</td><th>Batch Loose</th><td>${esc(data.batch2)}</td><th>Lot COA</th><td>${esc(data.lotCoa)}</td></tr>
+<tr><th>Customer</th><td>${esc(data.customer)}</td><th>Cust Segmen</th><td>${esc(data.custSegmen)}</td><th rowspan="2">Remark</th><td rowspan="2">${esc(data.remark)}</td></tr>
+<tr><th>IU Plant</th><td>${esc(data.iuPlant)}</td><th>Code Tanki</th><td>${esc(data.codeTanki)}</td></tr>
 </tbody></table>
 <div class="section-title">Spec Parameters</div>
 <table><thead><tr><th style="width:6%">No</th><th style="width:40%">Item Check</th><th style="width:18%;text-align:center">Spec</th><th style="width:18%;text-align:center">Result</th><th style="width:18%">PIC</th></tr></thead><tbody>${rowsHtml}</tbody></table>

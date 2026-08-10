@@ -56,6 +56,13 @@ export function formatInputBy(employees: EmployeeOption[] | undefined, nik: stri
 export interface MemberEntry {
   name: string;
   nik: string | null;
+  /** Qty/Pcs hasil kerja Member INI sendiri (2026-08-10, instruksi eksplisit
+   * user) -- dulu 1 Order dikerjakan rame-rame lalu Qty/Man dibagi rata per
+   * kepala (tidak adil kalau hasil kerja tiap orang beda). Sekarang tiap
+   * Member punya Qty/Pcs sendiri, dicatat per orang saat ditambahkan.
+   * Opsional supaya modul lain (Premix/Aftermix/Milling) yg belum pakai
+   * pola ini tetap kompatibel -- baris lama tanpa field ini juga aman. */
+  qtyPcs?: string;
 }
 
 /**
@@ -78,7 +85,9 @@ export function normalizeMembers(raw: unknown): MemberEntry[] {
       if (!name) continue;
       const nikRaw = (entry as { nik?: unknown }).nik;
       const nik = typeof nikRaw === "string" && nikRaw.trim() ? nikRaw.trim() : null;
-      out.push({ name, nik });
+      const qtyPcsRaw = (entry as { qtyPcs?: unknown }).qtyPcs;
+      const qtyPcs = typeof qtyPcsRaw === "string" && qtyPcsRaw.trim() ? qtyPcsRaw.trim() : undefined;
+      out.push({ name, nik, qtyPcs });
     }
   }
   return out;

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
@@ -7,6 +7,7 @@ import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { toDateTimeLocalValue } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
+import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { emptyMaintenanceForm, MaintenanceForm, MaintenanceRow } from "./types";
 
 const MAINTENANCE_COL_DEFAULT_WIDTHS: Record<string, number> = {
@@ -54,6 +55,8 @@ export default function MaintenanceFormPage() {
     "maintenanceFormColWidths",
     MAINTENANCE_COL_ROWS
   );
+  /** Navigasi panah ala Excel antar ExcelField -- lihat lib/excelGridNav.ts. */
+  const gridNav = (key: string) => ({ navKey: key, onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => handleExcelGridKeyNav(e, MAINTENANCE_COL_ROWS) });
 
   const editId = searchParams.get("editId");
   const codeTankiParam = searchParams.get("codeTanki");
@@ -163,17 +166,17 @@ export default function MaintenanceFormPage() {
         <ExcelBlock title="Maintenance » Form Input Maintenance">
           {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
           <ExcelRow>
-            <ExcelField label="Code Tanki / Objek" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")}>
+            <ExcelField label="Code Tanki / Objek" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")} {...gridNav("codeTanki")}>
               <TankSelect bare id="maintenance-code-tanki" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
             </ExcelField>
-            <ExcelField label="Prioritas" widthPx={colWidths.priority} onResizeStart={beginResize("priority")}>
+            <ExcelField label="Prioritas" widthPx={colWidths.priority} onResizeStart={beginResize("priority")} {...gridNav("priority")}>
               <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
                 <option value="">-</option>
                 <option value="Normal">Normal</option>
                 <option value="Urgent">Urgent</option>
               </select>
             </ExcelField>
-            <ExcelField label="Pelapor" widthPx={colWidths.reportedBy} onResizeStart={beginResize("reportedBy")}>
+            <ExcelField label="Pelapor" widthPx={colWidths.reportedBy} onResizeStart={beginResize("reportedBy")} {...gridNav("reportedBy")}>
               <EmployeeNameSelect
                 bare
                 id="maintenance-reported-by"
@@ -183,7 +186,7 @@ export default function MaintenanceFormPage() {
                 required
               />
             </ExcelField>
-            <ExcelField label="Teknisi / PIC Maintenance" widthPx={colWidths.technician} onResizeStart={beginResize("technician")}>
+            <ExcelField label="Teknisi / PIC Maintenance" widthPx={colWidths.technician} onResizeStart={beginResize("technician")} {...gridNav("technician")}>
               <EmployeeNameSelect
                 bare
                 id="maintenance-technician"
@@ -194,13 +197,13 @@ export default function MaintenanceFormPage() {
             </ExcelField>
           </ExcelRow>
           <ExcelRow>
-            <ExcelField label="Jadwal Pengerjaan" widthPx={colWidths.scheduledDate} onResizeStart={beginResize("scheduledDate")}>
+            <ExcelField label="Jadwal Pengerjaan" widthPx={colWidths.scheduledDate} onResizeStart={beginResize("scheduledDate")} {...gridNav("scheduledDate")}>
               <input type="date" value={form.scheduledDate} onChange={(e) => setForm({ ...form, scheduledDate: e.target.value })} />
             </ExcelField>
-            <ExcelField label="Tanggal Mulai" widthPx={colWidths.start} onResizeStart={beginResize("start")}>
+            <ExcelField label="Tanggal Mulai" widthPx={colWidths.start} onResizeStart={beginResize("start")} {...gridNav("start")}>
               <input type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
             </ExcelField>
-            <ExcelField label="Tanggal Selesai" widthPx={colWidths.finish} onResizeStart={beginResize("finish")}>
+            <ExcelField label="Tanggal Selesai" widthPx={colWidths.finish} onResizeStart={beginResize("finish")} {...gridNav("finish")}>
               <input type="datetime-local" value={form.finish} onChange={(e) => setForm({ ...form, finish: e.target.value })} />
             </ExcelField>
           </ExcelRow>

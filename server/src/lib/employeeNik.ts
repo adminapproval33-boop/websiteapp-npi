@@ -18,11 +18,14 @@ export async function sanitizeNik(nik: string | null | undefined): Promise<strin
 export interface MemberInput {
   name: string;
   nik?: string | null;
+  /** Qty/Pcs per-Member (dipakai Packing, lihat MemberEntry.qtyPcs di frontend) -- lewat apa adanya, tidak divalidasi di sini (murni angka hasil kerja, bukan identitas). */
+  qtyPcs?: string;
 }
 
 export interface SanitizedMember {
   name: string;
   nik: string | null;
+  qtyPcs?: string;
 }
 
 /** Versi batch dari `sanitizeNik` utk array Member -- 1 query utk semua NIK sekaligus. */
@@ -34,6 +37,10 @@ export async function sanitizeMembers(members: MemberInput[] | undefined | null)
     : [];
   const validNiks = new Set(found.map((f) => f.employeeId));
   return members
-    .map((m) => ({ name: m.name.trim(), nik: m.nik && validNiks.has(m.nik.trim()) ? m.nik.trim() : null }))
+    .map((m) => ({
+      name: m.name.trim(),
+      nik: m.nik && validNiks.has(m.nik.trim()) ? m.nik.trim() : null,
+      qtyPcs: m.qtyPcs?.trim() || undefined,
+    }))
     .filter((m) => m.name);
 }

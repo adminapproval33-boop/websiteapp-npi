@@ -151,61 +151,11 @@ export default function PostsPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="panel">
-        <div className="panel-header">Papan Info</div>
-        <div className="panel-body">
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", gap: 10 }}>
-              <Avatar name={user?.name ?? "?"} avatarPath={user?.avatarPath ?? null} />
-              <MentionTextarea
-                value={content}
-                onChange={setContent}
-                placeholder="Bagikan ide atau apa yang sedang Anda kerjakan... ketik @ utk tag orang, # utk hashtag"
-                style={{ flex: 1 }}
-              />
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ padding: "3px 12px" }}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Lampirkan File
-                </button>
-                {attachmentFile && (
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {attachmentFile.name}{" "}
-                    <button
-                      type="button"
-                      onClick={() => setAttachmentFile(null)}
-                      style={{ border: 0, background: "transparent", cursor: "pointer" }}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  style={{ display: "none" }}
-                  onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
-              <button className="btn btn-success" type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? "Memposting..." : "Posting"}
-              </button>
-            </div>
-            {error && <p className="error-text">{error}</p>}
-          </form>
-        </div>
-      </div>
-
       {/* Cari & jelajah hashtag (2026-08-11, instruksi eksplisit user: "hastag
           berguna saat ada event bisa cari hastag tersebut, maka akan muncul
-          semua papan info tentang hastag tersebut"). Trending diambil dari
-          GET /posts/hashtags (tanpa `q`), diurut by jumlah pemakaian. */}
+          semua papan info tentang hastag tersebut"; dinaikkan ke atas kolom
+          Posting 2026-08-11 -- instruksi eksplisit user). Trending diambil
+          dari GET /posts/hashtags (tanpa `q`), diurut by jumlah pemakaian. */}
       <div className="panel">
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <form onSubmit={submitTagSearch} style={{ display: "flex", gap: 8 }}>
@@ -265,6 +215,57 @@ export default function PostsPage() {
           </button>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-header">Papan Info</div>
+        <div className="panel-body">
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Avatar name={user?.name ?? "?"} avatarPath={user?.avatarPath ?? null} />
+              <MentionTextarea
+                value={content}
+                onChange={setContent}
+                placeholder="Bagikan ide atau apa yang sedang Anda kerjakan... ketik @ utk tag orang, # utk hashtag"
+                style={{ flex: 1 }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "3px 12px" }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Lampirkan File
+                </button>
+                {attachmentFile && (
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                    {attachmentFile.name}{" "}
+                    <button
+                      type="button"
+                      onClick={() => setAttachmentFile(null)}
+                      style={{ border: 0, background: "transparent", cursor: "pointer" }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  style={{ display: "none" }}
+                  onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <button className="btn btn-success" type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Memposting..." : "Posting"}
+              </button>
+            </div>
+            {error && <p className="error-text">{error}</p>}
+          </form>
+        </div>
+      </div>
 
       {postsQuery.isLoading && <p style={{ textAlign: "center", color: "var(--muted)" }}>Memuat...</p>}
 

@@ -162,7 +162,7 @@ export default function PostsPage() {
             <input
               value={tagSearchInput}
               onChange={(e) => setTagSearchInput(e.target.value)}
-              placeholder="Cari # hashtag (mis. event2026)..."
+              placeholder="Cari #hashtag yang ingin kamu temukan..."
               style={{ flex: 1 }}
             />
             <button type="submit" className="btn btn-outline" style={{ padding: "3px 14px" }}>

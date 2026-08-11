@@ -37,20 +37,27 @@ const saveSchema = z
     // eksplisit user -- "Lot Packing" DIPISAH dari "Joint Lot", TIDAK lagi
     // mewajibkan QC to App krn barangnya langsung Packing, tidak lewat
     // Approval). "Improve" tidak nambah syarat apa pun di luar baseline
-    // (sudah wajib dari Zod di atas).
+    // (sudah wajib dari Zod di atas). Direvisi lagi 2026-08-11 (instruksi
+    // eksplisit user): utk "Joint Lot", QC to App/QC Passed JADI TIDAK wajib
+    // (kebalikan dari sebelumnya) -- Lot Packing/Approval TIDAK berubah.
     const hasLotPassed = data.lotPassed != null;
     const hasQcToApproval = data.qcToApproval != null;
     const hasQcPassed = data.qcPassed != null;
+    const hasRemark = !!data.remark && data.remark.trim().length > 0;
 
     if (data.typeLot === "Lot Packing") {
       if (!hasLotPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lotPassed"], message: "Lot Passed wajib diisi kalau Admin QC Stage sudah diisi." });
       if (!hasQcPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcPassed"], message: "QC Passed wajib diisi kalau Admin QC Stage sudah diisi." });
     } else if (data.typeLot === "Joint Lot") {
       if (!hasLotPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lotPassed"], message: "Lot Passed wajib diisi kalau Admin QC Stage sudah diisi." });
-      if (!hasQcToApproval) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcToApproval"], message: "QC to App wajib diisi kalau Admin QC Stage sudah diisi." });
-      if (!hasQcPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcPassed"], message: "QC Passed wajib diisi kalau Admin QC Stage sudah diisi." });
     } else if (data.typeLot === "Approval") {
       if (!hasQcToApproval) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcToApproval"], message: "QC to App wajib diisi kalau Admin QC Stage sudah diisi." });
+    }
+
+    // Appearance Check Results wajib diisi kecuali "Joint Lot" (2026-08-11,
+    // instruksi eksplisit user, sama seperti QC Passed/QC to App di atas).
+    if (data.typeLot !== "Joint Lot" && !hasRemark) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["remark"], message: "Appearance Check Results wajib diisi kalau Admin QC Stage sudah diisi." });
     }
   });
 

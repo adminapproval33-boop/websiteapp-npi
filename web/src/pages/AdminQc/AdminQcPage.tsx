@@ -493,6 +493,21 @@ export default function AdminQcPage() {
     search.trim() ? row.order.toLowerCase().includes(search.trim().toLowerCase()) : true
   );
 
+  /** Wajib/tidaknya Lot Passed/QC to App/QC Passed mengikuti aturan per-stage
+   * yang SAMA PERSIS dengan validasi backend (lihat superRefine di
+   * server/src/modules/adminQc/adminQc.routes.ts) -- "Lot Packing" & "Approval"
+   * TETAP pakai aturan lama (Lot Packing skip QC to App krn langsung Packing
+   * tanpa Approval; Approval skip Lot Passed/QC Passed), TIDAK ikut "wajib
+   * semua". Appearance Check Results (remark) & aturan "Joint Lot" utk QC
+   * Passed/QC to App adalah kolom yg DIUBAH 2026-08-11 (instruksi eksplisit
+   * user): Joint Lot jadi TIDAK mewajibkan QC Passed/QC to App/remark;
+   * stage lain (termasuk Improve) tetap wajib isi remark. */
+  const jointLot = form.typeLot === "Joint Lot";
+  const lotPassedRequired = form.typeLot === "Lot Packing" || jointLot;
+  const qcToApprovalRequired = form.typeLot === "Approval";
+  const qcPassedRequired = form.typeLot === "Lot Packing";
+  const remarkRequired = !jointLot;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -521,30 +536,30 @@ export default function AdminQcPage() {
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
                 <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderResize("materialNumber")} {...gridNav("materialNumber")}>
-                  <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} />
+                  <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} required />
                 </ExcelField>
                 <ExcelField label="Material Description" widthPx={headerColWidths.materialDescription} onResizeStart={beginHeaderResize("materialDescription")} {...gridNav("materialDescription")}>
-                  <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
+                  <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} required />
                 </ExcelField>
                 <ExcelField label="Batch" widthPx={headerColWidths.batch} onResizeStart={beginHeaderResize("batch")} {...gridNav("batch")}>
                   <input value={form.batch} onChange={(e) => setForm({ ...form, batch: e.target.value })} required />
                 </ExcelField>
                 <ExcelField label="Order Qty" widthPx={headerColWidths.orderQty} onResizeStart={beginHeaderResize("orderQty")} {...gridNav("orderQty")}>
-                  <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
+                  <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} required />
                 </ExcelField>
                 <ExcelField label="Plant" widthPx={headerColWidths.plant} onResizeStart={beginHeaderResize("plant")} {...gridNav("plant")}>
-                  <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
+                  <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} required />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="IU Plant" widthPx={headerColWidths.iuPlant} onResizeStart={beginHeaderResize("iuPlant")} {...gridNav("iuPlant")}>
-                  <IuPlantSelect bare id="admin-qc-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} />
+                  <IuPlantSelect bare id="admin-qc-iu-plant" value={form.iuPlant} plant={form.plant} onChange={(v) => setForm({ ...form, iuPlant: v })} required />
                 </ExcelField>
                 <ExcelField label="Code Tanki" widthPx={headerColWidths.codeTanki} onResizeStart={beginHeaderResize("codeTanki")} {...gridNav("codeTanki")}>
-                  <TankSelect bare id="admin-qc-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required={false} />
+                  <TankSelect bare id="admin-qc-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
                 </ExcelField>
                 <ExcelField label="Admin QC Stage" widthPx={headerColWidths.typeLot} onResizeStart={beginHeaderResize("typeLot")} {...gridNav("typeLot")}>
-                  <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })}>
+                  <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })} required>
                     <option value="">-- Pilih --</option>
                     <option value="Improve">Improve</option>
                     <option value="Joint Lot">Joint Lot</option>
@@ -553,13 +568,13 @@ export default function AdminQcPage() {
                   </select>
                 </ExcelField>
                 <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")} {...gridNav("lotPassed")}>
-                  <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} />
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} required={lotPassedRequired} />
                 </ExcelField>
                 <ExcelField label="QC to App" widthPx={headerColWidths.qcToApproval} onResizeStart={beginHeaderResize("qcToApproval")} {...gridNav("qcToApproval")}>
-                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} />
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} required={qcToApprovalRequired} />
                 </ExcelField>
                 <ExcelField label="QC Passed" widthPx={headerColWidths.qcPassed} onResizeStart={beginHeaderResize("qcPassed")} {...gridNav("qcPassed")}>
-                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} />
+                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} required={qcPassedRequired} />
                 </ExcelField>
               </ExcelRow>
             </ExcelBlock>
@@ -641,7 +656,7 @@ export default function AdminQcPage() {
                 (bukan menimpa) ke Appearance Check Results Order ini -- jadi riwayat pengecekan sebelumnya tetap
                 tersimpan, tidak hilang.
               </p>
-              <textarea rows={5} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} />
+              <textarea rows={5} value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} required={remarkRequired} />
             </div>
 
             {error && <p className="error-text">{error}</p>}

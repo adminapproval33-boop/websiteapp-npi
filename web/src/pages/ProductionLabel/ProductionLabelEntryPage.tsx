@@ -65,7 +65,18 @@ interface CrossModuleData {
  * pecah 2 baris & overflow keluar halaman, makanya sekarang full-width.
  * Klik Cetak Label -> simpan dulu sbg baris History baru (POST
  * /production-label, lihat menu Label History) baru window.print(). */
-export default function ProductionLabelEntryPage() {
+export default function ProductionLabelEntryPage({
+  embedded = false,
+  initialOrder,
+}: {
+  /** Mode ringkas dipakai pop-up "Info Proses Material" -> baris "Production
+   * Label" setelah Packing (2026-08-11, instruksi eksplisit user: admin tidak
+   * perlu bolak-balik ke menu Production Label terpisah utk cetak) -- sama
+   * pola dgn embedded+initialOrder di PremixAftermixPage/MillingPage/dst.
+   * Sembunyikan tab switcher Entry/History, auto-cari Order dari initialOrder. */
+  embedded?: boolean;
+  initialOrder?: string;
+} = {}) {
   const { data: tanks } = useTankOptions();
   const [tab, setTab] = useState<"input" | "history">("input");
   const [order, setOrder] = useState("");
@@ -177,6 +188,20 @@ export default function ProductionLabelEntryPage() {
     }
   }
 
+  // Mode pop-up "Info Proses Material" (embedded+initialOrder) -- lihat
+  // komentar sama di PremixAftermixPage.tsx/MillingPage.tsx.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setOrder(initialOrder);
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() => {
+        /* Order tidak ditemukan di Master Data -- biarkan kosong, admin isi manual */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
+
   async function handlePrint() {
     if (!data) return;
     if (!isKnownTankCodeOrJoined(tanks, codeTanki)) {
@@ -214,18 +239,20 @@ export default function ProductionLabelEntryPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-          Production Label Entry
-        </button>
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          History
-        </button>
-      </div>
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Production Label Entry
+          </button>
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            History
+          </button>
+        </div>
+      )}
 
-      {tab === "history" && <LabelHistoryPage />}
+      {!embedded && tab === "history" && <LabelHistoryPage />}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <>
       <div className="panel label-form-panel">
         <div className="panel-header">Production Label Entry</div>

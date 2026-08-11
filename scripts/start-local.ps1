@@ -25,9 +25,15 @@ function Test-KeepAwakeRunning {
         Where-Object { $_.CommandLine -like '*keep-awake.ps1*' })
 }
 
+function Test-MouseJiggleRunning {
+    return $null -ne (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+        Where-Object { $_.CommandLine -like '*mouse-jiggle.ps1*' })
+}
+
 $backendUp = Test-PortListening 4000
 $frontendUp = Test-PortListening 5173
 $keepAwakeUp = Test-KeepAwakeRunning
+$mouseJiggleUp = Test-MouseJiggleRunning
 
 $pg = Get-Service postgresql-x64-18 -ErrorAction SilentlyContinue
 if ($pg -and $pg.Status -ne 'Running') {
@@ -45,6 +51,10 @@ if (-not $frontendUp) {
 if (-not $keepAwakeUp) {
     Write-Host "[NPI] Starting keep-awake..." -ForegroundColor Cyan
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$repoRoot\scripts\keep-awake.ps1" -WindowStyle Minimized
+}
+if (-not $mouseJiggleUp) {
+    Write-Host "[NPI] Starting mouse-jiggle..." -ForegroundColor Cyan
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$repoRoot\scripts\mouse-jiggle.ps1" -WindowStyle Minimized
 }
 
 if (-not $backendUp -or -not $frontendUp) {

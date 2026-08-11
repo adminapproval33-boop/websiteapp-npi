@@ -28,8 +28,10 @@ export interface StoredSession {
 // kena peringatan konflik walau fisiknya 1 orang di 1 browser yang sama.
 // Konsekuensinya: sesi TETAP tersimpan walau browser ditutup-buka lagi
 // (beda dari sessionStorage yg otomatis hilang) -- baru benar2 habis lewat
-// Logout eksplisit atau nganggur melebihi TTL sesi (sliding, lihat
-// SESSION_TTL_MINUTES di server/.env).
+// Logout eksplisit, ATAU login NIK yang sama dari device lain (force-revoke,
+// lihat revokeSessionsForUser/single-session gate). TIDAK ADA auto-logout
+// karena idle (2026-08-11, instruksi eksplisit user) -- SESSION_TTL_MINUTES
+// di server/.env sengaja dibuat sangat besar (10 tahun), bukan lagi 30 menit.
 export function loadSession(): StoredSession | null {
   const raw = localStorage.getItem(SESSION_KEY);
   if (!raw) return null;

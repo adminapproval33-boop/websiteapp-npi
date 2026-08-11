@@ -1,15 +1,26 @@
-/* Production Label -- Honeywell PC42T, ukuran sticker 100mm (lebar) x 140mm
-   (tinggi). Layout ke-5 (2026-08-04): niru template "shipping label" yg
-   dikirim user -- header brand, 1 barcode BESAR dominan (Batch, ditukar dgn
-   Order di revisi ke-7), baris info dipisah garis horizontal tipis (BUKAN
-   tabel bordered spt revisi ke-3), lalu barcode kecil (Order) + QR
-   berdampingan dekat bawah, ditutup baris Other. Revisi ke-9: semua jarak
-   (margin rule/header/value) dirapatkan, semua warna font dipaksa hitam
-   murni (#000, sebelumnya beberapa label pakai abu-abu #333), semua font
-   size dinaikkan lagi, dan semua weight dipastikan bold (700/800) --
-   instruksi eksplisit user. Semua angka mm di bawah sudah dikalibrasi &
-   diverifikasi lewat render headless Chrome (bukan tebakan) supaya PAS
-   mengisi 140mm tanpa overflow ke halaman ke-2 maupun nyisain celah kosong.
+/* Production Label -- Honeywell PC42T, ukuran sticker 95mm (lebar) x 135mm
+   (tinggi) -- DIUBAH dari 100x140mm (2026-08-11, instruksi eksplisit user).
+   Layout ke-5 (2026-08-04): niru template "shipping label" yg dikirim user
+   -- header brand, 1 barcode BESAR dominan (Batch, ditukar dgn Order di
+   revisi ke-7), baris info dipisah garis horizontal tipis (BUKAN tabel
+   bordered spt revisi ke-3), lalu barcode kecil (Order) + QR berdampingan
+   dekat bawah, ditutup baris Other. Revisi ke-9: semua jarak (margin
+   rule/header/value) dirapatkan, semua warna font dipaksa hitam murni
+   (#000, sebelumnya beberapa label pakai abu-abu #333), semua font size
+   dinaikkan lagi, dan semua weight dipastikan bold (700/800) -- instruksi
+   eksplisit user.
+   Revisi ke-13 (2026-08-11, instruksi eksplisit user): ukuran fisik label
+   diperkecil ke 95x135mm SEKALIGUS baris "Other" (Remark) harus muat sampai
+   4 baris tanpa overflow (dulu cuma diasumsikan pendek) -- dua permintaan
+   yg saling menekan ruang vertikal yg sama. Semua font/margin/tinggi
+   barcode & QR di bawah DIPERKECIL LAGI dari revisi ke-9 (bukan cuma
+   proporsional 95/100) supaya ruang ekstra utk Other 4-baris tetap
+   tersedia. Diverifikasi ULANG lewat render headless Chrome dgn skenario
+   TERBURUK (Material Description 2 baris + Other 4 baris penuh) -- PAS 1
+   halaman 135mm tanpa overflow ke halaman ke-2. Kalau kontennya lebih
+   pendek dari itu (kasus umum), akan ada sisa ruang kosong di bawah "Other"
+   -- ini WAJAR/disengaja (instruksi user: "layoutnya juga akan berubah"
+   mengikuti banyaknya info), bukan bug.
    PENTING -- @page pakai NAMA (`page: productionLabel`) SENGAJA, BUKAN
    @page tanpa nama, krn app ini SPA dan print.css (dipakai Print COA/Check
    Sheet, @page size:A4) ikut ke-bundle bareng CSS ini -- 2 @page anonim yg
@@ -17,7 +28,7 @@
    terjadi 2026-08-04). Named page dipilih spesifik by name lewat `page:`
    di elemen, jadi tidak collide dgn @page anonim manapun. */
 @page productionLabel {
-  size: 100mm 140mm;
+  size: 95mm 135mm;
   margin: 0;
 }
 
@@ -36,10 +47,10 @@
 
 .label-page {
   page: productionLabel;
-  width: 100mm;
-  height: 140mm;
+  width: 95mm;
+  height: 135mm;
   box-sizing: border-box;
-  padding: 4mm 5mm;
+  padding: 2.5mm 3.5mm;
   background: #fff;
   color: #000;
   font-family: Arial, Helvetica, sans-serif;
@@ -56,7 +67,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 1mm;
+  padding-bottom: 0.5mm;
 }
 
 .label-page .label-brand {
@@ -64,13 +75,13 @@
 }
 
 .label-page .label-brand-name {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   color: #000;
 }
 
 .label-page .label-brand-sub {
-  font-size: 11px;
+  font-size: 9.5px;
   font-weight: 700;
   color: #000;
 }
@@ -85,7 +96,7 @@
   border-top: 1.2pt solid #000;
   border-bottom: 1.2pt solid #000;
   height: 2.4pt;
-  margin: 0 0 1.8mm;
+  margin: 0 0 1.2mm;
   padding: 0;
 }
 
@@ -97,14 +108,14 @@
 .label-page .label-rule {
   border: none;
   border-top: 0.7pt solid #000;
-  margin: 2mm 0;
+  margin: 1.1mm 0;
 }
 
 .label-page .label-order-line {
   font-size: 14px;
   font-weight: 800;
   line-height: 1.1;
-  margin: 0 0 1.2mm;
+  margin: 0 0 0.6mm;
   color: #000;
 }
 
@@ -121,7 +132,7 @@
 }
 
 .label-page .label-order-barcode svg {
-  height: 18mm;
+  height: 12mm;
   width: 100%;
 }
 
@@ -150,7 +161,7 @@
 }
 
 .label-page .label-cell-value {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.15;
   margin: 0.15mm 0 0;
@@ -163,7 +174,7 @@
    .label-cell-value biasa yg tetap dipakai IU Plant/Material Type/Drum
    Colour supaya field2 itu TIDAK ikut membesar. */
 .label-page .label-cell-value-critical {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1.15;
   margin: 0.15mm 0 0;
@@ -179,7 +190,7 @@
    Plant dan malah pecah jadi 2 baris, mendorong konten overflow keluar
    140mm. */
 .label-page .label-cell-value-lg {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   line-height: 1.1;
   margin: 0.15mm 0 0;
@@ -218,7 +229,7 @@
 }
 
 .label-page .label-bottom-barcode svg {
-  height: 11mm;
+  height: 8mm;
   width: 100%;
 }
 
@@ -228,8 +239,8 @@
    mengorbankan keterbacaan scan, sekaligus membebaskan ruang vertikal
    supaya baris Other di bawahnya tidak kepotong/overflow. */
 .label-page .label-qr {
-  width: 18mm;
-  height: 18mm;
+  width: 14mm;
+  height: 14mm;
   flex-shrink: 0;
 }
 

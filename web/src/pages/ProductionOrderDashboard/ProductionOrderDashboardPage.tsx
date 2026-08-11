@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
@@ -12,6 +12,7 @@ import BongkaranPage from "../Bongkaran/BongkaranPage";
 import CheckResultsPage from "../CheckResults/CheckResultsPage";
 import ApprovalPage from "../Approval/ApprovalPage";
 import PackingPage from "../Packing/PackingPage";
+import ProductionLabelEntryPage from "../ProductionLabel/ProductionLabelEntryPage";
 import MaterialFlowPanel from "./MaterialFlowPanel";
 import OrderLookup from "../../components/OrderLookup";
 import ManualInputModal from "./ManualInputModal";
@@ -349,19 +350,34 @@ export default function ProductionOrderDashboardPage() {
     materialNumber: string | null;
     stages: { name: string; done: boolean }[];
     orderType: string | null;
+    /** True kalau modal ini dibuka lewat "+New PO Produk" (cari No Order),
+     * BUKAN lewat klik baris dashboard (2026-08-11, instruksi eksplisit user)
+     * -- dipakai utk munculkan tombol "Kembali" (balik ke layar ketik No
+     * Order) HANYA di alur pencarian, krn alur baris dashboard tidak py
+     * "layar ketik No Order" utk dikembalikan. */
+    viaSearch?: boolean;
   } | null>(null);
   const [inputTarget, setInputTarget] = useState<{ order: string; stage: string } | null>(null);
+  // Setelah Save berhasil di modal "Input <Tahap>", modal TIDAK langsung
+  // tertutup (2026-08-11, instruksi eksplisit user) supaya admin bisa lanjut
+  // input tahap lain lewat "Kembali" tanpa harus buka ulang. Form-nya SENDIRI
+  // sudah py pesan sukses inline ("Data berhasil disimpan.") persis di
+  // sebelah tombol Save Data (lihat mis. PremixAftermixPage `message`/
+  // `status-text`) -- JANGAN tambah lapisan notifikasi lain di level modal
+  // ini (pernah dicoba: layar kosong "✓ Berhasil input" yg nutupin form,
+  // dirasa mengganggu & malah nutupin pesan inline yg sudah bagus, DIHAPUS
+  // lagi 2026-08-11 sesi yg sama).
   // Tombol "+New PO Produk" (2026-08-02, instruksi eksplisit user): utk Order
   // yg SUDAH ada di Master Data tapi belum muncul di dashboard ini krn
   // Material Number-nya belum py histori tahap apa pun (jadi tidak lolos
-  // filter queuePremixRows di backend). Cari Order-nya dulu lewat modal kecil
-  // ini -> begitu ketemu di Master Data, langsung lempar ke popup "Info
-  // Proses Material" yg SUDAH ADA (infoTarget, sama persis dgn yg dibuka dari
-  // tombol ➜ baris dashboard) supaya admin set tahap wajib, baru lanjut Buka
-  // Input dari situ. `stages: []` krn Order ini belum py histori proses sama
-  // sekali -- MaterialFlowPanel aman dgn array kosong (findBlockingStage
-  // return null, semua tombol Buka Input aktif tanpa gate).
-  const [newOrderModalOpen, setNewOrderModalOpen] = useState(false);
+  // filter queuePremixRows di backend). Klik tombol ➜ langsung buka popup
+  // "Info Proses Material" (infoTarget) dgn `order: ""` (mode cari) -- pencarian
+  // Order digabung LANGSUNG ke dalam modal itu (2026-08-11, instruksi eksplisit
+  // user: awalnya modal kecil TERPISAH lalu lempar ke Info Proses, dirasa 1
+  // langkah lebih baik digabung jadi 1 modal saja). `stages: []` krn Order ini
+  // belum py histori proses sama sekali -- MaterialFlowPanel aman dgn array
+  // kosong (findBlockingStage return null, semua tombol Buka Input aktif tanpa
+  // gate) begitu Order-nya ketemu & infoTarget.order terisi.
   const [newOrderValue, setNewOrderValue] = useState("");
   // Tombol "+Input Manual" (2026-08-03, instruksi eksplisit user): catatan
   // manual TERPISAH dari tabel Production Order Monitoring, fungsinya sama
@@ -372,6 +388,8 @@ export default function ProductionOrderDashboardPage() {
   // eksplisit user: "jangan buat aksesnya sampai ke Info Proses Material") --
   // langsung buka form Input Manual, tanpa gate popup apa pun.
   const [manualInputOpen, setManualInputOpen] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const rowsQuery = useQuery({
     queryKey: ["dashboard-production-orders", search],
@@ -460,7 +478,7 @@ export default function ProductionOrderDashboardPage() {
                 className="btn"
                 onClick={() => {
                   setNewOrderValue("");
-                  setNewOrderModalOpen(true);
+                  setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
                 }}
               >
                 +New PO Produk
@@ -758,44 +776,83 @@ export default function ProductionOrderDashboardPage() {
         </Modal>
       )}
 
-      {newOrderModalOpen && (
-        <Modal title="New PO Produk" onClose={() => setNewOrderModalOpen(false)} width={480}>
-          <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-            Ketik nomor Order/PO yang sudah ada di Master Data (Referensi Order/PO) tapi belum muncul di dashboard
-            ini, lalu tekan Enter. Kalau ketemu, lanjut ke pengaturan tahap proses (Info Proses Material) untuk
-            Material Number-nya.
-          </p>
-          <OrderLookup
-            value={newOrderValue}
-            onChange={setNewOrderValue}
-            onFound={(data) => {
-              setNewOrderModalOpen(false);
-              setInfoTarget({ order: data.order, materialNumber: data.materialNumber, stages: [], orderType: data.orderType ?? null });
+      {infoTarget && (
+        <Modal
+          title={infoTarget.order ? `Info Proses — Order ${infoTarget.order}` : "Info Proses Material — Cari Order"}
+          onClose={() => setInfoTarget(null)}
+          onBack={
+            infoTarget.viaSearch && infoTarget.order
+              ? () => {
+                  setNewOrderValue("");
+                  setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
+                }
+              : undefined
+          }
+          width={860}
+          bodyPadding={12}
+          closeOnBackdropClick={false}
+        >
+          {!infoTarget.materialNumber && (
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                Ketik nomor Order/PO yang sudah ada di Master Data (Referensi Order/PO) tapi belum muncul di
+                dashboard ini, lalu tekan Enter. Tabel Tahap di bawah otomatis terisi begitu Order ketemu.
+              </p>
+              <OrderLookup
+                value={newOrderValue}
+                onChange={setNewOrderValue}
+                onFound={(data) =>
+                  setInfoTarget({
+                    order: data.order,
+                    materialNumber: data.materialNumber,
+                    stages: [],
+                    orderType: data.orderType ?? null,
+                    viaSearch: true,
+                  })
+                }
+              />
+            </div>
+          )}
+          <MaterialFlowPanel
+            materialNumber={infoTarget.materialNumber}
+            stages={infoTarget.stages}
+            orderType={infoTarget.orderType}
+            order={infoTarget.order || null}
+            onFlowSaved={() => rowsQuery.refetch()}
+            onOpenStage={(stage) => {
+              if (!infoTarget.order) {
+                window.alert("Cari & pilih Order dulu di atas sebelum bisa buka Input tahap.");
+                return;
+              }
+              setInputTarget({ order: infoTarget.order, stage });
             }}
           />
         </Modal>
       )}
 
-      {infoTarget && (
-        <Modal title={`Info Proses — Order ${infoTarget.order}`} onClose={() => setInfoTarget(null)} width={860}>
-          <MaterialFlowPanel
-            materialNumber={infoTarget.materialNumber}
-            stages={infoTarget.stages}
-            orderType={infoTarget.orderType}
-            order={infoTarget.order}
-            onFlowSaved={() => rowsQuery.refetch()}
-            onOpenStage={(stage) => setInputTarget({ order: infoTarget.order, stage })}
-          />
-        </Modal>
-      )}
-
       {inputTarget && (
-        <Modal title={`Input ${inputTarget.stage} — Order ${inputTarget.order}`} onClose={() => setInputTarget(null)} width={980}>
+        <Modal
+          title={`Input ${inputTarget.stage} — Order ${inputTarget.order}`}
+          onClose={() => {
+            setInputTarget(null);
+            setInfoTarget(null);
+          }}
+          onBack={() => setInputTarget(null)}
+          width={980}
+          closeOnBackdropClick={false}
+        >
           {(() => {
-            const closeAndRefresh = () => {
-              setInputTarget(null);
-              setInfoTarget(null);
-              rowsQuery.refetch();
+            const closeAndRefresh = async () => {
+              const result = await rowsQuery.refetch();
+              const freshRow = result.data?.find((r) => r.order === inputTarget.order);
+              if (freshRow) {
+                setInfoTarget((prev) =>
+                  prev
+                    ? { ...prev, stages: freshRow.stages, materialNumber: freshRow.materialNumber, orderType: freshRow.orderType }
+                    : prev
+                );
+                queryClient.invalidateQueries({ queryKey: ["bongkaran-latest-by-order", inputTarget.order] });
+              }
             };
             switch (inputTarget.stage) {
               case "Premix":
@@ -830,6 +887,8 @@ export default function ProductionOrderDashboardPage() {
                 return <ApprovalPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
               case "Packing":
                 return <PackingPage embedded initialOrder={inputTarget.order} onSaved={closeAndRefresh} />;
+              case "Production Label":
+                return <ProductionLabelEntryPage embedded initialOrder={inputTarget.order} />;
               default:
                 return <p style={{ color: "var(--text-muted)" }}>Tahap tidak dikenali.</p>;
             }

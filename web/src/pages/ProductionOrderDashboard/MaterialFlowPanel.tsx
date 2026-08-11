@@ -168,6 +168,20 @@ export default function MaterialFlowPanel({
     return blocking?.name ?? null;
   }
 
+  /** Gerbang KHUSUS tombol "Production Label" (2026-08-11, instruksi eksplisit
+   * user; DIREVISI hari yg sama -- Packing ditambahkan ke pengecualian) --
+   * BEDA dari findBlockingStage di atas (yg cuma cek antar-tahap PRODUKSI
+   * berurutan). Production Label baru bisa dibuka kalau SEMUA tahap `stages`
+   * lain (yg wajib utk Material ini) sudah Selesai, KECUALI QC, Approval, &
+   * Packing -- ketiganya sengaja dikecualikan (boleh menyusul/paralel setelah
+   * label dicetak). Tahap yg TIDAK WAJIB (tidak ada di `stages`) otomatis
+   * tidak ikut dicek, sama seperti findBlockingStage. */
+  const LABEL_GATE_EXCLUDED_STAGES = new Set(["QC", "Approval", "Packing"]);
+  function findBlockingStageForLabel(): string | null {
+    const blocking = stages.find((s) => !LABEL_GATE_EXCLUDED_STAGES.has(s.name) && !s.done);
+    return blocking?.name ?? null;
+  }
+
   /** Tahap yg py gerbang "Wajib?" di backend (2026-08-06, instruksi eksplisit
    * user, lihat checkStageApplicableGate di lib/stageGate.ts) -- HANYA Premix/
    * Milling/Aftermix/Colour Matching. QC & Packing selalu wajib mutlak (tidak
@@ -282,21 +296,65 @@ export default function MaterialFlowPanel({
     );
   }
 
+  /** Baris "Production Label" (2026-08-11, instruksi eksplisit user: supaya
+   * admin tidak perlu bolak-balik ke menu Production Label terpisah utk
+   * cetak label) -- diletakkan PALING BAWAH, setelah Packing. Sama pola dgn
+   * Bongkaran: TIDAK terhubung Master Data Material Flow Proses (tidak ada
+   * "Wajib/Tidak"), dan cetak label bisa dilakukan berkali-kali (bukan
+   * konsep sekali-selesai) jadi kolom Status ditampilkan "-" juga, bukan
+   * Selesai/Belum. Cuma tampil kalau `order` diketahui. */
+  function renderProductionLabelRow() {
+    if (!order) return null;
+    return (
+      <tr key="production-label">
+        <td>Production Label</td>
+        <td>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }} title="Tidak terhubung ke Master Data Material Flow Proses.">
+            -
+          </span>
+        </td>
+        <td>
+          <span style={{ color: "var(--text-muted)" }}>-</span>
+        </td>
+        <td>
+          {onOpenStage && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+              title="Buka Production Label"
+              onClick={() => {
+                const blocking = findBlockingStageForLabel();
+                if (blocking) {
+                  window.alert(`Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa cetak Production Label.`);
+                  return;
+                }
+                onOpenStage("Production Label");
+              }}
+            >
+              Buka Input ➜
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
   return (
-    <div className="panel" style={{ marginBottom: 16 }}>
-      <div className="panel-header">
+    <div className="panel" style={{ marginBottom: 8 }}>
+      <div className="panel-header" style={{ padding: "10px 20px" }}>
         Info Proses Material{materialNumber ? ` — ${materialNumber}` : ""}
       </div>
-      <div className="panel-body">
+      <div className="panel-body" style={{ padding: 14 }}>
         {isRfOrder && (
-          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
+          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 8, fontSize: "0.85rem" }}>
             Order Type Order ini <strong>{orderType}</strong> -- centang "Wajib?" di tabel ini cuma tampilan
             sementara utk Order ini sendiri, TIDAK akan mengubah Master Data Material Flow Proses (yg berlaku utk
             SEMUA Order dgn Material Number yang sama).
           </p>
         )}
         {!materialNumber && (
-          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
+          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 8, fontSize: "0.85rem" }}>
             Material Number Order ini belum diketahui (Order tidak terdaftar di Master Data Referensi Order/PO) --
             tabel tahap di bawah tetap bisa dipakai utk buka Input tiap proses, tapi centang "Wajib?" tidak bisa
             disimpan permanen sampai Material Number-nya diketahui.
@@ -304,7 +362,7 @@ export default function MaterialFlowPanel({
         )}
         {materialNumber && flowQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
         {materialNumber && !flowQuery.isLoading && !flowQuery.data && (
-          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 12, fontSize: "0.85rem" }}>
+          <p style={{ color: "var(--warning, #b7791f)", marginTop: 0, marginBottom: 8, fontSize: "0.85rem" }}>
             Material ini belum terdaftar di Master Data &gt; Material Flow Proses -- semua tahap dianggap "Tidak Wajib"
             sampai dicentang &amp; disimpan di sini (kecuali QC/Packing, selalu wajib).
           </p>
@@ -312,7 +370,7 @@ export default function MaterialFlowPanel({
         {checked && (
           <>
             <div style={{ overflowX: "auto" }}>
-              <table className="data-table">
+              <table className="data-table mf-compact-table">
                 <thead>
                   <tr>
                     <th>Tahap</th>
@@ -325,6 +383,7 @@ export default function MaterialFlowPanel({
                   {STAGE_ROWS.slice(0, 4).map(renderStageRow)}
                   {renderBongkaranRow()}
                   {STAGE_ROWS.slice(4).map(renderStageRow)}
+                  {renderProductionLabelRow()}
                 </tbody>
               </table>
             </div>

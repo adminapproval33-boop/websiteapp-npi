@@ -251,41 +251,43 @@
 }
 
 @media print {
-  .label-form-panel,
-  .label-toolbar {
-    display: none !important;
+  /* RIWAYAT PERBAIKAN (2026-08-11, laporan user via foto hasil cetak fisik,
+     3 percobaan): pendekatan awal cuma sembunyikan elemen chrome SATU-SATU
+     by name (.topbar/.sidebar/.statusbar/.label-form-panel/.label-toolbar,
+     lalu .modal-backdrop/.modal-panel/.modal-header) -- gagal berulang krn
+     app ini punya banyak lapisan pembungkus (AppLayout, lalu utk popup
+     Info Proses ada 2 Modal BERTUMPUK: "Info Proses" -> "Input Production
+     Label", masing2 py `position:fixed` + `overflow:auto` sendiri), dan
+     tiap kali 1 lapisan dinetralkan, lapisan/isi LAIN yg tadinya "kebetulan
+     ketutupan" jadi ikut kecetak (percobaan ke-2: tabel Info Proses
+     menimpa; percobaan ke-3 stlh itu dinetralkan: teks deskripsi halaman
+     dashboard + tombol chat "Kontak" malah yg tercetak, krn begitu modal
+     dibikin position:static dia ikut alur dokumen normal & mendorong SEMUA
+     konten SEBELUMNYA di DOM -- termasuk isi halaman dashboard di
+     belakangnya -- ikut ke-paginate ke cetakan).
+     FIX FINAL -- teknik "print isolation" standar, TIDAK peduli ada berapa
+     lapisan pembungkus apa pun (AppLayout, 1 modal, 2 modal bertumpuk, dst):
+     sembunyikan (visibility:hidden, BUKAN display:none, supaya tidak
+     mengubah reflow elemen lain) SELURUH isi <body>, lalu tampilkan LAGI
+     cuma .label-page & seluruh anak-nya, lalu keluarkan dari alur dokumen
+     (position:absolute, top/left 0) supaya dia berdiri sendiri pas di
+     pojok kertas (@page productionLabel) -- tidak peduli sebelumnya ada di
+     kedalaman DOM/scroll/overflow apa pun. Rule ini SENGAJA dibungkus
+     `body:has(.label-page)` supaya hanya aktif kalau memang lagi nyetak
+     label (CSS ini ke-bundle SATU FILE dgn print.css punya Print COA/Check
+     Sheet, lihat komentar @page di atas -- jangan sampai ikut menghilangkan
+     isi cetakan COA/Check Sheet yg tidak py .label-page sama sekali). */
+  body:has(.label-page) * {
+    visibility: hidden !important;
   }
-  /* Sembunyikan chrome AppLayout (Topbar/Sidebar/footer statusbar) -- beda
-     dari Print COA/Check Sheet yg route-nya BERDIRI SENDIRI di luar
-     AppLayout (lihat App.tsx), Production Label Entry ini dirender DI
-     DALAM AppLayout biasa, jadi window.print() ikut mencetak topbar
-     ("Websiteapp NPI") dan footer ("Status: Online") kalau tidak
-     disembunyikan eksplisit di sini (dilaporkan user 2026-08-04). */
-  .topbar,
-  .sidebar,
-  .sidebar-backdrop,
-  .statusbar {
-    display: none !important;
-  }
-  .label-preview-wrap {
-    padding: 0;
-    background: none;
-    border-radius: 0;
+  body:has(.label-page) .label-page,
+  body:has(.label-page) .label-page * {
+    visibility: visible !important;
   }
   .label-page {
-    box-shadow: none;
-  }
-  /* Netralkan chrome .panel (border/shadow/padding, lihat app.css) di panel
-     pembungkus preview supaya HANYA .label-page yg tercetak, pas 100x140mm --
-     kalau tidak, padding .panel-body (20px) + border .panel bikin konten
-     terdorong keluar area @page dan bisa memicu halaman ke-2 kosong. */
-  .label-print-panel {
-    border: none !important;
+    position: absolute !important;
+    top: 0;
+    left: 0;
     box-shadow: none !important;
-    border-radius: 0 !important;
-    background: none !important;
-  }
-  .label-print-panel .panel-body {
-    padding: 0 !important;
   }
 }

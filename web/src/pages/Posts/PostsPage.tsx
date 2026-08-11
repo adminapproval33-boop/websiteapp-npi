@@ -54,19 +54,20 @@ export default function PostsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
-  // Filter "#hashtag" (2026-08-11, instruksi eksplisit user: bisa cari
-  // hashtag pas ada event, muncul semua Papan Info yg pakai hashtag itu) --
-  // diisi dgn klik hashtag di dalam sebuah post (PostContent.tsx) ATAU lewat
-  // kotak cari manual di bawah. `null` = tampilkan semua (perilaku lama).
-  const [activeTag, setActiveTag] = useState<string | null>(null);
-  const [tagSearchInput, setTagSearchInput] = useState("");
+  // Satu kotak cari (2026-08-11, instruksi eksplisit user: awalnya cuma bisa
+  // cari "#hashtag", lalu diminta "kalau mencari postingan biasa yang tidak
+  // pakai # tidak bisa yah?" -> "satu kotak saja") -- `search` nampung
+  // APAPUN yg dicari, baik "#tag" (diisi otomatis pas klik hashtag di dalam
+  // sebuah post, lihat PostContent.tsx / tombol Trending) maupun kata kunci
+  // bebas dari kotak cari manual. Backend (GET /posts?q=) yg urus cocokkan
+  // ke `hashtags` (persis) DAN `content` (substring), lihat postsSearchWhere
+  // di posts.routes.ts. `null` = tampilkan semua (perilaku lama).
+  const [search, setSearch] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
 
   const postsQuery = useQuery({
-    queryKey: ["posts", activeTag],
-    queryFn: () =>
-      api
-        .get<{ success: boolean; data: PostRow[] }>(`/posts${activeTag ? `?tag=${encodeURIComponent(activeTag)}` : ""}`)
-        .then((r) => r.data),
+    queryKey: ["posts", search],
+    queryFn: () => api.get<{ success: boolean; data: PostRow[] }>(`/posts${search ? `?q=${encodeURIComponent(search)}` : ""}`).then((r) => r.data),
     refetchInterval: 15000,
   });
 
@@ -80,14 +81,17 @@ export default function PostsPage() {
   });
 
   function openTag(tag: string) {
-    setActiveTag(tag.toLowerCase());
-    setTagSearchInput("");
+    setSearch(`#${tag.toLowerCase()}`);
+    setSearchInput("");
   }
 
-  function submitTagSearch(e: FormEvent) {
+  function submitSearch(e: FormEvent) {
     e.preventDefault();
-    const t = tagSearchInput.trim().replace(/^#/, "");
-    if (t) openTag(t);
+    const q = searchInput.trim();
+    if (q) {
+      setSearch(q);
+      setSearchInput("");
+    }
   }
 
   const createMutation = useMutation({
@@ -158,11 +162,11 @@ export default function PostsPage() {
           dari GET /posts/hashtags (tanpa `q`), diurut by jumlah pemakaian. */}
       <div className="panel">
         <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <form onSubmit={submitTagSearch} style={{ display: "flex", gap: 8 }}>
+          <form onSubmit={submitSearch} style={{ display: "flex", gap: 8 }}>
             <input
-              value={tagSearchInput}
-              onChange={(e) => setTagSearchInput(e.target.value)}
-              placeholder="Cari #hashtag yang ingin kamu temukan..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Cari #hashtag atau kata kunci postingan..."
               style={{ flex: 1 }}
             />
             <button type="submit" className="btn btn-outline" style={{ padding: "3px 14px" }}>
@@ -182,8 +186,8 @@ export default function PostsPage() {
                     padding: "2px 10px",
                     fontSize: 12,
                     borderRadius: 999,
-                    color: activeTag === t.tag ? "#fff" : "#4f46e5",
-                    background: activeTag === t.tag ? "#4f46e5" : "transparent",
+                    color: search === `#${t.tag}` ? "#fff" : "#4f46e5",
+                    background: search === `#${t.tag}` ? "#4f46e5" : "transparent",
                     borderColor: "#4f46e5",
                   }}
                 >
@@ -195,7 +199,7 @@ export default function PostsPage() {
         </div>
       </div>
 
-      {activeTag && (
+      {search && (
         <div
           className="panel"
           style={{
@@ -208,9 +212,9 @@ export default function PostsPage() {
           }}
         >
           <span style={{ fontSize: 13 }}>
-            Menampilkan postingan dgn hashtag <strong>#{activeTag}</strong> ({posts.length})
+            Menampilkan hasil utk <strong>{search}</strong> ({posts.length})
           </span>
-          <button type="button" className="btn btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={() => setActiveTag(null)}>
+          <button type="button" className="btn btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={() => setSearch(null)}>
             Tampilkan Semua
           </button>
         </div>
@@ -395,10 +399,10 @@ export default function PostsPage() {
         );
       })}
 
-      {!postsQuery.isLoading && posts.length === 0 && activeTag && (
-        <p style={{ textAlign: "center", color: "var(--muted)" }}>Belum ada postingan dengan hashtag #{activeTag}.</p>
+      {!postsQuery.isLoading && posts.length === 0 && search && (
+        <p style={{ textAlign: "center", color: "var(--muted)" }}>Tidak ada postingan yang cocok dengan "{search}".</p>
       )}
-      {!postsQuery.isLoading && posts.length === 0 && !activeTag && (
+      {!postsQuery.isLoading && posts.length === 0 && !search && (
         <p style={{ textAlign: "center", color: "var(--muted)" }}>Belum ada postingan. Jadilah yang pertama!</p>
       )}
     </div>

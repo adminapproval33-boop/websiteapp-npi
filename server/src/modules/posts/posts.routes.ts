@@ -77,12 +77,27 @@ postsRouter.get(
   })
 );
 
+/** Satu kotak cari (2026-08-11, instruksi eksplisit user: "kalau mencari
+ * postingan biasa yang tidak pakai # tidak bisa yah?" -> "satu kotak saja",
+ * BUKAN dipisah jadi 2 kotak beda) -- terima "#tag" MAUPUN kata kunci
+ * bebas. "#" di depan dibuang (opsional, boleh diketik boleh tidak, sama2
+ * dicoba sbg tag PERSIS lewat `hashtags: { has }` DAN sbg substring bebas
+ * lewat `content: { contains }`) supaya baik klik hashtag (selalu kirim
+ * "#tag") maupun ketik manual kata kunci match ke query yg sama. */
+function postsSearchWhere(raw: string) {
+  const bare = raw.trim().replace(/^#/, "");
+  if (!bare) return undefined;
+  return {
+    OR: [{ content: { contains: bare, mode: "insensitive" as const } }, { hashtags: { has: bare.toLowerCase() } }],
+  };
+}
+
 postsRouter.get(
   "/",
   asyncRoute(async (req: AuthedRequest, res) => {
-    const tag = ((req.query.tag as string) ?? "").trim().toLowerCase();
+    const where = postsSearchWhere((req.query.q as string) ?? "");
     const posts = await prisma.post.findMany({
-      where: tag ? { hashtags: { has: tag } } : undefined,
+      where,
       orderBy: { timestamp: "desc" },
       take: 50,
       include: {

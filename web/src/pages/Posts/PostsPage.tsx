@@ -1,7 +1,8 @@
 import { FormEvent, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
-import AutoGrowTextarea from "../../components/AutoGrowTextarea";
+import MentionTextarea from "../../components/MentionTextarea";
+import PostContent from "../../components/PostContent";
 import { formatDateTime } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
 import Avatar from "../../components/Avatar";
@@ -53,12 +54,41 @@ export default function PostsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  // Filter "#hashtag" (2026-08-11, instruksi eksplisit user: bisa cari
+  // hashtag pas ada event, muncul semua Papan Info yg pakai hashtag itu) --
+  // diisi dgn klik hashtag di dalam sebuah post (PostContent.tsx) ATAU lewat
+  // kotak cari manual di bawah. `null` = tampilkan semua (perilaku lama).
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [tagSearchInput, setTagSearchInput] = useState("");
 
   const postsQuery = useQuery({
-    queryKey: ["posts"],
-    queryFn: () => api.get<{ success: boolean; data: PostRow[] }>("/posts").then((r) => r.data),
+    queryKey: ["posts", activeTag],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: PostRow[] }>(`/posts${activeTag ? `?tag=${encodeURIComponent(activeTag)}` : ""}`)
+        .then((r) => r.data),
     refetchInterval: 15000,
   });
+
+  // Daftar hashtag "trending" (2026-08-11) -- tanpa `q`, endpoint yg sama
+  // dgn autocomplete "#" di MentionTextarea, cuma dipanggil tanpa filter
+  // supaya dapat semua diurut by jumlah pemakaian.
+  const trendingTagsQuery = useQuery({
+    queryKey: ["hashtags-trending"],
+    queryFn: () => api.get<{ success: boolean; data: { tag: string; count: number }[] }>("/posts/hashtags").then((r) => r.data),
+    refetchInterval: 30000,
+  });
+
+  function openTag(tag: string) {
+    setActiveTag(tag.toLowerCase());
+    setTagSearchInput("");
+  }
+
+  function submitTagSearch(e: FormEvent) {
+    e.preventDefault();
+    const t = tagSearchInput.trim().replace(/^#/, "");
+    if (t) openTag(t);
+  }
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -127,10 +157,10 @@ export default function PostsPage() {
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", gap: 10 }}>
               <Avatar name={user?.name ?? "?"} avatarPath={user?.avatarPath ?? null} />
-              <AutoGrowTextarea
+              <MentionTextarea
                 value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Bagikan ide atau apa yang sedang Anda kerjakan..."
+                onChange={setContent}
+                placeholder="Bagikan ide atau apa yang sedang Anda kerjakan... ketik @ utk tag orang, # utk hashtag"
                 style={{ flex: 1 }}
               />
             </div>
@@ -172,6 +202,70 @@ export default function PostsPage() {
         </div>
       </div>
 
+      {/* Cari & jelajah hashtag (2026-08-11, instruksi eksplisit user: "hastag
+          berguna saat ada event bisa cari hastag tersebut, maka akan muncul
+          semua papan info tentang hastag tersebut"). Trending diambil dari
+          GET /posts/hashtags (tanpa `q`), diurut by jumlah pemakaian. */}
+      <div className="panel">
+        <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <form onSubmit={submitTagSearch} style={{ display: "flex", gap: 8 }}>
+            <input
+              value={tagSearchInput}
+              onChange={(e) => setTagSearchInput(e.target.value)}
+              placeholder="Cari # hashtag (mis. event2026)..."
+              style={{ flex: 1 }}
+            />
+            <button type="submit" className="btn btn-outline" style={{ padding: "3px 14px" }}>
+              Cari
+            </button>
+          </form>
+          {(trendingTagsQuery.data ?? []).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>Trending:</span>
+              {(trendingTagsQuery.data ?? []).map((t) => (
+                <button
+                  key={t.tag}
+                  type="button"
+                  onClick={() => openTag(t.tag)}
+                  className="btn btn-outline"
+                  style={{
+                    padding: "2px 10px",
+                    fontSize: 12,
+                    borderRadius: 999,
+                    color: activeTag === t.tag ? "#fff" : "#4f46e5",
+                    background: activeTag === t.tag ? "#4f46e5" : "transparent",
+                    borderColor: "#4f46e5",
+                  }}
+                >
+                  #{t.tag} <span style={{ opacity: 0.7 }}>({t.count})</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {activeTag && (
+        <div
+          className="panel"
+          style={{
+            padding: "10px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#eef2ff",
+            border: "1px solid #c7d2fe",
+          }}
+        >
+          <span style={{ fontSize: 13 }}>
+            Menampilkan postingan dgn hashtag <strong>#{activeTag}</strong> ({posts.length})
+          </span>
+          <button type="button" className="btn btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={() => setActiveTag(null)}>
+            Tampilkan Semua
+          </button>
+        </div>
+      )}
+
       {postsQuery.isLoading && <p style={{ textAlign: "center", color: "var(--muted)" }}>Memuat...</p>}
 
       {posts.map((post) => {
@@ -205,7 +299,7 @@ export default function PostsPage() {
                 )}
               </div>
 
-              <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{post.content}</p>
+              <PostContent content={post.content} onTagClick={openTag} />
 
               {post.attachments.map((att) =>
                 (att.fileType ?? "").startsWith("image/") ? (
@@ -274,7 +368,7 @@ export default function PostsPage() {
                           </button>
                         )}
                       </div>
-                      <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{c.content}</div>
+                      <PostContent content={c.content} onTagClick={openTag} style={{ fontSize: 13 }} />
                       <div style={{ fontSize: 11, color: "var(--muted)" }}>{formatDateTime(c.timestamp)}</div>
                     </div>
                   </div>
@@ -283,16 +377,12 @@ export default function PostsPage() {
 
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Avatar name={user?.name ?? "?"} avatarPath={user?.avatarPath ?? null} size={28} />
-                <input
+                <MentionTextarea
                   value={commentDrafts[post.id] ?? ""}
-                  onChange={(e) => setCommentDrafts((d) => ({ ...d, [post.id]: e.target.value }))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      submitComment(post.id);
-                    }
-                  }}
-                  placeholder="Tulis komentar..."
+                  onChange={(v) => setCommentDrafts((d) => ({ ...d, [post.id]: v }))}
+                  onEnterSubmit={() => submitComment(post.id)}
+                  rows={1}
+                  placeholder="Tulis komentar... (@ tag, # hashtag)"
                   style={{ flex: 1 }}
                 />
                 <button type="button" className="btn btn-outline" style={{ padding: "3px 12px" }} onClick={() => submitComment(post.id)}>
@@ -304,7 +394,10 @@ export default function PostsPage() {
         );
       })}
 
-      {!postsQuery.isLoading && posts.length === 0 && (
+      {!postsQuery.isLoading && posts.length === 0 && activeTag && (
+        <p style={{ textAlign: "center", color: "var(--muted)" }}>Belum ada postingan dengan hashtag #{activeTag}.</p>
+      )}
+      {!postsQuery.isLoading && posts.length === 0 && !activeTag && (
         <p style={{ textAlign: "center", color: "var(--muted)" }}>Belum ada postingan. Jadilah yang pertama!</p>
       )}
     </div>

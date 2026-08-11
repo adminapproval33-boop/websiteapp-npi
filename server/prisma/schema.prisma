@@ -844,6 +844,13 @@ model Post {
   authorNik   String
   content     String
   timestamp   DateTime         @default(now())
+  /// Diekstrak otomatis dari `content` saat posting (regex `#kata`, lihat
+  /// extractHashtags di posts.routes.ts) -- disimpan lowercase, DIPISAH dari
+  /// tampilan (yg tetap render langsung dari `content` apa adanya, lihat
+  /// PostContent.tsx) supaya "cari # pas ada event" (2026-08-11, instruksi
+  /// eksplisit user) bisa query cepat via `hashtags: { has: tag }` tanpa
+  /// full-text scan ke `content`.
+  hashtags    String[]         @default([])
   attachments PostAttachment[]
   comments    PostComment[]
   likes       PostLike[]

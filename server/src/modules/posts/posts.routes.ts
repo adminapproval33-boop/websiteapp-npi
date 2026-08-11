@@ -37,10 +37,52 @@ function authorInfo(map: Map<string, { name: string; department: string; avatarP
   };
 }
 
+/** Ekstrak semua "#kata" dari isi post (2026-08-11, instruksi eksplisit
+ * user: hashtag "berguna saat ada event bisa cari hastag tersebut, maka
+ * akan muncul semua papan info tentang hastag itu" -- perlu field
+ * terindeks TERPISAH dari `content` mentah spy filter GET / cepat, lihat
+ * `hashtags` di schema.prisma). Disimpan lowercase (case-insensitive saat
+ * dicari/di-klik), TAPI tampilan di layar tetap ambil dari `content` asli
+ * (lihat PostContent.tsx di frontend) jadi huruf besar/kecil yg diketik
+ * user tetap kelihatan apa adanya di teksnya. \p{L}\p{N}_ (unicode-aware)
+ * spy nama event berbahasa Indonesia dgn huruf apa pun tetap kena. */
+function extractHashtags(content: string): string[] {
+  const matches = content.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+  const tags = matches.map((m) => m.slice(1).toLowerCase());
+  return Array.from(new Set(tags));
+}
+
+/** Saran/daftar hashtag (2026-08-11) -- dipakai DUA tempat: autocomplete "#"
+ * di MentionTextarea saat mengetik (dgn `q`), DAN daftar "trending" di atas
+ * Papan Info (tanpa `q`). Dihitung dari `hashtags` 2000 post TERAKHIR
+ * (bukan agregat SQL -- skala internal kantor kecil, cukup dihitung di JS,
+ * tidak perlu index GIN/raw SQL). */
+postsRouter.get(
+  "/hashtags",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const q = ((req.query.q as string) ?? "").trim().toLowerCase();
+    const posts = await prisma.post.findMany({
+      select: { hashtags: true },
+      orderBy: { timestamp: "desc" },
+      take: 2000,
+    });
+    const counts = new Map<string, number>();
+    for (const p of posts) {
+      for (const h of p.hashtags) counts.set(h, (counts.get(h) ?? 0) + 1);
+    }
+    let tags = Array.from(counts.entries()).map(([tag, count]) => ({ tag, count }));
+    if (q) tags = tags.filter((t) => t.tag.includes(q));
+    tags.sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    res.json({ success: true, data: tags.slice(0, 15) });
+  })
+);
+
 postsRouter.get(
   "/",
   asyncRoute(async (req: AuthedRequest, res) => {
+    const tag = ((req.query.tag as string) ?? "").trim().toLowerCase();
     const posts = await prisma.post.findMany({
+      where: tag ? { hashtags: { has: tag } } : undefined,
       orderBy: { timestamp: "desc" },
       take: 50,
       include: {
@@ -87,7 +129,7 @@ postsRouter.post(
       return;
     }
     const created = await prisma.post.create({
-      data: { content: parsed.data.content, authorNik: req.auth!.nik },
+      data: { content: parsed.data.content, authorNik: req.auth!.nik, hashtags: extractHashtags(parsed.data.content) },
     });
     res.status(201).json({ success: true, message: "Berhasil diposting.", data: created });
   })

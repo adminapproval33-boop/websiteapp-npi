@@ -118,6 +118,21 @@ export default function MaterialFlowPanel({
     enabled: !!order,
   });
 
+  /// Status "Production Label" Order ini sendiri (2026-08-12, instruksi
+  /// eksplisit user: kalau sudah pernah dicetak, kolom "Status Order Ini"
+  /// jadi "Selesai") -- sama pola dgn bongkaranQuery di atas, TIDAK terhubung
+  /// Master Data Material Flow Proses.
+  const productionLabelQuery = useQuery({
+    queryKey: ["production-label-latest-by-order", order],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { id: string } | null }>(
+          `/production-label/latest-by-order/${encodeURIComponent(order!)}`
+        )
+        .then((r) => r.data),
+    enabled: !!order,
+  });
+
   useEffect(() => {
     const flow = flowQuery.data;
     setChecked({
@@ -300,9 +315,12 @@ export default function MaterialFlowPanel({
    * admin tidak perlu bolak-balik ke menu Production Label terpisah utk
    * cetak label) -- diletakkan PALING BAWAH, setelah Packing. Sama pola dgn
    * Bongkaran: TIDAK terhubung Master Data Material Flow Proses (tidak ada
-   * "Wajib/Tidak"), dan cetak label bisa dilakukan berkali-kali (bukan
-   * konsep sekali-selesai) jadi kolom Status ditampilkan "-" juga, bukan
-   * Selesai/Belum. Cuma tampil kalau `order` diketahui. */
+   * "Wajib/Tidak"). Kolom Status (2026-08-12, instruksi eksplisit user):
+   * "Selesai" kalau Order ini SUDAH PERNAH dicetak labelnya (ada baris di
+   * ProductionLabel, lihat productionLabelQuery/GET
+   * /production-label/latest-by-order/:order), kalau belum tetap "-" (bukan
+   * "Belum" -- cetak label bukan konsep wajib/sekali-selesai, bisa dicetak
+   * ulang kapan saja). Cuma tampil kalau `order` diketahui. */
   function renderProductionLabelRow() {
     if (!order) return null;
     return (
@@ -314,7 +332,13 @@ export default function MaterialFlowPanel({
           </span>
         </td>
         <td>
-          <span style={{ color: "var(--text-muted)" }}>-</span>
+          {productionLabelQuery.isLoading ? (
+            <span style={{ color: "var(--text-muted)" }}>—</span>
+          ) : productionLabelQuery.data ? (
+            <span className="status-text">Selesai</span>
+          ) : (
+            <span style={{ color: "var(--text-muted)" }}>-</span>
+          )}
         </td>
         <td>
           {onOpenStage && (

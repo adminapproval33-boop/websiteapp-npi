@@ -65,6 +65,23 @@ const saveSchema = z
     // Start/Finish diisi" di packing.routes.ts), TAPI lookup ke tabel AdminQc
     // ("QC to App wajib diisi dulu") DIHAPUS TOTAL -- itu dependensi ke
     // modul/tim lain, bukan lagi syarat sejak revisi ini.
+    // Spray Man (2026-08-12, instruksi eksplisit user): Plant "1201" -> field
+    // bebas teks (default "-" dari frontend), tidak wajib & tidak divalidasi
+    // thd Data Karyawan. Plant SELAIN "1201" (mis. "1101") -> wajib diisi DAN
+    // wajib berupa nama yg dikenal Data Karyawan (dropdown) -- kewajiban
+    // "berupa nama dikenal" divalidasi di FRONTEND (isKnownEmployeeName,
+    // sama pola dgn Mrp Pic/Sales Pic/Tech Name -- backend sengaja tidak
+    // mem-validasi nama krn sudah ada NIK eksplisit, lihat sanitizeNik),
+    // tapi kewajiban "wajib diisi"-nya ditegakkan di sini juga supaya tidak
+    // bisa dilewati lewat request langsung ke API.
+    if (data.plant.trim() !== "1201" && !(data.sprayMan && data.sprayMan.trim())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sprayMan"],
+        message: "Spray Man wajib diisi (pilih dari dropdown Data Karyawan) untuk Plant selain 1201.",
+      });
+    }
+
     const has = {
       prepareProduksi: data.prepareProduksi != null,
       sprayMan: Boolean(data.sprayMan && data.sprayMan.trim()),

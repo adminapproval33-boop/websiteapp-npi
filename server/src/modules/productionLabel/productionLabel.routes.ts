@@ -118,6 +118,19 @@ productionLabelRouter.get(
   })
 );
 
+/// Dipakai panel "Info Proses Material" (baris "Production Label") utk tahu
+/// apakah Order ini SUDAH PERNAH dicetak labelnya, supaya kolom "Status
+/// Order Ini" bisa tampil "Selesai" (2026-08-12, instruksi eksplisit user)
+/// -- sama pola dgn GET /bongkaran/latest-by-order/:order.
+productionLabelRouter.get(
+  "/latest-by-order/:order",
+  asyncRoute(async (req, res) => {
+    const order = String(req.params.order).trim();
+    const latest = await prisma.productionLabel.findFirst({ where: { order }, orderBy: { timestamp: "desc" } });
+    res.json({ success: true, data: latest });
+  })
+);
+
 productionLabelRouter.get(
   "/history",
   asyncRoute(async (_req, res) => {

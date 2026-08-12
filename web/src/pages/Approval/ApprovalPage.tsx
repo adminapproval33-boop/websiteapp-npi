@@ -204,6 +204,12 @@ export default function ApprovalPage({
   const [filterValue, setFilterValue] = useState("");
   const [attachmentModalId, setAttachmentModalId] = useState<string | null>(null);
 
+  /** Spray Man (2026-08-12, instruksi eksplisit user): Plant "1201" -> field
+   * bebas teks (bukan dropdown Data Karyawan), Plant lain (mis. "1101") ->
+   * tetap dropdown wajib spt sebelumnya. Dipakai bareng oleh JSX form &
+   * handleSubmit di bawah. */
+  const sprayManFreeText = form.plant.trim() === "1201";
+
   const historyQuery = useQuery({
     queryKey: ["approval-lot-history", statusFilter, filterCol, filterValue],
     queryFn: () => {
@@ -336,6 +342,28 @@ export default function ApprovalPage({
       /* saran IU Plant/Code Tanki bersifat opsional -- Remark SENGAJA tidak ikut disarankan
          dari order-context lintas modul -- kalau gagal, biarkan user isi manual */
     }
+
+    // Spray Man (2026-08-12, instruksi eksplisit user): Plant "1201" ->
+    // default "-" kalau masih kosong (field bebas teks, lihat sprayManFreeText).
+    // Plant lain (mis. "1101", field dropdown wajib) -> disarankan dari Member
+    // TERAKHIR Colour Matching Order ini (ambil anggota pertama -- Spray Man
+    // cuma 1 nama, sedangkan Member Colour Matching bisa banyak), tetap bisa
+    // diganti manual krn cuma dipakai kalau sprayMan masih kosong.
+    if ((data.plant ?? "").trim() === "1201") {
+      setForm((f) => (f.sprayMan.trim() ? f : { ...f, sprayMan: "-", sprayManNik: null }));
+    } else {
+      try {
+        const cm = await api.get<{ success: boolean; data: { members: { name: string; nik?: string | null }[] | null } | null }>(
+          `/colour-matching/latest-by-order/${encodeURIComponent(data.order)}`
+        );
+        const firstMember = cm.data?.members?.[0];
+        if (firstMember?.name) {
+          setForm((f) => (f.sprayMan.trim() ? f : { ...f, sprayMan: firstMember.name, sprayManNik: firstMember.nik ?? null }));
+        }
+      } catch {
+        /* saran Spray Man dari Member Colour Matching bersifat opsional -- kalau gagal, biarkan user isi manual */
+      }
+    }
   }
 
   // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
@@ -441,6 +469,20 @@ export default function ApprovalPage({
       setError("Tech Name tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
     }
+    // Spray Man (2026-08-12, instruksi eksplisit user): Plant 1201 -> bebas,
+    // tidak divalidasi. Plant selain 1201 (mis. 1101) -> wajib diisi DAN
+    // wajib nama yg dikenal Data Karyawan, sama pola dgn Mrp Pic/Sales
+    // Pic/Tech Name di atas.
+    if (!sprayManFreeText) {
+      if (!form.sprayMan.trim()) {
+        setError("Spray Man wajib diisi (pilih dari dropdown Data Karyawan) untuk Plant selain 1201.");
+        return;
+      }
+      if (!isKnownEmployeeName(employees, form.sprayMan)) {
+        setError("Spray Man tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+        return;
+      }
+    }
     if (!isKnownTankCode(tanks, form.codeTanki)) {
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return;
@@ -497,7 +539,19 @@ export default function ApprovalPage({
                   <input value={form.orderQty} onChange={(e) => setForm({ ...form, orderQty: e.target.value })} />
                 </ExcelField>
                 <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")} {...gridNav("plant")}>
-                  <input value={form.plant} onChange={(e) => setForm({ ...form, plant: e.target.value })} />
+                  <input
+                    value={form.plant}
+                    onChange={(e) => {
+                      const plant = e.target.value;
+                      setForm((f) => ({
+                        ...f,
+                        plant,
+                        // Plant 1201 (2026-08-12, instruksi eksplisit user): Spray Man
+                        // jadi bebas teks, default "-" kalau masih kosong.
+                        sprayMan: plant.trim() === "1201" && !f.sprayMan.trim() ? "-" : f.sprayMan,
+                      }));
+                    }}
+                  />
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -532,13 +586,22 @@ export default function ApprovalPage({
                   <input type="datetime-local" value={toDateTimeLocalValue(form.prepareProduksi)} onChange={(e) => setForm({ ...form, prepareProduksi: e.target.value })} />
                 </ExcelField>
                 <ExcelField label="Spray Man" widthPx={colWidths.sprayMan} onResizeStart={beginResize("sprayMan")} {...gridNav("sprayMan")}>
-                  <EmployeeNameSelect
-                    bare
-                    id="approval-spray-man"
-                    value={form.sprayMan}
-                    employeeId={form.sprayManNik}
-                    onChange={(v, nik) => setForm({ ...form, sprayMan: v, sprayManNik: nik ?? null })}
-                  />
+                  {sprayManFreeText ? (
+                    <input
+                      value={form.sprayMan}
+                      onChange={(e) => setForm({ ...form, sprayMan: e.target.value, sprayManNik: null })}
+                      placeholder="-"
+                      title="Plant 1201 -- bebas diisi apa saja, tidak wajib dari Data Karyawan."
+                    />
+                  ) : (
+                    <EmployeeNameSelect
+                      bare
+                      id="approval-spray-man"
+                      value={form.sprayMan}
+                      employeeId={form.sprayManNik}
+                      onChange={(v, nik) => setForm({ ...form, sprayMan: v, sprayManNik: nik ?? null })}
+                    />
+                  )}
                 </ExcelField>
                 <ExcelField label="Wet Sample" widthPx={colWidths.wetSample} onResizeStart={beginResize("wetSample")} {...gridNav("wetSample")}>
                   <input value={form.wetSample} onChange={(e) => setForm({ ...form, wetSample: e.target.value })} />

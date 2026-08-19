@@ -92,6 +92,42 @@ function postsSearchWhere(raw: string) {
   };
 }
 
+/** Notifikasi "ada postingan baru di Beranda" (2026-08-19, instruksi eksplisit
+ * user) -- dibandingkan dgn `lastSeenPostsAt` (kapan user ini terakhir buka
+ * Papan Info), BUKAN per-post read tracking spt chat (papan info = broadcast
+ * ke semua orang, bukan 1-ke-1, jadi cukup 1 timestamp per user, tidak perlu
+ * tabel "dibaca oleh siapa saja" per post). Post milik SENDIRI tidak dihitung
+ * (user tidak perlu diberitahu soal postingannya sendiri). `lastSeenPostsAt`
+ * null (belum pernah buka Beranda sama sekali) dianggap "semua post orang
+ * lain belum dibaca". HARUS didaftarkan SEBELUM "/:id" di bawah supaya
+ * "unread-count" tidak kena tangkap sbg wildcard :id (sama alasan dgn
+ * chat.routes.ts /search).
+ */
+postsRouter.get(
+  "/unread-count",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const myNik = req.auth!.nik;
+    const me = await prisma.user.findUnique({ where: { nik: myNik }, select: { lastSeenPostsAt: true } });
+    const count = await prisma.post.count({
+      where: {
+        authorNik: { not: myNik },
+        ...(me?.lastSeenPostsAt ? { timestamp: { gt: me.lastSeenPostsAt } } : {}),
+      },
+    });
+    res.json({ success: true, data: { count } });
+  })
+);
+
+/** Ditandai "sudah dilihat" saat user membuka Beranda (lihat HomePage.tsx) --
+ * cukup timestamp SEKARANG, tidak perlu tahu post mana persisnya. */
+postsRouter.post(
+  "/mark-seen",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    await prisma.user.update({ where: { nik: req.auth!.nik }, data: { lastSeenPostsAt: new Date() } });
+    res.json({ success: true });
+  })
+);
+
 postsRouter.get(
   "/",
   asyncRoute(async (req: AuthedRequest, res) => {

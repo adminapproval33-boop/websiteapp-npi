@@ -40,6 +40,7 @@ interface AppearanceFile {
 interface CheckRow {
   checkId: string;
   timestamp: string;
+  tanggalMasukQc: string | null;
   order: string;
   materialNumber: string | null;
   materialDescription: string | null;
@@ -83,6 +84,7 @@ interface HistoryFlatRow {
   key: string;
   checkId: string;
   timestamp: string;
+  tanggalMasukQc: string | null;
   order: string;
   materialNumber: string | null;
   batch: string | null;
@@ -114,6 +116,7 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         key: `${r.checkId}-${p ? p.no : "none"}`,
         checkId: r.checkId,
         timestamp: r.timestamp,
+        tanggalMasukQc: r.tanggalMasukQc,
         order: r.order,
         materialNumber: r.materialNumber,
         batch: r.batch,
@@ -155,7 +158,16 @@ function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
   };
 }
 
+/** QC Entry Date otomatis terisi tanggal+jam SEKARANG (2026-08-19, instruksi
+ * eksplisit user) -- tetap bisa diganti manual spt biasa, cuma nilai awalnya
+ * saja yg dibantu. Dihitung ULANG tiap kali form kosong dibuka (bukan sekali
+ * saat modul di-load) spy tetap "hari ini" walau tab dibiarkan terbuka lama. */
+function defaultQcEntryDate(): string {
+  return toDateTimeLocalValue(new Date());
+}
+
 const emptyForm = {
+  tanggalMasukQc: "",
   order: "",
   materialNumber: "",
   materialDescription: "",
@@ -188,6 +200,7 @@ const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
 
 /** Lebar default (px) kolom "Order .. Remark" -- dipakai sbg fallback sebelum user pernah drag-resize. */
 const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
+  tanggalMasukQc: 230,
   order: 140,
   materialNumber: 140,
   materialDescription: 280,
@@ -208,6 +221,7 @@ const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
 /** Urutan kolom per baris visual (utk snap-to-align saat drag-resize -- lihat
  * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah. */
 const HEADER_TABLE_COL_ROWS: string[][] = [
+  ["tanggalMasukQc"],
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["order2", "materialNumber2", "batch2"],
   ["iuPlant", "codeTanki", "customer", "custSegmen", "lotCoa"],
@@ -245,7 +259,7 @@ export default function CheckResultsPage({
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => ({ ...emptyForm, tanggalMasukQc: defaultQcEntryDate() }));
   const [params, setParams] = useState<ParamRow[]>([]);
   const [specStatus, setSpecStatus] = useState<"idle" | "loading" | "found" | "not-found">("idle");
   const [linkedSpecId, setLinkedSpecId] = useState<string | null>(null);
@@ -472,7 +486,7 @@ export default function CheckResultsPage({
   }, [embedded, initialOrder]);
 
   function resetForm() {
-    setForm(emptyForm);
+    setForm({ ...emptyForm, tanggalMasukQc: defaultQcEntryDate() });
     setParams([]);
     setSpecStatus("idle");
     setLinkedSpecId(null);
@@ -483,6 +497,9 @@ export default function CheckResultsPage({
   function startEdit(row: CheckRow) {
     setEditingCheckId(row.checkId);
     setForm({
+      // Record LAMA (sebelum field ini ada) dianggap sama dgn Timestamp (instruksi
+      // eksplisit user) -- supaya field wajib ini tidak kosong pas dibuka utk Edit.
+      tanggalMasukQc: toDateTimeLocalValue(row.tanggalMasukQc ?? row.timestamp),
       order: row.order,
       materialNumber: row.materialNumber ?? "",
       materialDescription: row.materialDescription ?? "",
@@ -528,6 +545,7 @@ export default function CheckResultsPage({
 
   /** IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum Save ATAU Print. */
   function validateRequiredFields(): string | null {
+    if (!form.tanggalMasukQc.trim()) return "QC Entry Date wajib diisi sebelum Save/Print.";
     if (!form.iuPlant.trim()) return "IU Plant wajib diisi sebelum Save/Print.";
     if (!form.codeTanki.trim()) return "Code Tanki wajib diisi sebelum Save/Print.";
     if (!isKnownTankCode(tanks, form.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
@@ -608,6 +626,21 @@ export default function CheckResultsPage({
             <div className="excel-block" data-nav-scope="">
               {headerGuideX !== null && <div className="col-align-guide" style={{ left: headerGuideX }} />}
               <ExcelRow>
+                <ExcelField
+                  label="QC Entry Date *"
+                  widthPx={headerColWidths.tanggalMasukQc}
+                  onResizeStart={beginHeaderColResize("tanggalMasukQc")}
+                  {...gridNav("tanggalMasukQc")}
+                >
+                  <input
+                    type="datetime-local"
+                    value={form.tanggalMasukQc}
+                    onChange={(e) => setForm({ ...form, tanggalMasukQc: e.target.value })}
+                    required
+                  />
+                </ExcelField>
+              </ExcelRow>
+              <ExcelRow>
                 <ExcelField label="Order Pack" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")} {...gridNav("order")}>
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
@@ -667,7 +700,7 @@ export default function CheckResultsPage({
               </ExcelRow>
             </div>
             <p style={{ marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-              * IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum bisa Save atau Print. Order Pack, Material
+              * QC Entry Date, IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum bisa Save atau Print. Order Pack, Material
               Number Pack, Material Description, Batch Pack, Order Qty, dan Plant otomatis terisi dari hasil pencarian
               Order Pack; Material Number Loose &amp; Batch Loose otomatis terisi dari hasil pencarian Order Loose. Tarik
               garis di sisi kanan tiap kolom untuk mengubah lebarnya.
@@ -857,6 +890,14 @@ export default function CheckResultsPage({
                   label: "Timestamp",
                   render: (r) => formatDateTime(r.timestamp),
                   csvValue: (r) => toExcelDateTimeString(r.timestamp),
+                },
+                {
+                  key: "tanggalMasukQc",
+                  label: "QC Entry Date",
+                  // Record LAMA (sebelum field ini ada, 2026-08-19) tidak punya nilai --
+                  // dianggap sama dgn Timestamp (instruksi eksplisit user), bukan tampil "-".
+                  render: (r) => formatDateTime(r.tanggalMasukQc ?? r.timestamp),
+                  csvValue: (r) => toExcelDateTimeString(r.tanggalMasukQc ?? r.timestamp),
                 },
                 { key: "order", label: "Order Pack", render: (r) => r.order },
                 { key: "materialNumber", label: "Material Number Pack", render: (r) => r.materialNumber || "-" },

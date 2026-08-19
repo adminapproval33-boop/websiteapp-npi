@@ -184,6 +184,17 @@
     @apply bg-indigo-500/70;
   }
 
+  /* Sembunyikan scrollbar galeri gambar Papan Info (ImageCarousel.tsx) --
+     geser tetap jalan (swipe/klik panah), cuma bar abu-abunya yg disembunyikan
+     spy tampilannya bersih ala Facebook/Instagram, bukan spt tabel data biasa. */
+  .image-carousel-scroller {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .image-carousel-scroller::-webkit-scrollbar {
+    display: none;
+  }
+
   .error-text {
     @apply text-sm font-medium text-red-600;
   }

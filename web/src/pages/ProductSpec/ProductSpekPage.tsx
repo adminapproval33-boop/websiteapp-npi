@@ -108,6 +108,8 @@ export default function ProductSpekPage() {
   const [search, setSearch] = useState("");
   const [detailSpec, setDetailSpec] = useState<SpecRow | null>(null);
   const [showRemovePicker, setShowRemovePicker] = useState(false);
+  const [draggedParamIdx, setDraggedParamIdx] = useState<number | null>(null);
+  const [dragOverParamIdx, setDragOverParamIdx] = useState<number | null>(null);
   const { registerFocus, insert: insertSymbol } = useActiveFieldInsert();
 
   // Lebar kolom "No / Item Check / Spec" & "Material Number / Description" bisa di-drag bebas oleh user (px).
@@ -248,6 +250,17 @@ export default function ProductSpekPage() {
   }
   function removeParam(idx: number) {
     setParams((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows));
+  }
+  /** Reorder Spec Parameters via drag & drop -- nomor "No" ikut dirapikan ulang (1..n)
+   * sesuai posisi baru, meniru cara reorder kolom di DataTable.tsx (native HTML5 DnD). */
+  function moveParam(from: number, to: number) {
+    if (from === to) return;
+    setParams((rows) => {
+      const next = [...rows];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next.map((r, i) => ({ ...r, no: i + 1 }));
+    });
   }
 
   function handleSubmit(e: FormEvent) {
@@ -401,36 +414,86 @@ export default function ProductSpekPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {params.map((p, idx) => (
-                    <tr key={idx}>
-                      <td style={{ width: specColWidths[0], overflow: "hidden" }}>{p.no}</td>
-                      <td style={{ width: specColWidths[1], overflow: "hidden" }}>
-                        <input
-                          value={p.itemCheck}
-                          onChange={(e) => updateParam(idx, { itemCheck: e.target.value })}
-                          onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { itemCheck: v }))}
-                          required
-                          style={{ width: "100%" }}
-                        />
-                      </td>
-                      <td style={{ width: specColWidths[2], overflow: "hidden" }}>
-                        <input
-                          value={p.standardSpec}
-                          onChange={(e) => updateParam(idx, { standardSpec: e.target.value })}
-                          onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { standardSpec: v }))}
-                          placeholder='mis. "40-45" atau "<=28"'
-                          style={{ width: "100%" }}
-                        />
-                      </td>
-                      <td style={{ width: specColWidths[3], overflow: "hidden", textAlign: "center" }}>
-                        <SpecVerdictCell
-                          standardSpec={p.standardSpec}
-                          itemCheck={p.itemCheck}
-                          onApplySuggestion={(v) => updateParam(idx, { standardSpec: v })}
-                        />
-                      </td>
-                    </tr>
-                  ))}
+                  {params.map((p, idx) => {
+                    const isDragging = draggedParamIdx === idx;
+                    const isDragOver = dragOverParamIdx === idx && draggedParamIdx !== idx;
+                    /* Highlight cukup tebal (border indigo + bg) SUPAYA tetap kelihatan
+                       walau sebagian besar sel diisi <input> berlatar putih (2026-08-19,
+                       laporan bug: highlight lama nyaris tidak terlihat -- background di
+                       <tr> "tertutup" input putih di dalamnya, jadi border ditaruh di tiap
+                       <td> supaya kelihatan di seluruh baris, bukan cuma celah padding). */
+                    const dragOverTdStyle: React.CSSProperties = isDragOver
+                      ? { background: "#eef2ff", borderTop: "2px solid #6366f1" }
+                      : {};
+                    return (
+                      <tr
+                        key={idx}
+                        onDragEnter={(e) => {
+                          e.preventDefault();
+                          if (draggedParamIdx !== null && draggedParamIdx !== idx) setDragOverParamIdx(idx);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (draggedParamIdx !== null && draggedParamIdx !== idx) setDragOverParamIdx(idx);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const from = Number(e.dataTransfer.getData("text/plain"));
+                          if (!Number.isNaN(from)) moveParam(from, idx);
+                          setDraggedParamIdx(null);
+                          setDragOverParamIdx(null);
+                        }}
+                        style={{ opacity: isDragging ? 0.5 : undefined }}
+                      >
+                        <td style={{ width: specColWidths[0], overflow: "hidden", ...dragOverTdStyle }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/plain", String(idx));
+                                e.dataTransfer.effectAllowed = "move";
+                                setDraggedParamIdx(idx);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedParamIdx(null);
+                                setDragOverParamIdx(null);
+                              }}
+                              title="Drag utk ubah urutan Spec"
+                              style={{ cursor: "grab", color: "var(--text-muted)", touchAction: "none" }}
+                            >
+                              ⠿
+                            </span>
+                            {p.no}
+                          </div>
+                        </td>
+                        <td style={{ width: specColWidths[1], overflow: "hidden", ...dragOverTdStyle }}>
+                          <input
+                            value={p.itemCheck}
+                            onChange={(e) => updateParam(idx, { itemCheck: e.target.value })}
+                            onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { itemCheck: v }))}
+                            required
+                            style={{ width: "100%" }}
+                          />
+                        </td>
+                        <td style={{ width: specColWidths[2], overflow: "hidden", ...dragOverTdStyle }}>
+                          <input
+                            value={p.standardSpec}
+                            onChange={(e) => updateParam(idx, { standardSpec: e.target.value })}
+                            onFocus={(e) => registerFocus(e.currentTarget, (v) => updateParam(idx, { standardSpec: v }))}
+                            placeholder='mis. "40-45" atau "<=28"'
+                            style={{ width: "100%" }}
+                          />
+                        </td>
+                        <td style={{ width: specColWidths[3], overflow: "hidden", textAlign: "center", ...dragOverTdStyle }}>
+                          <SpecVerdictCell
+                            standardSpec={p.standardSpec}
+                            itemCheck={p.itemCheck}
+                            onApplySuggestion={(v) => updateParam(idx, { standardSpec: v })}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -56,7 +56,12 @@ const parameterSchema = z
     if (!data.pic || !data.pic.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pic"], message: `PIC wajib diisi kalau Result "${label}" sudah diisi.` });
   });
 
+const requiredDate = z.coerce.date({
+  errorMap: () => ({ message: "QC Entry Date wajib diisi." }),
+});
+
 const saveSchema = z.object({
+  tanggalMasukQc: requiredDate,
   order: z.string().trim().min(1, "Order wajib diisi."),
   materialNumber: z.string().optional(),
   materialDescription: z.string().optional(),

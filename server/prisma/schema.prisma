@@ -41,6 +41,11 @@ model User {
   mustResetPassword Boolean     @default(false)
   /// Pathname foto avatar di Vercel Blob (private), diisi lewat menu Settings > Profil.
   avatarPath        String?
+  /// Kapan user terakhir buka/lihat Papan Info (Beranda) -- dipakai utk hitung
+  /// notifikasi "ada postingan baru" (GET /posts/unread-count, lihat
+  /// posts.routes.ts). null = belum pernah lihat sama sekali (anggap semua
+  /// post orang lain sbg belum dibaca).
+  lastSeenPostsAt   DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   sessions          Session[]
@@ -617,6 +622,11 @@ model ProductSpecParameter {
 model CheckResult {
   checkId             String                 @id @default(uuid())
   timestamp           DateTime               @default(now())
+  /// Tanggal sampel FISIK masuk ke QC (2026-08-19, instruksi eksplisit user)
+  /// -- beda dari `timestamp` (kapan record ini disimpan ke sistem, bisa
+  /// menyusul belakangan). Wajib diisi di form Input Check Results, tapi
+  /// nullable di DB supaya record LAMA (sebelum field ini ada) tetap valid.
+  tanggalMasukQc      DateTime?
   order               String
   materialNumber      String?
   materialDescription String?

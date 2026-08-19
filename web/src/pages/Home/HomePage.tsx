@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import PostsPage from "../Posts/PostsPage";
 
 const WELCOME_SEEN_KEY_PREFIX = "npi_welcome_seen_";
+/** Sama dgn POLL_MS di ChatWidget.tsx -- selagi user masih di Beranda,
+ * tandai "sudah dilihat" berkala (bukan cuma sekali pas mount) supaya
+ * notifikasi di Sidebar tidak muncul lagi utk post baru yg masuk SAAT user
+ * masih membaca feed (lihat GET /posts/unread-count di posts.routes.ts). */
+const MARK_SEEN_POLL_MS = 15000;
 
 /**
  * Pesan sambutan (2026-08-09, instruksi eksplisit user) HANYA tampil sekali
@@ -11,6 +18,7 @@ const WELCOME_SEEN_KEY_PREFIX = "npi_welcome_seen_";
  */
 export default function HomePage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [showWelcome, setShowWelcome] = useState(false);
 
   useEffect(() => {
@@ -20,6 +28,19 @@ export default function HomePage() {
       setShowWelcome(true);
       localStorage.setItem(key, "1");
     }
+  }, [user?.nik]);
+
+  const markSeenMutation = useMutation({
+    mutationFn: () => api.post("/posts/mark-seen"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["posts-unread-count"] }),
+  });
+
+  useEffect(() => {
+    if (!user?.nik) return;
+    markSeenMutation.mutate();
+    const id = setInterval(() => markSeenMutation.mutate(), MARK_SEEN_POLL_MS);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.nik]);
 
   return (

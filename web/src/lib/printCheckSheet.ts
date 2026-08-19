@@ -12,6 +12,7 @@ export interface PrintCheckSheetParam {
 }
 
 export interface PrintCheckSheetData {
+  tanggalMasukQc: string;
   order: string;
   materialNumber: string;
   materialDescription: string;
@@ -83,21 +84,25 @@ th{background:#fff;color:#000;font-weight:700;}
 <div class="doc-code">Doc No. F-D TQP-FI-011<div class="print-date">Dicetak: ${esc(formatDateTime(new Date()))}</div></div>
 </div>
 <table class="info-tbl" style="margin-bottom:0"><colgroup>
-<col style="width:35mm"><col style="width:40mm"><col style="width:35mm"><col style="width:80mm">
+<col style="width:35mm"><col style="width:34mm"><col style="width:33mm"><col style="width:88mm">
 </colgroup><tbody>
-<tr><th>Order Pack</th><td>${esc(data.order)}</td><th>Material Description</th><td>${esc(data.materialDescription)}</td></tr>
+<tr><th>QC Entry Date</th><td>${esc(formatDateTime(data.tanggalMasukQc))}</td><th>Material Description</th><td>${esc(data.materialDescription)}</td></tr>
 </tbody></table>
 <table class="info-tbl" style="margin-bottom:0"><colgroup>
-<col style="width:35mm"><col style="width:40mm"><col style="width:23mm"><col style="width:25mm"><col style="width:18mm"><col style="width:15mm"><col style="width:19mm"><col style="width:15mm">
+<col style="width:35mm"><col style="width:34mm"><col style="width:22mm"><col style="width:22mm"><col style="width:18mm"><col style="width:20mm"><col style="width:19mm"><col style="width:20mm">
 </colgroup><tbody>
-<tr><th>Material Number Pack</th><td>${esc(data.materialNumber)}</td><th>Batch Pack</th><td>${esc(data.batch)}</td><th>Order Qty</th><td>${esc(data.orderQty)}</td><th>Plant</th><td>${esc(data.plant)}</td></tr>
+<tr><th>Material Number Pack</th><td>${esc(data.materialNumber)}</td><th>Order Pack</th><td>${esc(data.order)}</td><th>Order Qty</th><td>${esc(data.orderQty)}</td><th>Plant</th><td>${esc(data.plant)}</td></tr>
+</tbody></table>
+<table class="info-tbl" style="margin-bottom:0"><colgroup>
+<col style="width:35mm"><col style="width:34mm"><col style="width:22mm"><col style="width:22mm"><col style="width:18mm"><col style="width:20mm"><col style="width:19mm"><col style="width:20mm">
+</colgroup><tbody>
+<tr><th>Material Number Loose</th><td>${esc(data.materialNumber2)}</td><th>Batch Pack</th><td>${esc(data.batch)}</td><th>Lot COA</th><td>${esc(data.lotCoa)}</td><th>IU Plant</th><td>${esc(data.iuPlant)}</td></tr>
 </tbody></table>
 <table class="info-tbl"><colgroup>
-<col style="width:35mm"><col style="width:40mm"><col style="width:23mm"><col style="width:25mm"><col style="width:18mm"><col style="width:49mm">
+<col style="width:35mm"><col style="width:34mm"><col style="width:22mm"><col style="width:22mm"><col style="width:18mm"><col style="width:59mm">
 </colgroup><tbody>
-<tr><th>Material Number Loose</th><td>${esc(data.materialNumber2)}</td><th>Batch Loose</th><td>${esc(data.batch2)}</td><th>Lot COA</th><td>${esc(data.lotCoa)}</td></tr>
-<tr><th>Customer</th><td>${esc(data.customer)}</td><th>Cust Segmen</th><td>${esc(data.custSegmen)}</td><th rowspan="2">Remark</th><td rowspan="2">${esc(data.remark)}</td></tr>
-<tr><th>IU Plant</th><td>${esc(data.iuPlant)}</td><th>Code Tanki</th><td>${esc(data.codeTanki)}</td></tr>
+<tr><th>Customer</th><td>${esc(data.customer)}</td><th>Batch Loose</th><td>${esc(data.batch2)}</td><th rowspan="2">Remark</th><td rowspan="2">${esc(data.remark)}</td></tr>
+<tr><th>Cust Segmen</th><td>${esc(data.custSegmen)}</td><th>Code Tanki</th><td>${esc(data.codeTanki)}</td></tr>
 </tbody></table>
 <div class="section-title">Spec Parameters</div>
 <table><thead><tr><th style="width:6%">No</th><th style="width:40%">Item Check</th><th style="width:18%;text-align:center">Spec</th><th style="width:18%;text-align:center">Result</th><th style="width:18%">PIC</th></tr></thead><tbody>${rowsHtml}</tbody></table>

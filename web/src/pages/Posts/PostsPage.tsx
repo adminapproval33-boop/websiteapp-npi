@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import MentionTextarea from "../../components/MentionTextarea";
 import PostContent from "../../components/PostContent";
+import ImageCarousel from "../../components/ImageCarousel";
 import { formatDateTime } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
 import Avatar from "../../components/Avatar";
@@ -49,7 +50,12 @@ export default function PostsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
-  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  // Lampiran BOLEH lebih dari 1 gambar/file sekaligus (2026-08-19, instruksi
+  // eksplisit user: berguna utk tutorial menu baru yg butuh beberapa
+  // screenshot dalam 1 postingan) -- backend sudah lama mendukung banyak
+  // PostAttachment per post (lihat post.attachments.map di render bawah),
+  // yang kurang cuma UI compose-nya yang dulu cuma bisa pilih 1 file.
+  const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
@@ -97,15 +103,18 @@ export default function PostsPage() {
   const createMutation = useMutation({
     mutationFn: async () => {
       const res = await api.post<{ success: boolean; data: { id: string } }>("/posts", { content });
-      if (attachmentFile) {
+      // Diunggah satu-satu berurutan (bukan Promise.all) supaya urutan lampiran
+      // di postingan konsisten dgn urutan dipilih user -- masing-masing tetap 1
+      // request ke endpoint yang sama (POST /:id/attachments) spt sebelumnya.
+      for (const file of attachmentFiles) {
         const formData = new FormData();
-        formData.append("file", attachmentFile);
+        formData.append("file", file);
         await api.post(`/posts/${res.data.id}/attachments`, formData);
       }
     },
     onSuccess: () => {
       setContent("");
-      setAttachmentFile(null);
+      setAttachmentFiles([]);
       setError("");
       queryClient.invalidateQueries({ queryKey: ["posts"] });
     },
@@ -234,38 +243,61 @@ export default function PostsPage() {
               />
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <button
                   type="button"
                   className="btn btn-outline"
                   style={{ padding: "3px 12px" }}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  Lampirkan File
+                  Lampirkan File {attachmentFiles.length > 0 && `(${attachmentFiles.length})`}
                 </button>
-                {attachmentFile && (
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {attachmentFile.name}{" "}
-                    <button
-                      type="button"
-                      onClick={() => setAttachmentFile(null)}
-                      style={{ border: 0, background: "transparent", cursor: "pointer" }}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                )}
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   style={{ display: "none" }}
-                  onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    const picked = Array.from(e.target.files ?? []);
+                    // Ditambahkan (bukan diganti) supaya klik "Lampirkan File" berkali-kali
+                    // bisa terus menumpuk lampiran, bukan cuma pilihan terakhir yang tersimpan.
+                    if (picked.length > 0) setAttachmentFiles((files) => [...files, ...picked]);
+                    e.target.value = "";
+                  }}
                 />
               </div>
               <button className="btn btn-success" type="submit" disabled={createMutation.isPending}>
                 {createMutation.isPending ? "Memposting..." : "Posting"}
               </button>
             </div>
+            {attachmentFiles.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {attachmentFiles.map((f, idx) => (
+                  <span
+                    key={`${f.name}-${f.lastModified}-${idx}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 12,
+                      color: "var(--muted)",
+                      background: "#f1f5f9",
+                      borderRadius: 6,
+                      padding: "2px 8px",
+                    }}
+                  >
+                    {f.name}
+                    <button
+                      type="button"
+                      onClick={() => setAttachmentFiles((files) => files.filter((_, i) => i !== idx))}
+                      style={{ border: 0, background: "transparent", cursor: "pointer" }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             {error && <p className="error-text">{error}</p>}
           </form>
         </div>
@@ -306,27 +338,33 @@ export default function PostsPage() {
 
               <PostContent content={post.content} onTagClick={openTag} />
 
-              {post.attachments.map((att) =>
-                (att.fileType ?? "").startsWith("image/") ? (
-                  <img
-                    key={att.id}
-                    src={fileUrl(att.filePath)}
-                    alt={att.fileName}
-                    style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid var(--border)" }}
-                  />
-                ) : (
-                  <a
-                    key={att.id}
-                    href={fileUrl(att.filePath)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-outline"
-                    style={{ alignSelf: "flex-start" }}
-                  >
-                    📎 {att.fileName}
-                  </a>
-                )
-              )}
+              {(() => {
+                // Gambar digeser horizontal 1 galeri (ala Facebook/Instagram, 2026-08-19
+                // instruksi eksplisit user) -- BUKAN ditumpuk vertikal spt sebelumnya
+                // (dulu >1 gambar harus discroll ke bawah 1-1). File non-gambar (PDF/dst)
+                // tetap sbg daftar link unduh terpisah di bawah galerinya.
+                const images = post.attachments.filter((att) => (att.fileType ?? "").startsWith("image/"));
+                const files = post.attachments.filter((att) => !(att.fileType ?? "").startsWith("image/"));
+                return (
+                  <>
+                    {images.length > 0 && (
+                      <ImageCarousel images={images.map((att) => ({ key: att.id, src: fileUrl(att.filePath), alt: att.fileName }))} />
+                    )}
+                    {files.map((att) => (
+                      <a
+                        key={att.id}
+                        href={fileUrl(att.filePath)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-outline"
+                        style={{ alignSelf: "flex-start" }}
+                      >
+                        📎 {att.fileName}
+                      </a>
+                    ))}
+                  </>
+                );
+              })()}
 
               <div style={{ display: "flex", gap: 16, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
                 <button

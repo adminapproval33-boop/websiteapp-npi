@@ -543,6 +543,25 @@ export default function CheckResultsPage({
     setParams((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
+  /** Start/Finish 1 baris Spec Parameter otomatis terisi jam SEKARANG begitu Result-nya
+   * diisi (2026-08-19, instruksi eksplisit user) -- HANYA kalau keduanya masih kosong,
+   * supaya tidak menimpa tanggal yang sudah direvisi manual sebelumnya. Tetap bisa diedit
+   * manual kapan saja setelahnya (input datetime-local biasa, tidak dikunci). */
+  function updateResult(idx: number, value: string) {
+    setParams((rows) =>
+      rows.map((r, i) => {
+        if (i !== idx) return r;
+        const patch: Partial<ParamRow> = { result: value };
+        if (value.trim()) {
+          const now = toDateTimeLocalValue(new Date());
+          if (!r.start) patch.start = now;
+          if (!r.finish) patch.finish = now;
+        }
+        return { ...r, ...patch };
+      })
+    );
+  }
+
   /** IU Plant, Code Tanki, Customer, dan Remark wajib diisi sebelum Save ATAU Print. */
   function validateRequiredFields(): string | null {
     if (!form.tanggalMasukQc.trim()) return "QC Entry Date wajib diisi sebelum Save/Print.";
@@ -777,7 +796,7 @@ export default function CheckResultsPage({
                           <input
                             style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%", textAlign: "center" }}
                             value={p.result}
-                            onChange={(e) => updateParam(idx, { result: e.target.value })}
+                            onChange={(e) => updateResult(idx, e.target.value)}
                           />
                         </td>
                         <td style={{ textAlign: "center" }}>{SPEC_VERDICT_LABEL[verdict]}</td>

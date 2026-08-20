@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions, resolveEmployeeId } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  resolveEmployeeId,
+  EmployeeOption,
+} from "../../components/EmployeeNameSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
@@ -156,6 +162,87 @@ function paramRowFromSpec(p: LinkedSpecParameter): ParamRow {
     picNik: null,
     suggestion: "",
   };
+}
+
+/** Saran PIC per baris Spec Parameter (2026-08-20, instruksi eksplisit user)
+ * -- BEDA dari `useNameSuggestions` di EmployeeNameSelect.tsx yg di-scope per
+ * module+field: di sini acuannya PERSIS teks Item Check baris ITU SENDIRI
+ * (mis. "SUPPLIED VISCOSITY (KU/25°C)" -> "Zava Anbiya"), krn PIC yg biasa
+ * mengerjakan 1 jenis Item Check cenderung SAMA lintas Order/Material Number
+ * apa pun. `enabled: false` kalau Item Check kosong (baris "Belum ada Spec
+ * Parameters" placeholder). */
+function usePicSuggestions(itemCheck: string) {
+  const trimmed = itemCheck.trim();
+  return useQuery({
+    queryKey: ["check-results-pic-suggestions", trimmed],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: EmployeeOption[] }>(`/check-results/pic-suggestions/${encodeURIComponent(trimmed)}`)
+        .then((r) => r.data),
+    enabled: Boolean(trimmed),
+    staleTime: 60_000,
+  });
+}
+
+/** 1 baris tabel Spec Parameters -- dipisah jadi komponen sendiri (2026-08-20)
+ * KHUSUS supaya `usePicSuggestions` (di atas) bisa dipanggil per-baris dgn
+ * Item Check row itu sendiri sbg key -- hook React tidak boleh dipanggil di
+ * dalam `.map()` langsung di komponen induk (jumlah baris `params` berubah-
+ * ubah), jadi query-nya harus tinggal di komponen anak spt ini. */
+function SpecParameterRow({
+  idx,
+  p,
+  specGridNav,
+  updateResult,
+  updateParam,
+}: {
+  idx: number;
+  p: ParamRow;
+  specGridNav: (col: "result" | "start" | "finish" | "pic" | "suggestion", idx: number) => Record<string, unknown>;
+  updateResult: (idx: number, value: string) => void;
+  updateParam: (idx: number, patch: Partial<ParamRow>) => void;
+}) {
+  const { data: picSuggestions } = usePicSuggestions(p.parameter);
+  const verdict = evaluateSpec(p.standard, p.result, p.parameter);
+  return (
+    <tr>
+      <td style={{ width: 40 }}>{p.no}</td>
+      <td>{p.parameter}</td>
+      <td style={{ textAlign: "center" }}>{p.standard || "-"}</td>
+      <td {...specGridNav("result", idx)}>
+        <input
+          style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%", textAlign: "center" }}
+          value={p.result}
+          onChange={(e) => updateResult(idx, e.target.value)}
+        />
+      </td>
+      <td style={{ textAlign: "center" }}>{SPEC_VERDICT_LABEL[verdict]}</td>
+      <td {...specGridNav("start", idx)}>
+        <input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} />
+      </td>
+      <td {...specGridNav("finish", idx)}>
+        <input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} />
+      </td>
+      <td {...specGridNav("pic", idx)}>
+        <EmployeeNameSelect
+          bare
+          id={`pic-${idx}`}
+          value={p.pic}
+          employeeId={p.picNik}
+          onChange={(v, nik) => updateParam(idx, { pic: v, picNik: nik ?? null })}
+          suggestions={picSuggestions}
+        />
+      </td>
+      <td {...specGridNav("suggestion", idx)}>
+        <input
+          style={{ width: "100%" }}
+          placeholder="Acc or improve"
+          value={p.suggestion}
+          onChange={(e) => updateParam(idx, { suggestion: e.target.value })}
+        />
+      </td>
+    </tr>
+  );
 }
 
 /** QC Entry Date otomatis terisi tanggal+jam SEKARANG (2026-08-19, instruksi
@@ -424,6 +511,30 @@ export default function CheckResultsPage({
     }
   }
 
+  /** Saran Customer/Cust Segmen dari baris History Check Results TERAKHIR dgn
+   * Material Number Pack yg SAMA (2026-08-20, instruksi eksplisit user) --
+   * bukan dikunci ke Order yg sama persis (itu urusan findExistingCheckResult
+   * di atas, yg malah langsung buka mode Edit) krn Material Number SERING
+   * dipakai ulang lintas Order berbeda-beda. HANYA mengisi field yg masih
+   * kosong, tetap bisa diganti manual krn ini murni saran. Sama pola dgn
+   * suggestFromMaterialHistory di ApprovalPage.tsx. */
+  async function suggestCustomerFromMaterialHistory(materialNumber: string) {
+    try {
+      const res = await api.get<{ success: boolean; data: { customer: string | null; custSegmen: string | null } | null }>(
+        `/check-results/latest-by-material/${encodeURIComponent(materialNumber)}`
+      );
+      const latest = res.data;
+      if (!latest) return;
+      setForm((f) => ({
+        ...f,
+        customer: f.customer || latest.customer || "",
+        custSegmen: f.custSegmen || latest.custSegmen || "",
+      }));
+    } catch {
+      /* saran dari histori Material Number bersifat opsional -- kalau gagal, biarkan user isi manual */
+    }
+  }
+
   async function handleOrderFound(data: OrderRefData) {
     setForm((f) => ({
       ...f,
@@ -445,6 +556,9 @@ export default function CheckResultsPage({
 
     setEditingCheckId(null);
     void loadSpecForMaterial(data.materialNumber ?? "");
+    if ((data.materialNumber ?? "").trim()) {
+      await suggestCustomerFromMaterialHistory(data.materialNumber!.trim());
+    }
     try {
       const res = await api.get<{ success: boolean; data: { iuPlant: string; codeTanki: string } | null }>(
         `/master-data/order-context/${encodeURIComponent(data.order)}`
@@ -785,43 +899,9 @@ export default function CheckResultsPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {params.map((p, idx) => {
-                    const verdict = evaluateSpec(p.standard, p.result, p.parameter);
-                    return (
-                      <tr key={idx}>
-                        <td style={{ width: 40 }}>{p.no}</td>
-                        <td>{p.parameter}</td>
-                        <td style={{ textAlign: "center" }}>{p.standard || "-"}</td>
-                        <td {...specGridNav("result", idx)}>
-                          <input
-                            style={{ background: SPEC_VERDICT_COLOR[verdict], width: "100%", textAlign: "center" }}
-                            value={p.result}
-                            onChange={(e) => updateResult(idx, e.target.value)}
-                          />
-                        </td>
-                        <td style={{ textAlign: "center" }}>{SPEC_VERDICT_LABEL[verdict]}</td>
-                        <td {...specGridNav("start", idx)}><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.start)} onChange={(e) => updateParam(idx, { start: e.target.value })} /></td>
-                        <td {...specGridNav("finish", idx)}><input type="datetime-local" style={{ width: "100%" }} value={toDateTimeLocalValue(p.finish)} onChange={(e) => updateParam(idx, { finish: e.target.value })} /></td>
-                        <td {...specGridNav("pic", idx)}>
-                          <EmployeeNameSelect
-                            bare
-                            id={`pic-${idx}`}
-                            value={p.pic}
-                            employeeId={p.picNik}
-                            onChange={(v, nik) => updateParam(idx, { pic: v, picNik: nik ?? null })}
-                          />
-                        </td>
-                        <td {...specGridNav("suggestion", idx)}>
-                          <input
-                            style={{ width: "100%" }}
-                            placeholder="Acc or improve"
-                            value={p.suggestion}
-                            onChange={(e) => updateParam(idx, { suggestion: e.target.value })}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {params.map((p, idx) => (
+                    <SpecParameterRow key={idx} idx={idx} p={p} specGridNav={specGridNav} updateResult={updateResult} updateParam={updateParam} />
+                  ))}
                   {params.length === 0 && (
                     <tr>
                       <td colSpan={9}>Belum ada Spec Parameters.</td>

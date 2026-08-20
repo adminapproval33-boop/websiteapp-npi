@@ -845,6 +845,201 @@ masterDataRouter.get(
   })
 );
 
+interface ModuleFieldConfig {
+  name: string;
+  nik: string;
+}
+
+interface ModuleConfig {
+  /** Field non-Member yg didukung modul ini, key = nilai query `field` yg diterima (mis. "spv", "leader", "spvColourMatching", "sprayMan"). */
+  fields: Record<string, ModuleFieldConfig>;
+  /** Nama kolom Member (Json?) modul ini -- opsional, modul tanpa kolom Member (mis. Approval) tidak perlu isi ini. */
+  membersField?: string;
+  findMany: (section?: string) => Promise<Record<string, unknown>[]>;
+}
+
+const NAME_SUGGESTION_MODULES: Record<string, ModuleConfig> = {
+  productionOrderManualInput: {
+    fields: {
+      spv: { name: "spvProduksi", nik: "spvProduksiNik" },
+      leader: { name: "leader", nik: "leaderNik" },
+    },
+    membersField: "members",
+    findMany: () =>
+      prisma.productionOrderManualInput.findMany({
+        select: { spvProduksi: true, spvProduksiNik: true, leader: true, leaderNik: true, members: true },
+      }),
+  },
+  milling: {
+    fields: {
+      spv: { name: "spvProduksi", nik: "spvProduksiNik" },
+      leader: { name: "leader", nik: "leaderNik" },
+    },
+    membersField: "members",
+    findMany: () =>
+      prisma.millingLog.findMany({
+        select: { spvProduksi: true, spvProduksiNik: true, leader: true, leaderNik: true, members: true },
+      }),
+  },
+  premixAftermix: {
+    fields: {
+      spv: { name: "spvProduksi", nik: "spvProduksiNik" },
+      leader: { name: "leader", nik: "leaderNik" },
+    },
+    membersField: "members",
+    findMany: (section) =>
+      prisma.premixAftermixLog.findMany({
+        where: section === "PREMIX" || section === "AFTERMIX" ? { section } : undefined,
+        select: { spvProduksi: true, spvProduksiNik: true, leader: true, leaderNik: true, members: true },
+      }),
+  },
+  colourMatching: {
+    fields: {
+      spv: { name: "spvName", nik: "spvNik" },
+      leader: { name: "leaderName", nik: "leaderNik" },
+      spvColourMatching: { name: "spvColourMatching", nik: "spvColourMatchingNik" },
+    },
+    membersField: "members",
+    findMany: () =>
+      prisma.colourMatchingLog.findMany({
+        select: {
+          spvName: true,
+          spvNik: true,
+          leaderName: true,
+          leaderNik: true,
+          spvColourMatching: true,
+          spvColourMatchingNik: true,
+          members: true,
+        },
+      }),
+  },
+  bongkaran: {
+    fields: {
+      spv: { name: "spvName", nik: "spvNik" },
+      leader: { name: "leaderName", nik: "leaderNik" },
+    },
+    membersField: "members",
+    findMany: () =>
+      prisma.bongkaranLog.findMany({
+        select: { spvName: true, spvNik: true, leaderName: true, leaderNik: true, members: true },
+      }),
+  },
+  packing: {
+    fields: {
+      spv: { name: "spvName", nik: "spvNik" },
+      leader: { name: "leaderName", nik: "leaderNik" },
+    },
+    membersField: "members",
+    findMany: () =>
+      prisma.packingLog.findMany({
+        select: { spvName: true, spvNik: true, leaderName: true, leaderNik: true, members: true },
+      }),
+  },
+  approval: {
+    fields: {
+      sprayMan: { name: "sprayMan", nik: "sprayManNik" },
+      mrpPic: { name: "mrpPic", nik: "mrpPicNik" },
+      salesPic: { name: "salesPic", nik: "salesPicNik" },
+      techName: { name: "techName", nik: "techNameNik" },
+    },
+    findMany: () =>
+      prisma.approvalSchedule.findMany({
+        select: {
+          sprayMan: true,
+          sprayManNik: true,
+          mrpPic: true,
+          mrpPicNik: true,
+          salesPic: true,
+          salesPicNik: true,
+          techName: true,
+          techNameNik: true,
+        },
+      }),
+  },
+};
+
+/** Baca array Member (Json?) dlm 2 bentuk lama/baru -- sama spt normalizeMembers di frontend (EmployeeNameSelect.tsx). */
+function extractMemberCandidates(raw: unknown): { name: string; nik: string | null }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { name: string; nik: string | null }[] = [];
+  for (const entry of raw) {
+    if (typeof entry === "string") {
+      const name = entry.trim();
+      if (name) out.push({ name, nik: null });
+    } else if (entry && typeof entry === "object" && "name" in entry) {
+      const name = String((entry as { name?: unknown }).name ?? "").trim();
+      if (!name) continue;
+      const nikRaw = (entry as { nik?: unknown }).nik;
+      out.push({ name, nik: typeof nikRaw === "string" && nikRaw.trim() ? nikRaw.trim() : null });
+    }
+  }
+  return out;
+}
+
+/**
+ * Popup saran nama utk kolom SPV Produksi/Leader/Member (2026-08-20,
+ * instruksi eksplisit user) -- BUKAN daftar semua Data Karyawan (bisa
+ * ratusan orang, bikin dropdown penuh noise), tapi cuma nama yang PERNAH
+ * benar-benar diinput admin utk field itu di menu (History) itu, DAN
+ * dipastikan masih ada di Data Karyawan saat ini -- nama yg sudah tidak
+ * match lagi difilter, tidak ditampilkan sama sekali. Mengetik manual nama
+ * karyawan BARU (belum pernah dipakai di field ini) tetap boleh & tetap
+ * tervalidasi normal lewat isKnownEmployeeName di frontend -- endpoint ini
+ * murni mempersempit daftar SARAN, bukan aturan validasi baru.
+ */
+masterDataRouter.get(
+  "/employees/name-suggestions",
+  asyncRoute(async (req, res) => {
+    const moduleKey = String(req.query.module ?? "");
+    const field = String(req.query.field ?? "");
+    const section = typeof req.query.section === "string" ? req.query.section : undefined;
+    const config = NAME_SUGGESTION_MODULES[moduleKey];
+    const fieldConfig = field !== "member" ? config?.fields[field] : undefined;
+    const membersField = field === "member" ? config?.membersField : undefined;
+    if (!config || (field !== "member" && !fieldConfig) || (field === "member" && !membersField)) {
+      res.status(400).json({ success: false, message: "Parameter module/field tidak valid." });
+      return;
+    }
+
+    const rows = await config.findMany(section);
+    const candidates = new Map<string, { name: string; nik: string | null }>();
+    function addCandidate(name: unknown, nik: unknown) {
+      const trimmedName = String(name ?? "").trim();
+      if (!trimmedName) return;
+      const trimmedNik = typeof nik === "string" && nik.trim() ? nik.trim() : null;
+      const key = trimmedNik ?? `name:${trimmedName.toLowerCase()}`;
+      if (!candidates.has(key)) candidates.set(key, { name: trimmedName, nik: trimmedNik });
+    }
+
+    if (field === "member") {
+      for (const row of rows) {
+        for (const entry of extractMemberCandidates(row[membersField!])) {
+          addCandidate(entry.name, entry.nik);
+        }
+      }
+    } else {
+      const { name, nik } = fieldConfig!;
+      for (const row of rows) addCandidate(row[name], row[nik]);
+    }
+
+    const employees = await prisma.masterEmployee.findMany();
+    const byNik = new Map(employees.map((e) => [e.employeeId, e]));
+    const byNameLower = new Map(employees.map((e) => [e.fullName.trim().toLowerCase(), e]));
+
+    const result: typeof employees = [];
+    const addedIds = new Set<string>();
+    for (const cand of candidates.values()) {
+      const emp = (cand.nik && byNik.get(cand.nik)) || byNameLower.get(cand.name.toLowerCase());
+      if (!emp || addedIds.has(emp.employeeId)) continue;
+      addedIds.add(emp.employeeId);
+      result.push(emp);
+    }
+    result.sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    res.json({ success: true, data: result });
+  })
+);
+
 masterDataRouter.post(
   "/employees/import",
   requireFullAccess,

@@ -20,6 +20,7 @@ export const MENU_KEYS = [
   "adminQc",
   "maintenance",
   "productionLabel",
+  "productionLabelFg",
   "purchaseRequisition",
 ] as const;
 
@@ -37,7 +38,8 @@ export const MENU_LABELS: Record<MenuKey, string> = {
   checkResults: "Input Check Results",
   adminQc: "Input Admin QC",
   maintenance: "Maintenance",
-  productionLabel: "Production Label",
+  productionLabel: "Label Entry SFG",
+  productionLabelFg: "Label Entry FG",
   purchaseRequisition: "Purchase Requisition",
 };
 

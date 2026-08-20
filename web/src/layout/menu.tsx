@@ -21,6 +21,7 @@ import ProduktivitasDashboardPage from "../pages/ProduktivitasDashboard/Produkti
 import MesinDashboardPage from "../pages/MesinDashboard/MesinDashboardPage";
 import QualityCheckReviewPage from "../pages/QualityCheckReview/QualityCheckReviewPage";
 import ProductionLabelEntryPage from "../pages/ProductionLabel/ProductionLabelEntryPage";
+import ProductionLabelEntryFgPage from "../pages/ProductionLabel/ProductionLabelEntryFgPage";
 import MaintenanceFormPage from "../pages/Maintenance/MaintenanceFormPage";
 import MaintenanceListPage from "../pages/Maintenance/MaintenanceListPage";
 import MaintenanceSchedulePage from "../pages/Maintenance/MaintenanceSchedulePage";
@@ -78,7 +79,8 @@ export const menuTree: MenuNode[] = [
     leaf("Input Admin QC", "/qc/admin-qc", <AdminQcPage />),
   ]),
   group("Production Label", [
-    leaf("Production Label Entry", "/production-label/entry", <ProductionLabelEntryPage />),
+    leaf("Label Entry SFG", "/production-label/entry", <ProductionLabelEntryPage />),
+    leaf("Label Entry FG", "/production-label/entry-fg", <ProductionLabelEntryFgPage />),
   ]),
   group("Maintenance", [
     leaf("Form Input Maintenance", "/maintenance/form", <MaintenanceFormPage />),

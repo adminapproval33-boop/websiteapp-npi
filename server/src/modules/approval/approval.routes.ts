@@ -195,6 +195,28 @@ approvalRouter.get(
   })
 );
 
+/**
+ * Autofill Wet Sample/Panel/Customer/Cust Segmen dari Material Number
+ * (2026-08-20, instruksi eksplisit user) -- BEDA dari `/latest-by-order` di
+ * atas yg dikunci ke Order yg SAMA PERSIS (jarang terulang), Material Number
+ * justru SERING dipakai ulang lintas Order berbeda (produk yg sama dipesan
+ * lagi), jadi field2 yg sifatnya melekat ke produk (bukan ke Order spesifik)
+ * lebih pas disarankan dari histori Material Number yg sama.
+ */
+approvalRouter.get(
+  "/latest-by-material/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const materialNumber = String(req.params.materialNumber).trim();
+    const latest = materialNumber
+      ? await prisma.approvalSchedule.findFirst({
+          where: { materialNumber },
+          orderBy: { timestamp: "desc" },
+        })
+      : null;
+    res.json({ success: true, data: latest });
+  })
+);
+
 // ===================== List Antrian Approval =====================
 
 /** Order yg Admin QC Stage TERBARUnya "Approval" atau "Joint Lot" (lihat

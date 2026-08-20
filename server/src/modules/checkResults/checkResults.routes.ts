@@ -131,6 +131,78 @@ checkResultsRouter.get(
   })
 );
 
+/**
+ * Autofill Customer/Cust Segmen dari Material Number Pack (2026-08-20,
+ * instruksi eksplisit user) -- BEDA dari `/by-order` di atas yg dikunci ke
+ * Order yg SAMA PERSIS (jarang terulang), Material Number justru SERING
+ * dipakai ulang lintas Order berbeda (produk yg sama diperiksa lagi), sama
+ * pola dgn `/approvals/latest-by-material` di approval.routes.ts.
+ */
+checkResultsRouter.get(
+  "/latest-by-material/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const materialNumber = req.params.materialNumber.trim();
+    const latest = materialNumber
+      ? await prisma.checkResult.findFirst({
+          where: { materialNumber },
+          orderBy: { timestamp: "desc" },
+        })
+      : null;
+    res.json({ success: true, data: latest });
+  })
+);
+
+/**
+ * Saran PIC per baris Spec Parameter (2026-08-20, instruksi eksplisit user)
+ * -- BEDA dari pola name-suggestions modul lain (masterdata.routes.ts) yg
+ * di-scope per module+field: di sini acuannya PERSIS teks Item Check baris
+ * itu sendiri (mis. "SUPPLIED VISCOSITY (KU/25°C)"), krn PIC yg biasa
+ * mengerjakan 1 jenis Item Check cenderung SAMA lintas Order/Material Number
+ * apa pun -- bukan cuma "siapa yg pernah isi PIC di modul QC", tapi "siapa
+ * yg BIASA ngerjakan Item Check spesifik ini". Match case-insensitive
+ * (operator bisa beda kapitalisasi kecil saat mengetik ulang parameter yg
+ * sama). Hasil difilter thd Data Karyawan spt semua name-suggestions lain --
+ * nama yg sudah tidak match Data Karyawan tidak pernah ditampilkan.
+ */
+checkResultsRouter.get(
+  "/pic-suggestions/:itemCheck",
+  asyncRoute(async (req, res) => {
+    const itemCheck = req.params.itemCheck.trim();
+    if (!itemCheck) {
+      res.json({ success: true, data: [] });
+      return;
+    }
+    const rows = await prisma.checkResultParameter.findMany({
+      where: { parameter: { equals: itemCheck, mode: "insensitive" } },
+      select: { pic: true, picNik: true },
+    });
+    const candidates = new Map<string, { name: string; nik: string | null }>();
+    for (const row of rows) {
+      const trimmedName = (row.pic ?? "").trim();
+      if (!trimmedName) continue;
+      const trimmedNik = (row.picNik ?? "").trim() || null;
+      const key = trimmedNik ?? `name:${trimmedName.toLowerCase()}`;
+      if (!candidates.has(key)) candidates.set(key, { name: trimmedName, nik: trimmedNik });
+    }
+
+    const employees = await prisma.masterEmployee.findMany();
+    const byNik = new Map(employees.map((e) => [e.employeeId, e]));
+    const byNameLower = new Map(employees.map((e) => [e.fullName.trim().toLowerCase(), e]));
+
+    const result: typeof employees = [];
+    const addedIds = new Set<string>();
+    for (const cand of candidates.values()) {
+      const emp = (cand.nik && byNik.get(cand.nik)) || byNameLower.get(cand.name.toLowerCase());
+      if (!emp || addedIds.has(emp.employeeId)) continue;
+      addedIds.add(emp.employeeId);
+      result.push(emp);
+    }
+    result.sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    res.json({ success: true, data: result });
+  })
+);
+
 checkResultsRouter.get(
   "/:checkId",
   asyncRoute(async (req, res) => {

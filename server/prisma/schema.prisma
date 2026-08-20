@@ -841,6 +841,40 @@ model ProductionLabel {
   @@map("production_labels")
 }
 
+/// Label Entry FG (2026-08-20, instruksi eksplisit user) -- SAMA PERSIS
+/// strukturnya dgn ProductionLabel (Label Entry SFG) di atas, tapi tabel
+/// TERPISAH TOTAL (bukan dibedakan lewat kolom tipe) sesuai instruksi
+/// eksplisit user, supaya History FG & SFG tidak pernah bercampur. Lihat
+/// ProductionLabelEntryPage.tsx (dipakai ulang lewat prop `variant`) &
+/// productionLabelFg.routes.ts.
+model ProductionLabelFg {
+  id                  String    @id @default(uuid())
+  timestamp           DateTime  @default(now())
+  order               String
+  materialNumber      String?
+  materialDescription String?
+  batch               String?
+  orderQty            String?
+  plant               String?
+  lotNo               String?
+  exp                 DateTime?
+  shelfLife           String?
+  codeTanki           String?
+  iuPlant             String?
+  pasteType           String?
+  drumColour          String?
+  /// Volume (2026-08-20, instruksi eksplisit user, KHUSUS FG -- ProductionLabel/SFG
+  /// tidak punya kolom ini) -- auto-saran dari kolom "Volume" di Referensi Order/PO
+  /// (SAP-COOISPI, sama sumber & pola dgn PackingLog.totalQty), tapi tetap bisa
+  /// diedit manual sebelum Save.
+  volume              String?
+  remark              String?
+  printedBy           String
+
+  @@index([order])
+  @@map("production_labels_fg")
+}
+
 /// Menu "Papan Info" (2026-08-08, instruksi eksplisit user) -- feed internal
 /// spt media sosial: tiap user login bisa posting teks (+lampiran opsional),
 /// semua user lain bisa lihat, komentar, & like. SENGAJA TIDAK masuk

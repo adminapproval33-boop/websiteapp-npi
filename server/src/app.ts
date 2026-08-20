@@ -18,6 +18,7 @@ import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
 import { tankManualInputRouter } from "./modules/tankManualInput/tankManualInput.routes";
 import { productionOrderManualInputRouter } from "./modules/productionOrderManualInput/productionOrderManualInput.routes";
 import { productionLabelRouter } from "./modules/productionLabel/productionLabel.routes";
+import { productionLabelFgRouter } from "./modules/productionLabelFg/productionLabelFg.routes";
 import { maintenanceRouter } from "./modules/maintenance/maintenance.routes";
 import { postsRouter } from "./modules/posts/posts.routes";
 import { chatRouter } from "./modules/chat/chat.routes";
@@ -50,6 +51,7 @@ export function createApp() {
   app.use("/api/tank-manual-input", tankManualInputRouter);
   app.use("/api/production-order-manual-input", productionOrderManualInputRouter);
   app.use("/api/production-label", productionLabelRouter);
+  app.use("/api/production-label-fg", productionLabelFgRouter);
   app.use("/api/maintenance", maintenanceRouter);
   app.use("/api/posts", postsRouter);
   app.use("/api/chat", chatRouter);

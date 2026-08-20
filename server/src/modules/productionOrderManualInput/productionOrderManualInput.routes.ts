@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, AuthedRequest } from "../../middleware/auth";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 
@@ -70,7 +70,7 @@ productionOrderManualInputRouter.post(
 
 productionOrderManualInputRouter.put(
   "/:id",
-  requireFullAccess,
+  requireWrite,
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -98,7 +98,7 @@ productionOrderManualInputRouter.put(
 
 productionOrderManualInputRouter.delete(
   "/:id",
-  requireFullAccess,
+  requireWrite,
   asyncRoute(async (req, res) => {
     const existing = await prisma.productionOrderManualInput.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");

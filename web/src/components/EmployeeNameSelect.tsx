@@ -20,6 +20,37 @@ export function useEmployeeOptions() {
 }
 
 /**
+ * Saran nama utk kolom SPV Produksi/Leader/Member (2026-08-20, instruksi
+ * eksplisit user) -- BUKAN seluruh Data Karyawan, tapi cuma nama yang PERNAH
+ * diinput admin utk field ini di History menu terkait (mis. "leader" di
+ * "premixAftermix"), sudah difilter server-side supaya nama yang tidak ada
+ * lagi di Data Karyawan tidak pernah muncul. `section` opsional dipakai
+ * modul yang punya pembagian proses dlm 1 tabel (Premix vs Aftermix).
+ * Diteruskan ke `EmployeeNameSelect` lewat prop `suggestions` -- kalau belum
+ * termuat/kosong, komponen itu jatuh balik ke daftar Data Karyawan penuh
+ * (lihat `suggestionSource` di bawah), jadi popup tidak pernah kosong total
+ * di modul yang belum diberi source ini.
+ */
+export function useNameSuggestions(
+  module: string,
+  field: "spv" | "leader" | "member" | "spvColourMatching" | "sprayMan" | "mrpPic" | "salesPic" | "techName",
+  section?: string
+) {
+  return useQuery({
+    queryKey: ["employee-name-suggestions", module, field, section],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: EmployeeOption[] }>(
+          `/master-data/employees/name-suggestions?module=${encodeURIComponent(module)}&field=${field}${
+            section ? `&section=${encodeURIComponent(section)}` : ""
+          }`
+        )
+        .then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+/**
  * True kalau `name` cocok persis (tanpa peduli besar/kecil huruf) dengan salah satu
  * Full Name di Data Karyawan. Dipakai buat validasi SPV/Leader/Member/PIC sebelum
  * disimpan -- nama yang tidak ada di Data Karyawan tidak boleh lolos.
@@ -148,6 +179,7 @@ export default function EmployeeNameSelect({
   label = "Nama",
   placeholder,
   employeeId,
+  suggestions,
 }: {
   value: string;
   onChange: (value: string, employeeId?: string | null) => void;
@@ -159,8 +191,15 @@ export default function EmployeeNameSelect({
   placeholder?: string;
   /** NIK yg sedang tercatat di parent utk field ini (dari DB saat edit, atau hasil pilihan dropdown sebelumnya). */
   employeeId?: string | null;
+  /** Daftar saran ter-scope (hasil `useNameSuggestions`) -- kalau diisi & tidak kosong,
+   * dipakai utk isi dropdown MENGGANTIKAN seluruh Data Karyawan (mempersempit ke nama yg
+   * pernah diinput utk field ini di History menu terkait). Validasi ketik-bebas
+   * (isInvalid/isAmbiguous) TETAP pakai seluruh Data Karyawan apa pun isi prop ini --
+   * ini murni mempersempit SARAN, bukan aturan validasi baru. */
+  suggestions?: EmployeeOption[];
 }) {
   const { data: employees } = useEmployeeOptions();
+  const suggestionSource = suggestions && suggestions.length > 0 ? suggestions : employees;
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -193,10 +232,10 @@ export default function EmployeeNameSelect({
 
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase();
-    const list = employees ?? [];
+    const list = suggestionSource ?? [];
     const matches = q ? list.filter((e) => e.fullName.toLowerCase().includes(q)) : list;
     return matches.slice(0, 50);
-  }, [employees, value]);
+  }, [suggestionSource, value]);
 
   const isInvalid = !isKnownEmployeeName(employees, value);
   const exactMatches = useMemo(() => exactNameMatches(employees, value), [employees, value]);

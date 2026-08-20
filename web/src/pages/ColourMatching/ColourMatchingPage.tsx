@@ -8,6 +8,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   displayNameWithNik,
   resolveEmployeeId,
@@ -145,6 +146,10 @@ export default function ColourMatchingPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "colourMatching") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("colourMatching", "spv");
+  const { data: leaderSuggestions } = useNameSuggestions("colourMatching", "leader");
+  const { data: memberSuggestions } = useNameSuggestions("colourMatching", "member");
+  const { data: spvColourMatchingSuggestions } = useNameSuggestions("colourMatching", "spvColourMatching");
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
@@ -339,7 +344,15 @@ export default function ColourMatchingPage({
     setError("");
     setForm((f) => {
       const members = [...f.members, { name, nik: memberNikInput }];
-      return { ...f, members, formPerMan: computeFormPerMan(members.length) };
+      const next = { ...f, members, formPerMan: computeFormPerMan(members.length) };
+      // Form Received & Start otomatis terisi jam SEKARANG begitu Member pertama
+      // ditambahkan (2026-08-20, instruksi eksplisit user: percepat input admin) --
+      // HANYA kalau masih kosong, supaya tidak menimpa tanggal yang sudah diisi/
+      // direvisi manual.
+      const now = toDateTimeLocalValue(new Date());
+      if (!next.formReceived) next.formReceived = now;
+      if (!next.start) next.start = now;
+      return next;
     });
     setMemberInput("");
     setMemberNikInput(null);
@@ -532,6 +545,7 @@ export default function ColourMatchingPage({
                     value={form.spvName}
                     employeeId={form.spvNik}
                     onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    suggestions={spvSuggestions}
                     required
                   />
                 </ExcelField>
@@ -542,6 +556,7 @@ export default function ColourMatchingPage({
                     value={form.spvColourMatching}
                     employeeId={form.spvColourMatchingNik}
                     onChange={(v, nik) => setForm({ ...form, spvColourMatching: v, spvColourMatchingNik: nik ?? null })}
+                    suggestions={spvColourMatchingSuggestions}
                     required
                   />
                 </ExcelField>
@@ -552,6 +567,7 @@ export default function ColourMatchingPage({
                     value={form.leaderName}
                     employeeId={form.leaderNik}
                     onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                    suggestions={leaderSuggestions}
                     required
                   />
                 </ExcelField>
@@ -595,6 +611,7 @@ export default function ColourMatchingPage({
                       setMemberInput(v);
                       setMemberNikInput(nik ?? null);
                     }}
+                    suggestions={memberSuggestions}
                     placeholder="Nama anggota"
                   />
                 </ExcelField>

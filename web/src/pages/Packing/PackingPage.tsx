@@ -8,6 +8,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   displayNameWithNik,
   resolveEmployeeId,
@@ -206,6 +207,9 @@ export default function PackingPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "packing") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("packing", "spv");
+  const { data: leaderSuggestions } = useNameSuggestions("packing", "leader");
+  const { data: memberSuggestions } = useNameSuggestions("packing", "member");
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
@@ -452,7 +456,15 @@ export default function PackingPage({
     setError("");
     setForm((f) => {
       const members = [...f.members, { name, nik: memberNikInput, qtyPcs }];
-      return { ...f, members, qtyPcs: String(sumMembersQtyPcs(members)), qtyPerMan: computeTotalQtyPerMan(members, f.totalQty) };
+      const next = { ...f, members, qtyPcs: String(sumMembersQtyPcs(members)), qtyPerMan: computeTotalQtyPerMan(members, f.totalQty) };
+      // Form Received & Start otomatis terisi jam SEKARANG begitu Member pertama
+      // ditambahkan (2026-08-20, instruksi eksplisit user: percepat input admin) --
+      // HANYA kalau masih kosong, supaya tidak menimpa tanggal yang sudah diisi/
+      // direvisi manual.
+      const now = toDateTimeLocalValue(new Date());
+      if (!next.formReceived) next.formReceived = now;
+      if (!next.start) next.start = now;
+      return next;
     });
     setMemberNameInput("");
     setMemberNikInput(null);
@@ -633,6 +645,7 @@ export default function PackingPage({
                     value={form.spvName}
                     employeeId={form.spvNik}
                     onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    suggestions={spvSuggestions}
                     required
                   />
                 </ExcelField>
@@ -643,6 +656,7 @@ export default function PackingPage({
                     value={form.leaderName}
                     employeeId={form.leaderNik}
                     onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                    suggestions={leaderSuggestions}
                   />
                 </ExcelField>
               </ExcelRow>
@@ -657,6 +671,7 @@ export default function PackingPage({
                       setMemberNameInput(v);
                       setMemberNikInput(nik ?? null);
                     }}
+                    suggestions={memberSuggestions}
                     placeholder="Nama anggota"
                   />
                 </ExcelField>

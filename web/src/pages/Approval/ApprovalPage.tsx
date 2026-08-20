@@ -7,7 +7,12 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
-import EmployeeNameSelect, { formatInputBy, isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import EmployeeNameSelect, {
+  formatInputBy,
+  isKnownEmployeeName,
+  useEmployeeOptions,
+  useNameSuggestions,
+} from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
@@ -181,6 +186,10 @@ export default function ApprovalPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "approval") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: sprayManSuggestions } = useNameSuggestions("approval", "sprayMan");
+  const { data: mrpPicSuggestions } = useNameSuggestions("approval", "mrpPic");
+  const { data: salesPicSuggestions } = useNameSuggestions("approval", "salesPic");
+  const { data: techNameSuggestions } = useNameSuggestions("approval", "techName");
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
@@ -209,6 +218,65 @@ export default function ApprovalPage({
    * tetap dropdown wajib spt sebelumnya. Dipakai bareng oleh JSX form &
    * handleSubmit di bawah. */
   const sprayManFreeText = form.plant.trim() === "1201";
+
+  /** Saran Spray Man dari Member TERAKHIR Colour Matching Order ini (ambil
+   * anggota pertama -- Spray Man cuma 1 nama, sedangkan Member Colour
+   * Matching bisa banyak). Dipakai utk Plant selain "1201" (2026-08-12
+   * instruksi eksplisit user), HANYA kalau Spray Man masih kosong -- tetap
+   * bisa diganti manual krn ini murni saran, bukan kunci. Fungsi bersama
+   * dipakai baik saat Order baru di-lookup MAUPUN saat kolom Plant diedit
+   * manual belakangan (2026-08-20, instruksi eksplisit user: saran harus
+   * muncul begitu Plant "teridentifikasi" 1101, bukan cuma dari alur lookup). */
+  /** Saran Wet Sample/Panel/Customer/Cust Segmen/Mrp Pic/Sales Pic dari baris
+   * History Approval TERAKHIR dgn Material Number yg SAMA -- bukan dikunci ke
+   * Order yg sama (2026-08-20, instruksi eksplisit user, Mrp Pic/Sales Pic
+   * disamakan belakangan) krn field2 ini melekat ke produk (Material Number),
+   * yg SERING dipesan ulang lintas Order berbeda-beda, beda dgn Order yg
+   * jarang terulang persis. HANYA mengisi field yg masih kosong (termasuk yg
+   * mungkin sudah keisi dari histori Order yg sama di `handleOrderFound` --
+   * itu didahulukan krn dipanggil lebih dulu), tetap bisa diganti manual krn
+   * ini murni saran. Dipakai baik saat Order baru di-lookup MAUPUN saat
+   * kolom Material Number diedit manual belakangan (lihat onBlur di JSX-nya).
+   */
+  async function suggestFromMaterialHistory(materialNumber: string) {
+    try {
+      const res = await api.get<{ success: boolean; data: ApprovalRow | null }>(
+        `/approvals/latest-by-material/${encodeURIComponent(materialNumber)}`
+      );
+      const latest = res.data;
+      if (!latest) return;
+      setForm((f) => ({
+        ...f,
+        wetSample: f.wetSample || latest.wetSample || "",
+        panel: f.panel || latest.panel || "",
+        customer: f.customer || latest.customer || "",
+        custSegmen: f.custSegmen || latest.custSegmen || "",
+        // Mrp Pic/Sales Pic (2026-08-20, instruksi eksplisit user: samakan dgn
+        // Wet Sample/Panel/Customer/Cust Segmen) -- ikut disarankan dari histori
+        // Material Number yg sama, tetap HANYA kalau masih kosong.
+        mrpPic: f.mrpPic || latest.mrpPic || "",
+        mrpPicNik: f.mrpPic ? f.mrpPicNik : latest.mrpPicNik ?? null,
+        salesPic: f.salesPic || latest.salesPic || "",
+        salesPicNik: f.salesPic ? f.salesPicNik : latest.salesPicNik ?? null,
+      }));
+    } catch {
+      /* saran dari histori Material Number bersifat opsional -- kalau gagal, biarkan user isi manual */
+    }
+  }
+
+  async function suggestSprayManFromColourMatching(order: string) {
+    try {
+      const cm = await api.get<{ success: boolean; data: { members: { name: string; nik?: string | null }[] | null } | null }>(
+        `/colour-matching/latest-by-order/${encodeURIComponent(order)}`
+      );
+      const firstMember = cm.data?.members?.[0];
+      if (firstMember?.name) {
+        setForm((f) => (f.sprayMan.trim() ? f : { ...f, sprayMan: firstMember.name, sprayManNik: firstMember.nik ?? null }));
+      }
+    } catch {
+      /* saran Spray Man dari Member Colour Matching bersifat opsional -- kalau gagal, biarkan user isi manual */
+    }
+  }
 
   const historyQuery = useQuery({
     queryKey: ["approval-lot-history", statusFilter, filterCol, filterValue],
@@ -327,6 +395,9 @@ export default function ApprovalPage({
     } catch {
       /* tidak ada histori Approval sebelumnya untuk Order ini -- biarkan kosong */
     }
+    if ((data.materialNumber ?? "").trim()) {
+      await suggestFromMaterialHistory(data.materialNumber!.trim());
+    }
     try {
       const ctx = await api.get<{ success: boolean; data: { iuPlant: string; codeTanki: string } | null }>(
         `/master-data/order-context/${encodeURIComponent(data.order)}`
@@ -352,17 +423,7 @@ export default function ApprovalPage({
     if ((data.plant ?? "").trim() === "1201") {
       setForm((f) => (f.sprayMan.trim() ? f : { ...f, sprayMan: "-", sprayManNik: null }));
     } else {
-      try {
-        const cm = await api.get<{ success: boolean; data: { members: { name: string; nik?: string | null }[] | null } | null }>(
-          `/colour-matching/latest-by-order/${encodeURIComponent(data.order)}`
-        );
-        const firstMember = cm.data?.members?.[0];
-        if (firstMember?.name) {
-          setForm((f) => (f.sprayMan.trim() ? f : { ...f, sprayMan: firstMember.name, sprayManNik: firstMember.nik ?? null }));
-        }
-      } catch {
-        /* saran Spray Man dari Member Colour Matching bersifat opsional -- kalau gagal, biarkan user isi manual */
-      }
+      await suggestSprayManFromColourMatching(data.order);
     }
   }
 
@@ -527,7 +588,20 @@ export default function ApprovalPage({
                   <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
                 </ExcelField>
                 <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
-                  <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} required />
+                  <input
+                    value={form.materialNumber}
+                    onChange={(e) => setForm({ ...form, materialNumber: e.target.value })}
+                    onBlur={() => {
+                      // Saran Wet Sample/Panel/Customer/Cust Segmen dari histori Material
+                      // Number ini juga harus tetap muncul begitu kolomnya DIKOREKSI
+                      // MANUAL belakangan, bukan cuma saat Order baru di-lookup (2026-08-20,
+                      // instruksi eksplisit user). onBlur (bukan tiap ketikan) supaya tidak
+                      // fetch berkali-kali selagi masih mengetik.
+                      const materialNumber = form.materialNumber.trim();
+                      if (materialNumber) suggestFromMaterialHistory(materialNumber);
+                    }}
+                    required
+                  />
                 </ExcelField>
                 <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")} {...gridNav("materialDescription")}>
                   <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />
@@ -551,6 +625,18 @@ export default function ApprovalPage({
                         sprayMan: plant.trim() === "1201" && !f.sprayMan.trim() ? "-" : f.sprayMan,
                       }));
                     }}
+                    onBlur={() => {
+                      // Plant selain 1201 (mis. "1101", 2026-08-20 instruksi eksplisit
+                      // user) -- saran Spray Man dari Colour Matching harus tetap
+                      // muncul begitu Plant DIKOREKSI MANUAL belakangan, bukan cuma
+                      // saat Order baru pertama kali di-lookup. onBlur (bukan tiap
+                      // ketikan) supaya tidak fetch berkali-kali selagi masih mengetik.
+                      const plant = form.plant.trim();
+                      const order = form.order.trim();
+                      if (plant && plant !== "1201" && order && !form.sprayMan.trim()) {
+                        suggestSprayManFromColourMatching(order);
+                      }
+                    }}
                   />
                 </ExcelField>
               </ExcelRow>
@@ -568,6 +654,7 @@ export default function ApprovalPage({
                     value={form.mrpPic}
                     employeeId={form.mrpPicNik}
                     onChange={(v, nik) => setForm({ ...form, mrpPic: v, mrpPicNik: nik ?? null })}
+                    suggestions={mrpPicSuggestions}
                   />
                 </ExcelField>
                 <ExcelField label="Sales Pic" widthPx={colWidths.salesPic} onResizeStart={beginResize("salesPic")} {...gridNav("salesPic")}>
@@ -577,6 +664,7 @@ export default function ApprovalPage({
                     value={form.salesPic}
                     employeeId={form.salesPicNik}
                     onChange={(v, nik) => setForm({ ...form, salesPic: v, salesPicNik: nik ?? null })}
+                    suggestions={salesPicSuggestions}
                   />
                 </ExcelField>
               </ExcelRow>
@@ -600,6 +688,7 @@ export default function ApprovalPage({
                       value={form.sprayMan}
                       employeeId={form.sprayManNik}
                       onChange={(v, nik) => setForm({ ...form, sprayMan: v, sprayManNik: nik ?? null })}
+                      suggestions={sprayManSuggestions}
                     />
                   )}
                 </ExcelField>
@@ -645,6 +734,7 @@ export default function ApprovalPage({
                     value={form.techName}
                     employeeId={form.techNameNik}
                     onChange={(v, nik) => setForm({ ...form, techName: v, techNameNik: nik ?? null })}
+                    suggestions={techNameSuggestions}
                   />
                 </ExcelField>
                 <ExcelField label="Finish App" widthPx={colWidths.finishApp} onResizeStart={beginResize("finishApp")} {...gridNav("finishApp")}>

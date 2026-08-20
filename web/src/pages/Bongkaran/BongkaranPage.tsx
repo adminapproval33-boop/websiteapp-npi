@@ -6,6 +6,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   displayNameWithNik,
   resolveEmployeeId,
@@ -109,6 +110,9 @@ export default function BongkaranPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "bongkaran") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("bongkaran", "spv");
+  const { data: leaderSuggestions } = useNameSuggestions("bongkaran", "leader");
+  const { data: memberSuggestions } = useNameSuggestions("bongkaran", "member");
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
@@ -249,7 +253,14 @@ export default function BongkaranPage({
       return;
     }
     setError("");
-    setForm((f) => ({ ...f, members: [...f.members, { name, nik: memberNikInput }] }));
+    setForm((f) => {
+      const next = { ...f, members: [...f.members, { name, nik: memberNikInput }] };
+      // Form Received otomatis terisi jam SEKARANG begitu Member pertama ditambahkan
+      // (2026-08-20, instruksi eksplisit user: percepat input admin) -- HANYA kalau
+      // masih kosong, supaya tidak menimpa tanggal yang sudah diisi/direvisi manual.
+      if (!next.formReceived) next.formReceived = toDateTimeLocalValue(new Date());
+      return next;
+    });
     setMemberInput("");
     setMemberNikInput(null);
   }
@@ -388,6 +399,7 @@ export default function BongkaranPage({
                     value={form.spvName}
                     employeeId={form.spvNik}
                     onChange={(v, nik) => setForm({ ...form, spvName: v, spvNik: nik ?? null })}
+                    suggestions={spvSuggestions}
                     required
                   />
                 </ExcelField>
@@ -398,6 +410,7 @@ export default function BongkaranPage({
                     value={form.leaderName}
                     employeeId={form.leaderNik}
                     onChange={(v, nik) => setForm({ ...form, leaderName: v, leaderNik: nik ?? null })}
+                    suggestions={leaderSuggestions}
                   />
                 </ExcelField>
                 <ExcelField label="Form Received" widthPx={colWidths.formReceived} onResizeStart={beginResize("formReceived")} {...gridNav("formReceived")}>
@@ -422,6 +435,7 @@ export default function BongkaranPage({
                       setMemberInput(v);
                       setMemberNikInput(nik ?? null);
                     }}
+                    suggestions={memberSuggestions}
                     placeholder="Nama anggota"
                   />
                 </ExcelField>

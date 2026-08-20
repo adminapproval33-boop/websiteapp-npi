@@ -9,6 +9,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   displayNameWithNik,
   resolveEmployeeId,
@@ -242,6 +243,9 @@ export default function PremixAftermixPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, section === "PREMIX" ? "premix" : "aftermix") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("premixAftermix", "spv", section);
+  const { data: leaderSuggestions } = useNameSuggestions("premixAftermix", "leader", section);
+  const { data: memberSuggestions } = useNameSuggestions("premixAftermix", "member", section);
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
@@ -756,7 +760,15 @@ export default function PremixAftermixPage({
     setError("");
     setForm((f) => {
       const members = [...f.members, { name, nik: memberNikInput }];
-      return { ...f, members, qtyPerMan: computeQtyPerMan(f.orderQty, members.length) };
+      const next = { ...f, members, qtyPerMan: computeQtyPerMan(f.orderQty, members.length) };
+      // Form Received & Start otomatis terisi jam SEKARANG begitu Member pertama
+      // ditambahkan (2026-08-20, instruksi eksplisit user: percepat input admin) --
+      // HANYA kalau masih kosong, supaya tidak menimpa tanggal yang sudah diisi/
+      // direvisi manual.
+      const now = toDateTimeLocalValue(new Date());
+      if (!next.formReceived) next.formReceived = now;
+      if (!next.start) next.start = now;
+      return next;
     });
     setMemberNameInput("");
     setMemberNikInput(null);
@@ -954,6 +966,7 @@ export default function PremixAftermixPage({
                     value={form.spvProduksi}
                     employeeId={form.spvProduksiNik}
                     onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                    suggestions={spvSuggestions}
                     required
                   />
                 </ExcelField>
@@ -964,6 +977,7 @@ export default function PremixAftermixPage({
                     value={form.leader}
                     employeeId={form.leaderNik}
                     onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+                    suggestions={leaderSuggestions}
                   />
                 </ExcelField>
                 <ExcelField label="Qty/Man (Liter)" color="orange" widthPx={colWidths.qtyPerMan} onResizeStart={beginResize("qtyPerMan")} {...gridNav("qtyPerMan")}>
@@ -985,6 +999,7 @@ export default function PremixAftermixPage({
                       setMemberNameInput(v);
                       setMemberNikInput(nik ?? null);
                     }}
+                    suggestions={memberSuggestions}
                     placeholder="Nama anggota"
                   />
                 </ExcelField>

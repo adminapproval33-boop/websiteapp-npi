@@ -9,6 +9,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   displayNameWithNik,
   resolveEmployeeId,
@@ -319,6 +320,9 @@ export default function MillingPage({
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, "milling") === "VIEW";
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("milling", "spv");
+  const { data: leaderSuggestions } = useNameSuggestions("milling", "leader");
+  const { data: memberSuggestions } = useNameSuggestions("milling", "member");
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
@@ -542,7 +546,17 @@ export default function MillingPage({
       return;
     }
     setError("");
-    setForm((f) => ({ ...f, members: [...f.members, { name, nik: memberNikInput }] }));
+    setForm((f) => {
+      const next = { ...f, members: [...f.members, { name, nik: memberNikInput }] };
+      // Form Received & Start otomatis terisi jam SEKARANG begitu Member pertama
+      // ditambahkan (2026-08-20, instruksi eksplisit user: percepat input admin) --
+      // HANYA kalau masih kosong, supaya tidak menimpa tanggal yang sudah diisi/
+      // direvisi manual.
+      const now = toDateTimeLocalValue(new Date());
+      if (!next.formReceived) next.formReceived = now;
+      if (!next.start) next.start = now;
+      return next;
+    });
     setMemberInput("");
     setMemberNikInput(null);
   }
@@ -775,6 +789,7 @@ export default function MillingPage({
                     value={form.spvProduksi}
                     employeeId={form.spvProduksiNik}
                     onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                    suggestions={spvSuggestions}
                     required
                   />
                 </ExcelField>
@@ -785,6 +800,7 @@ export default function MillingPage({
                     value={form.leader}
                     employeeId={form.leaderNik}
                     onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+                    suggestions={leaderSuggestions}
                   />
                 </ExcelField>
                 <ExcelField label="Qty Act" color="orange" widthPx={colWidths.qtyAct} onResizeStart={beginResize("qtyAct")} {...gridNav("qtyAct")}>
@@ -802,6 +818,7 @@ export default function MillingPage({
                       setMemberInput(v);
                       setMemberNikInput(nik ?? null);
                     }}
+                    suggestions={memberSuggestions}
                     placeholder="Nama anggota"
                   />
                 </ExcelField>

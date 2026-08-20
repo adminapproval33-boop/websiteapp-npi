@@ -21,29 +21,40 @@ interface LabelHistoryRow {
   iuPlant: string | null;
   pasteType: string | null;
   drumColour: string | null;
+  /// Cuma ada di History Label Entry FG (kolom DB khusus ProductionLabelFg) -- undefined utk SFG.
+  volume?: string | null;
   remark: string | null;
   printedBy: string;
 }
 
 /** Label History (2026-08-04, instruksi eksplisit user) -- histori tiap kali
- * label produksi dicetak dari Production Label Entry (lihat
+ * label produksi dicetak dari menu Label Entry SFG (lihat
  * ProductionLabelEntryPage.tsx). Hapus dibatasi FULL_ACCESS -- menu ini
  * BUKAN bagian sistem akses per-menu View/Input/Hide (lib/menuAccess.ts),
  * sama spt Tank Manual Input/Production Order Manual Input, jadi pola
  * hapusnya ikut default lama (FULL_ACCESS saja), bukan getMenuLevel. */
-export default function LabelHistoryPage() {
+export default function LabelHistoryPage({
+  apiBase = "/production-label",
+  showVolumeColumn = false,
+}: {
+  apiBase?: string;
+  /** Kolom "Volume" di tabel History (2026-08-20, instruksi eksplisit user)
+   * -- KHUSUS Label Entry FG (kolom DB `volume` cuma ada di ProductionLabelFg),
+   * default false (SFG tidak berubah). */
+  showVolumeColumn?: boolean;
+} = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
 
   const historyQuery = useQuery({
-    queryKey: ["production-label-history"],
-    queryFn: () => api.get<{ success: boolean; data: LabelHistoryRow[] }>("/production-label/history").then((r) => r.data),
+    queryKey: ["production-label-history", apiBase],
+    queryFn: () => api.get<{ success: boolean; data: LabelHistoryRow[] }>(`${apiBase}/history`).then((r) => r.data),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/production-label/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-label-history"] }),
+    mutationFn: (id: string) => api.delete(`${apiBase}/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["production-label-history", apiBase] }),
   });
 
   const filtered = (historyQuery.data ?? []).filter((row) =>
@@ -76,6 +87,7 @@ export default function LabelHistoryPage() {
             { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
             { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
             { key: "batch", label: "Batch", render: (r) => r.batch },
+            ...(showVolumeColumn ? [{ key: "volume", label: "Volume", render: (r: LabelHistoryRow) => r.volume ?? null }] : []),
             { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
             { key: "plant", label: "Plant", render: (r) => r.plant },
             { key: "lotNo", label: "Lot No", render: (r) => r.lotNo },

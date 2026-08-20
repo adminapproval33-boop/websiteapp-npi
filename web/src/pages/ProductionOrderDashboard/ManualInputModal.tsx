@@ -10,6 +10,7 @@ import EmployeeNameSelect, {
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
+  useNameSuggestions,
   normalizeMembers,
   MemberEntry,
 } from "../../components/EmployeeNameSelect";
@@ -55,9 +56,16 @@ const emptyForm = {
 
 export default function ManualInputModal() {
   const { user } = useAuth();
-  const canEditOrDelete = user?.access === "FULL_ACCESS";
+  // Edit/Hapus (2026-08-20, instruksi eksplisit user) -- sebelumnya cuma
+  // FULL_ACCESS, sekarang user dgn akses Input juga boleh, HANYA akses View
+  // (baca-saja) yg tetap tidak bisa -- sama pola dgn requireWrite di
+  // backend (lihat productionOrderManualInput.routes.ts PUT/DELETE).
+  const canEditOrDelete = user?.access === "FULL_ACCESS" || user?.access === "INPUT";
   const queryClient = useQueryClient();
   const { data: employees } = useEmployeeOptions();
+  const { data: spvSuggestions } = useNameSuggestions("productionOrderManualInput", "spv");
+  const { data: leaderSuggestions } = useNameSuggestions("productionOrderManualInput", "leader");
+  const { data: memberSuggestions } = useNameSuggestions("productionOrderManualInput", "member");
   const { data: tanks } = useTankOptions();
 
   const [form, setForm] = useState(emptyForm);
@@ -222,6 +230,7 @@ export default function ManualInputModal() {
                 value={form.spvProduksi}
                 employeeId={form.spvProduksiNik}
                 onChange={(v, nik) => setForm({ ...form, spvProduksi: v, spvProduksiNik: nik ?? null })}
+                suggestions={spvSuggestions}
                 required
               />
               <EmployeeNameSelect
@@ -230,6 +239,7 @@ export default function ManualInputModal() {
                 value={form.leader}
                 employeeId={form.leaderNik}
                 onChange={(v, nik) => setForm({ ...form, leader: v, leaderNik: nik ?? null })}
+                suggestions={leaderSuggestions}
               />
               <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <label>Member</label>
@@ -244,6 +254,7 @@ export default function ManualInputModal() {
                         setMemberNameInput(v);
                         setMemberNikInput(nik ?? null);
                       }}
+                      suggestions={memberSuggestions}
                     />
                   </div>
                   <button type="button" className="btn btn-outline" onClick={addMember}>

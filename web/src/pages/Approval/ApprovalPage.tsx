@@ -13,7 +13,7 @@ import EmployeeNameSelect, {
   useEmployeeOptions,
   useNameSuggestions,
 } from "../../components/EmployeeNameSelect";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
@@ -546,6 +546,14 @@ export default function ApprovalPage({
     }
     if (!isKnownTankCode(tanks, form.codeTanki)) {
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    // Lot COA/Send To Tech/Submit Tech/Submit Cust SENGAJA TIDAK divalidasi
+    // (2026-08-21, instruksi eksplisit user: kolom2 itu boleh tanggal masa
+    // depan) -- cuma Prepare Date & Finish App yg tetap diblokir.
+    const dateError = validateNotFutureDate(form.prepareProduksi, "Prepare Date") ?? validateNotFutureDate(form.finishApp, "Finish App");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

@@ -23,6 +23,10 @@ interface LabelHistoryRow {
   drumColour: string | null;
   /// Cuma ada di History Label Entry FG (kolom DB khusus ProductionLabelFg) -- undefined utk SFG.
   volume?: string | null;
+  /// Cuma ada di History Label Entry FG (kolom DB khusus ProductionLabelFg) -- undefined utk SFG.
+  jumlahPer?: string | null;
+  /// Cuma ada di History Label Entry FG (kolom DB khusus ProductionLabelFg) -- undefined utk SFG.
+  orderQtyPcs?: string | null;
   remark: string | null;
   printedBy: string;
 }
@@ -36,12 +40,24 @@ interface LabelHistoryRow {
 export default function LabelHistoryPage({
   apiBase = "/production-label",
   showVolumeColumn = false,
+  showJumlahPerColumn = false,
+  showOrderQtyPcsColumn = false,
 }: {
   apiBase?: string;
   /** Kolom "Volume" di tabel History (2026-08-20, instruksi eksplisit user)
    * -- KHUSUS Label Entry FG (kolom DB `volume` cuma ada di ProductionLabelFg),
    * default false (SFG tidak berubah). */
   showVolumeColumn?: boolean;
+  /** Kolom "Jumlah /Per" di tabel History (2026-08-21, instruksi eksplisit
+   * user) -- KHUSUS Label Entry FG (kolom DB `jumlahPer` cuma ada di
+   * ProductionLabelFg), default false (SFG tidak berubah). */
+  showJumlahPerColumn?: boolean;
+  /** Kolom "Quantity/PCS" (varian Pcs) di tabel History (2026-08-21, instruksi
+   * eksplisit user) -- KHUSUS Label Entry FG (kolom DB `orderQtyPcs` cuma ada
+   * di ProductionLabelFg), default false (SFG tidak berubah). Varian /LITER-
+   * nya (`orderQty`) SUDAH ada sbg kolom "Quantity/LITER" tanpa gerbang ini --
+   * kolom itu memang sudah lama tampil di History SFG maupun FG. */
+  showOrderQtyPcsColumn?: boolean;
 } = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -88,7 +104,11 @@ export default function LabelHistoryPage({
             { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
             { key: "batch", label: "Batch", render: (r) => r.batch },
             ...(showVolumeColumn ? [{ key: "volume", label: "Volume", render: (r: LabelHistoryRow) => r.volume ?? null }] : []),
-            { key: "orderQty", label: "Order Qty", render: (r) => r.orderQty },
+            ...(showJumlahPerColumn ? [{ key: "jumlahPer", label: "Jumlah /Per", render: (r: LabelHistoryRow) => r.jumlahPer ?? null }] : []),
+            { key: "orderQty", label: "Quantity/LITER", render: (r) => r.orderQty },
+            ...(showOrderQtyPcsColumn
+              ? [{ key: "orderQtyPcs", label: "Quantity/PCS", render: (r: LabelHistoryRow) => r.orderQtyPcs ?? null }]
+              : []),
             { key: "plant", label: "Plant", render: (r) => r.plant },
             { key: "lotNo", label: "Lot No", render: (r) => r.lotNo },
             {

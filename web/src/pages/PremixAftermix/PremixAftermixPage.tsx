@@ -25,7 +25,7 @@ import WeeklyScheduleCalendar, {
 } from "../../components/WeeklyScheduleCalendar";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
@@ -861,6 +861,14 @@ export default function PremixAftermixPage({
     }
     if (!isKnownTankCode(tanks, form.codeTanki)) {
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    const dateError =
+      validateNotFutureDate(form.formReceived, "Form Received") ??
+      validateNotFutureDate(form.start, "Start") ??
+      validateNotFutureDate(form.finish, "Finish");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

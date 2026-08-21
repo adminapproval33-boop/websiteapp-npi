@@ -7,6 +7,35 @@ export function toDateTimeLocalValue(value: string | Date | null | undefined): s
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Tanggal HARI INI (YYYY-MM-DD, waktu lokal browser) -- dipakai sbg atribut
+ * `max` di <input type="date"> DAN sbg acuan `isFutureDate` di bawah. */
+export function todayDateValue(): string {
+  return toDateTimeLocalValue(new Date()).slice(0, 10);
+}
+
+/** True kalau TANGGAL (bagian "YYYY-MM-DD" -- jam diabaikan) dari `value`
+ * lebih besar dari tanggal HARI INI (2026-08-21, instruksi eksplisit user:
+ * field spt Start/Finish/Form Received menandakan proses yg SUDAH terjadi,
+ * jadi tidak boleh diisi tanggal yg belum terjadi -- ditemukan lewat grafik
+ * Dashboard Produktivitas yg kecolongan titik data "di masa depan" krn field
+ * `finish` production log diisi salah tanggal). Dipakai utk kedua tipe input
+ * (<input type="date"> MAUPUN type="datetime-local">) krn keduanya sama-sama
+ * berawalan "YYYY-MM-DD". String kosong bukan tanggung jawab fungsi ini
+ * (required/optional diatur terpisah di pemanggil). */
+export function isFutureDate(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return value.slice(0, 10) > todayDateValue();
+}
+
+/** Pesan error siap pakai kalau `value` melebihi hari ini, else `null` --
+ * `label` = nama field utk pesan (mis. "Finish", "QC Entry Date"), dipanggil
+ * dari validasi submit tiap modul (lihat pemanggil utk daftar field). */
+export function validateNotFutureDate(value: string | null | undefined, label: string): string | null {
+  return isFutureDate(value)
+    ? `${label} tidak boleh diisi tanggal yang belum terjadi (melebihi hari ini). Periksa kembali tanggalnya.`
+    : null;
+}
+
 /** Format Date/ISO string untuk ditampilkan di tabel history. */
 export function formatDateTime(value: string | Date | null | undefined): string {
   if (!value) return "-";

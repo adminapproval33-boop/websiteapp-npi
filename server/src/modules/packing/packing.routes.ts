@@ -7,6 +7,7 @@ import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedReq
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const packingRouter = Router();
 packingRouter.use(requireAuth);
@@ -32,14 +33,14 @@ const saveSchema = z
     members: z
       .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable(), qtyPcs: z.string().trim().optional() }))
       .optional(),
-    formReceived: optionalDate,
-    start: optionalDate,
+    formReceived: notFutureDate(optionalDate, "Form Received"),
+    start: notFutureDate(optionalDate, "Start"),
     leaderName: z.string().optional(),
     leaderNik: z.string().trim().optional().nullable(),
     qtyPerMan: z.string().optional(),
     totalQty: z.string().optional(),
     qtyPcs: z.string().optional(),
-    finish: optionalDate,
+    finish: notFutureDate(optionalDate, "Finish"),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     remark: z.string().optional(),
   })

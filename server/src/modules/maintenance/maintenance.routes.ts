@@ -5,6 +5,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik } from "../../lib/employeeNik";
+import { notFutureDate } from "../../lib/dateValidation";
 
 /**
  * Menu "Maintenance" (2026-08-06, instruksi eksplisit user) -- dipicu dari
@@ -40,9 +41,11 @@ const saveSchema = z
     priority: z.string().optional(),
     technician: z.string().optional(),
     technicianNik: z.string().trim().optional().nullable(),
+    // scheduledDate ("Jadwal Pengerjaan") SENGAJA TIDAK divalidasi -- itu
+    // tanggal rencana/jadwal ke depan, wajar kalau lebih besar dari hari ini.
     scheduledDate: optionalDate,
-    start: optionalDate,
-    finish: optionalDate,
+    start: notFutureDate(optionalDate, "Tanggal Mulai"),
+    finish: notFutureDate(optionalDate, "Tanggal Selesai"),
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {

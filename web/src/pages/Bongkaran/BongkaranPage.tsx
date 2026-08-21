@@ -14,7 +14,7 @@ import EmployeeNameSelect, {
 } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
@@ -329,6 +329,11 @@ export default function BongkaranPage({
     }
     if (form.leaderName.trim() && !isKnownEmployeeName(employees, form.leaderName)) {
       setError("Leader tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    const dateError = validateNotFutureDate(form.formReceived, "Form Received") ?? validateNotFutureDate(form.sendToPqe, "Send To PQE");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

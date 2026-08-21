@@ -96,9 +96,44 @@ function formatDuration(since: string): string {
   return `${days} hari ${hours} jam`;
 }
 
+type TaTbFilter = "TA" | "TB";
+type StatusFilter = "empty" | "occupied" | "damaged";
+
+const TA_TB_OPTIONS: { value: TaTbFilter; label: string }[] = [
+  { value: "TA", label: "Tanki Atas" },
+  { value: "TB", label: "Tanki Bawah" },
+];
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "empty", label: "Tanki Kosong" },
+  { value: "occupied", label: "Tanki Terisi" },
+  { value: "damaged", label: "Tank Damaged" },
+];
+
+function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
 export default function TankDashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Filter Tipe Tanki & Status (2026-08-21, instruksi eksplisit user) --
+  // multi-select, kosong (default) = tampilkan semua. Tanki Atas/Bawah
+  // ditentukan dari 2 HURUF DEPAN Code Tanki ("TA"/"TB"), BUKAN dari kolom
+  // `taTb` Master Data -- sesuai instruksi eksplisit user.
+  const [taTbFilter, setTaTbFilter] = useState<Set<TaTbFilter>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<StatusFilter>>(new Set());
+  // Panel dropdown filter (2026-08-21, instruksi eksplisit user: dibuat spt
+  // tombol "Kolom" DataTable -- 1 tombol per grup, klik utk buka/tutup panel
+  // checkbox, bukan baris tombol toggle yg selalu kelihatan).
+  const [showTaTbPanel, setShowTaTbPanel] = useState(false);
+  const [showStatusPanel, setShowStatusPanel] = useState(false);
+  // Kotak pencarian (2026-08-21, instruksi eksplisit user: dimunculkan lagi,
+  // kali ini di toolbar tabel sendiri lewat `toolbarExtra` -- sejajar
+  // "Reset Kolom" -- bukan lagi baris terpisah di atas).
   const [search, setSearch] = useState("");
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
@@ -159,59 +194,119 @@ export default function TankDashboardPage() {
   });
 
   const rows = tankQuery.data ?? [];
-  const damagedCount = rows.filter((r) => r.damaged).length;
-  const occupiedCount = rows.filter((r) => !r.damaged && r.status === "occupied").length;
-  const emptyCount = rows.length - damagedCount - occupiedCount;
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
     return rows.filter((r) => {
-      const haystack = [r.code, r.occupant?.order, r.occupant?.materialNumber, r.occupant?.materialDescription, r.occupant?.batch]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
+      if (taTbFilter.size > 0) {
+        const codePrefix = r.code.trim().toUpperCase();
+        const matchesTaTb = (taTbFilter.has("TA") && codePrefix.startsWith("TA")) || (taTbFilter.has("TB") && codePrefix.startsWith("TB"));
+        if (!matchesTaTb) return false;
+      }
+      if (statusFilter.size > 0) {
+        const rowStatus: StatusFilter = r.damaged ? "damaged" : r.status === "occupied" ? "occupied" : "empty";
+        if (!statusFilter.has(rowStatus)) return false;
+      }
+      if (q) {
+        const haystack = [r.code, r.occupant?.order, r.occupant?.materialNumber, r.occupant?.materialDescription, r.occupant?.batch]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
     });
-  }, [rows, search]);
+  }, [rows, taTbFilter, statusFilter, search]);
+
+  // KPI cards (2026-08-21, instruksi eksplisit user: harus ikut berubah
+  // sesuai filter TA/TB & Status Tanki, MAUPUN tombol "Filter" per-kolom
+  // bawaan DataTable) -- dihitung dari `visibleRows`, yaitu baris yg
+  // BENAR-BENAR tampil di tabel setelah SEMUA filter (custom TA/TB/Status +
+  // filter per-kolom bawaan), diisi lewat callback `onVisibleRowsChange`
+  // DataTable (lihat prop-nya di bawah), BUKAN dari `filteredRows` yg cuma
+  // menghitung filter custom.
+  const [visibleRows, setVisibleRows] = useState<TankRow[]>([]);
+  const damagedCount = visibleRows.filter((r) => r.damaged).length;
+  const occupiedCount = visibleRows.filter((r) => !r.damaged && r.status === "occupied").length;
+  const emptyCount = visibleRows.length - damagedCount - occupiedCount;
+
+  // Filter TA/TB & Status Tanki (2026-08-21, instruksi eksplisit user: dibuat
+  // spt tombol "Kolom" DataTable -- 1 tombol per grup, klik buka/tutup panel
+  // checkbox) -- multi-select, tidak ada yg dicentang = tampilkan semua.
+  // Dirender lewat prop `toolbarExtraLeft` DataTable supaya 1 baris bareng
+  // "Kolom"/"Filter"/"Reset Kolom" (instruksi eksplisit user: urutan tombol
+  // "TA/TB, Status Tanki, Kolom, Filter, Reset Kolom" dlm 1 baris).
+  const tankFilterButtons = (
+    <>
+      <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          className={`btn ${showTaTbPanel || taTbFilter.size > 0 ? "" : "btn-outline"}`}
+          onClick={() => setShowTaTbPanel((s) => !s)}
+        >
+          ☰ TA/TB{taTbFilter.size > 0 ? ` (${taTbFilter.size})` : ""}
+        </button>
+        {showTaTbPanel && (
+          <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 180, padding: 10 }}>
+            {TA_TB_OPTIONS.map((opt) => (
+              <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                <input type="checkbox" checked={taTbFilter.has(opt.value)} onChange={() => setTaTbFilter((s) => toggleInSet(s, opt.value))} />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          className={`btn ${showStatusPanel || statusFilter.size > 0 ? "" : "btn-outline"}`}
+          onClick={() => setShowStatusPanel((s) => !s)}
+        >
+          ☰ Status Tanki{statusFilter.size > 0 ? ` (${statusFilter.size})` : ""}
+        </button>
+        {showStatusPanel && (
+          <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 180, padding: 10 }}>
+            {STATUS_OPTIONS.map((opt) => (
+              <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                <input type="checkbox" checked={statusFilter.has(opt.value)} onChange={() => setStatusFilter((s) => toggleInSet(s, opt.value))} />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <KpiCard label="Total Tank" value={rows.length} color="var(--navy-light)" />
-        <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
-        <KpiCard label="Tank Terisi" value={occupiedCount} color="var(--danger)" />
-        <KpiCard label="Tank Damaged" value={damagedCount} color="#d97706" />
-      </div>
+    <>
+    <div className="panel">
+      <div className="panel-header">Tank Monitoring</div>
+      <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <KpiCard label="Total Tank" value={visibleRows.length} color="var(--navy-light)" />
+          <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
+          <KpiCard label="Tank Terisi" value={occupiedCount} color="var(--danger)" />
+          <KpiCard label="Tank Damaged" value={damagedCount} color="#d97706" />
+        </div>
 
-      <div className="panel">
-        <div className="panel-header">Tank Monitoring</div>
-        <div className="panel-body">
-          <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-            Status "Terisi"/"Kosong" diturunkan otomatis dari Code Tanki yang diisi di menu Premix, Milling, Aftermix,
-            Colour Matching, QC, Approval, dan Packing -- diambil dari input PALING TERAKHIR untuk tiap Tank (lintas
-            Order manapun), dan dianggap kosong lagi begitu Order tersebut sudah masuk Packing. Data ini bukan sensor
-            fisik, jadi bisa saja tidak 100% akurat kalau ada tahap yang belum diinput ke sistem. Status
-            "<strong>Damaged</strong>" ditandai manual lewat checkbox di kolom "Damaged" tabel ini (otomatis
-            mengarahkan ke menu Maintenance) -- menggantikan tampilan Terisi/Kosong di baris itu, dan dikeluarkan
-            dari KPI "Tank Kosong"/"Tank Terisi" di atas.
-          </p>
-          <input
-            placeholder="Cari Code Tanki / Order / Material..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ marginBottom: 8, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-          />
-          <p style={{ marginTop: 0, marginBottom: 12, fontSize: "0.75rem", color: "var(--text-muted)" }}>
-            Kolom <strong>Code Tanki</strong> di-freeze (tetap kelihatan saat scroll ke samping), dan Header tabel
-            selalu freeze ke atas saat scroll ke bawah -- mirip Freeze Panes di Excel.
-          </p>
-          <DataTable
+        <DataTable
             rowKey={(r: TankRow) => r.code}
             exportFileName="tank-monitoring"
             storageKey="tank-monitoring-v2"
             rows={filteredRows}
             freezeFirstColumn
+            toolbarExtraLeft={tankFilterButtons}
+            onVisibleRowsChange={setVisibleRows}
+            toolbarExtra={
+              <input
+                placeholder="Cari Code Tanki / Order / Material..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ padding: 8, width: 260, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+            }
             rowStyle={(r) => (r.damaged ? { background: "#fffbeb" } : r.status === "occupied" ? { background: "#fef2f2" } : undefined)}
             columns={[
               { key: "code", label: "Code Tanki", render: (r) => r.code },
@@ -481,6 +576,6 @@ export default function TankDashboardPage() {
           </p>
         </Modal>
       )}
-    </div>
+    </>
   );
 }

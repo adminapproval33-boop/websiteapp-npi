@@ -5,7 +5,7 @@ import { api, ApiError } from "../../api/client";
 import TankSelect from "../../components/TankSelect";
 import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { toDateTimeLocalValue } from "../../lib/datetime";
+import { toDateTimeLocalValue, validateNotFutureDate } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { emptyMaintenanceForm, MaintenanceForm, MaintenanceRow } from "./types";
@@ -150,6 +150,13 @@ export default function MaintenanceFormPage() {
     }
     if (form.technician.trim() && !isKnownEmployeeName(employees, form.technician)) {
       setError("Teknisi/PIC Maintenance tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
+      return;
+    }
+    // Jadwal Pengerjaan (scheduledDate) SENGAJA TIDAK divalidasi -- itu tanggal
+    // rencana/jadwal ke depan, wajar kalau lebih besar dari hari ini.
+    const dateError = validateNotFutureDate(form.start, "Tanggal Mulai") ?? validateNotFutureDate(form.finish, "Tanggal Selesai");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

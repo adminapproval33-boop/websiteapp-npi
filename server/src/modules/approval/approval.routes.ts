@@ -6,6 +6,7 @@ import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireM
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -33,11 +34,14 @@ const saveSchema = z
     mrpPicNik: z.string().trim().optional().nullable(),
     salesPic: z.string().trim().min(1, "Sales Pic wajib diisi."),
     salesPicNik: z.string().trim().optional().nullable(),
-    prepareProduksi: optionalDate,
+    prepareProduksi: notFutureDate(optionalDate, "Prepare Date"),
     sprayMan: z.string().optional(),
     sprayManNik: z.string().trim().optional().nullable(),
     wetSample: z.string().optional(),
     panel: z.string().optional(),
+    // Lot COA/Send To Tech/Submit Tech/Submit Cust SENGAJA TIDAK divalidasi
+    // (2026-08-21, instruksi eksplisit user: kolom2 itu boleh tanggal masa
+    // depan).
     lotCoa: optionalDate,
     sendToTech: optionalDate,
     technicalDateReceiving: optionalDate,
@@ -46,7 +50,7 @@ const saveSchema = z
     custSegmen: z.string().optional(),
     techName: z.string().optional(),
     techNameNik: z.string().trim().optional().nullable(),
-    finishApp: optionalDate,
+    finishApp: notFutureDate(optionalDate, "Finish App"),
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {

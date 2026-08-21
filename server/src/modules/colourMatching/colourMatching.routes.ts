@@ -8,6 +8,7 @@ import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const colourMatchingRouter = Router();
 colourMatchingRouter.use(requireAuth);
@@ -41,9 +42,9 @@ const saveSchema = z
     typesOfProducts: z.string().trim().min(1, "Types of Products wajib diisi."),
     baseColor: z.string().trim().min(1, "Base Color wajib diisi."),
     formPerMan: z.string().optional(),
-    formReceived: requiredDate,
-    start: optionalDate,
-    finish: optionalDate,
+    formReceived: notFutureDate(requiredDate, "Form Received"),
+    start: notFutureDate(optionalDate, "Start"),
+    finish: notFutureDate(optionalDate, "Finish"),
     spvName: z.string().trim().min(1, "Nama SPV Produksi wajib diisi."),
     spvNik: z.string().trim().optional().nullable(),
     spvColourMatching: z.string().trim().min(1, "Nama SPV Colour Matching wajib diisi."),

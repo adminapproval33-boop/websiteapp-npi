@@ -5,6 +5,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 /** Sanitasi `picNik` per baris Spec Parameter -- 1 query batch utk semua NIK
  * sekaligus (pola sama dgn sanitizeMembers di lib/employeeNik.ts, tapi
@@ -39,8 +40,8 @@ const parameterSchema = z
     standard: z.string().optional(),
     result: z.string().optional(),
     remark: z.string().optional(),
-    start: optionalDate,
-    finish: optionalDate,
+    start: notFutureDate(optionalDate, "Start"),
+    finish: notFutureDate(optionalDate, "Finish"),
     pic: z.string().optional(),
     picNik: z.string().trim().optional().nullable(),
     suggestion: z.string().optional(),
@@ -61,7 +62,7 @@ const requiredDate = z.coerce.date({
 });
 
 const saveSchema = z.object({
-  tanggalMasukQc: requiredDate,
+  tanggalMasukQc: notFutureDate(requiredDate, "QC Entry Date"),
   order: z.string().trim().min(1, "Order wajib diisi."),
   materialNumber: z.string().optional(),
   materialDescription: z.string().optional(),
@@ -80,8 +81,8 @@ const saveSchema = z.object({
   appearanceNotes: z.string().optional(),
   information: z.string().optional(),
   checkNotes: z.string().optional(),
-  start: optionalDate,
-  finish: optionalDate,
+  start: notFutureDate(optionalDate, "Start"),
+  finish: notFutureDate(optionalDate, "Finish"),
   parameters: z.array(parameterSchema).min(1, "Minimal 1 baris Spec Parameter wajib diisi."),
 });
 

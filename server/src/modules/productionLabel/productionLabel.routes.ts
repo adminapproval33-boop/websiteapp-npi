@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { getLatestCrossModule, isValidTankCodeOrJoined } from "../../lib/productionLabelHelpers";
+import { notFutureDDMMYYYY } from "../../lib/dateValidation";
 
 export const productionLabelRouter = Router();
 productionLabelRouter.use(requireAuth);
@@ -20,7 +21,9 @@ const saveSchema = z.object({
   batch: z.string().optional(),
   orderQty: z.string().optional(),
   plant: z.string().optional(),
-  lotNo: z.string().optional(),
+  // exp ("Expired") SENGAJA TIDAK divalidasi -- itu tanggal kedaluwarsa hasil
+  // hitung Lot No + Shelf Life, wajar di masa depan by design.
+  lotNo: notFutureDDMMYYYY(z.string().optional(), "Lot No"),
   exp: optionalDate,
   shelfLife: z.string().optional(),
   codeTanki: z.string().optional(),

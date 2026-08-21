@@ -6,6 +6,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const bongkaranRouter = Router();
 bongkaranRouter.use(requireAuth);
@@ -40,11 +41,11 @@ const saveSchema = z.object({
   members: z
     .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
     .optional(),
-  formReceived: optionalDate,
+  formReceived: notFutureDate(optionalDate, "Form Received"),
   /// Milestone "Selesai" tahap ini -- begitu terisi, kolom "Proses" di
   /// Production Order Monitoring berubah jadi "Produksi - PQE" (lihat
   /// bongkaranProcessLabel di dashboard.routes.ts).
-  sendToPqe: optionalDate,
+  sendToPqe: notFutureDate(optionalDate, "Send To PQE"),
   remark: z.string().optional(),
 });
 

@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { getLatestCrossModule, isValidTankCodeOrJoined } from "../../lib/productionLabelHelpers";
+import { notFutureDDMMYYYY } from "../../lib/dateValidation";
 
 /// Label Entry FG (2026-08-20, instruksi eksplisit user) -- SAMA PERSIS
 /// dgn productionLabel.routes.ts (Label Entry SFG), cuma beda model Prisma
@@ -24,8 +25,12 @@ const saveSchema = z.object({
   materialDescription: z.string().optional(),
   batch: z.string().optional(),
   orderQty: z.string().optional(),
+  /// "Order quantity (GMEIN)" varian Pcs (2026-08-21, instruksi eksplisit user, KHUSUS FG) -- lihat komentar kolom di schema.prisma.
+  orderQtyPcs: z.string().optional(),
   plant: z.string().optional(),
-  lotNo: z.string().optional(),
+  // exp ("Expired") SENGAJA TIDAK divalidasi -- itu tanggal kedaluwarsa hasil
+  // hitung Lot No + Shelf Life, wajar di masa depan by design.
+  lotNo: notFutureDDMMYYYY(z.string().optional(), "Lot No"),
   exp: optionalDate,
   shelfLife: z.string().optional(),
   codeTanki: z.string().optional(),
@@ -34,6 +39,8 @@ const saveSchema = z.object({
   drumColour: z.string().optional(),
   /// Volume (2026-08-20, instruksi eksplisit user, KHUSUS FG) -- lihat komentar kolom di schema.prisma.
   volume: z.string().optional(),
+  /// "Jumlah /Per" (2026-08-21, instruksi eksplisit user, KHUSUS FG) -- lihat komentar kolom di schema.prisma.
+  jumlahPer: z.string().optional(),
   remark: z.string().optional(),
 });
 

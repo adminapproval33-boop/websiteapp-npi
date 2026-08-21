@@ -26,10 +26,9 @@ export function useEmployeeOptions() {
  * "premixAftermix"), sudah difilter server-side supaya nama yang tidak ada
  * lagi di Data Karyawan tidak pernah muncul. `section` opsional dipakai
  * modul yang punya pembagian proses dlm 1 tabel (Premix vs Aftermix).
- * Diteruskan ke `EmployeeNameSelect` lewat prop `suggestions` -- kalau belum
- * termuat/kosong, komponen itu jatuh balik ke daftar Data Karyawan penuh
- * (lihat `suggestionSource` di bawah), jadi popup tidak pernah kosong total
- * di modul yang belum diberi source ini.
+ * Diteruskan ke `EmployeeNameSelect` lewat prop `suggestions`, ditampilkan
+ * DULUAN di popup lalu diikuti sisa Data Karyawan (lihat prop `suggestions`
+ * di `EmployeeNameSelect` di bawah).
  */
 export function useNameSuggestions(
   module: string,
@@ -191,15 +190,17 @@ export default function EmployeeNameSelect({
   placeholder?: string;
   /** NIK yg sedang tercatat di parent utk field ini (dari DB saat edit, atau hasil pilihan dropdown sebelumnya). */
   employeeId?: string | null;
-  /** Daftar saran ter-scope (hasil `useNameSuggestions`) -- kalau diisi & tidak kosong,
-   * dipakai utk isi dropdown MENGGANTIKAN seluruh Data Karyawan (mempersempit ke nama yg
-   * pernah diinput utk field ini di History menu terkait). Validasi ketik-bebas
-   * (isInvalid/isAmbiguous) TETAP pakai seluruh Data Karyawan apa pun isi prop ini --
-   * ini murni mempersempit SARAN, bukan aturan validasi baru. */
+  /** Daftar saran ter-scope (hasil `useNameSuggestions`) -- kalau diisi, ditampilkan
+   * DULUAN di popup (nama yg pernah diinput utk field ini di History menu terkait,
+   * biasanya paling relevan). TIDAK menggantikan Data Karyawan (2026-08-21, fix: dulu
+   * menggantikan total, jadi karyawan yg belum pernah tercatat di field ini seolah
+   * tidak bisa dipilih) -- sisa Data Karyawan yg belum ada di saran tetap ikut
+   * ditampilkan di bawahnya, jadi siapa pun yg terdaftar di Data Karyawan tetap bisa
+   * dicari & dipilih. Validasi ketik-bebas (isInvalid/isAmbiguous) selalu pakai seluruh
+   * Data Karyawan apa pun isi prop ini. */
   suggestions?: EmployeeOption[];
 }) {
   const { data: employees } = useEmployeeOptions();
-  const suggestionSource = suggestions && suggestions.length > 0 ? suggestions : employees;
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -230,12 +231,29 @@ export default function EmployeeNameSelect({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filtered = useMemo(() => {
+  /**
+   * Saran ter-scope (`suggestions`, mis. nama yg pernah dipakai PIC utk Item
+   * Check baris ini) ditampilkan DULUAN, tapi TIDAK menggantikan seluruh
+   * Data Karyawan lagi (2026-08-21, fix: sebelumnya `suggestions` non-kosong
+   * MENIMPA seluruh daftar, jadi popup cuma nampilin nama yg PERNAH dipakai
+   * di Item Check itu -- kalau ada member baru/orang lain di Data Karyawan
+   * yang belum pernah tercatat utk Item Check ybs, dia tidak muncul sama
+   * sekali di popup, seolah tidak bisa dipilih). Sekarang selalu digabung:
+   * saran ter-scope dulu (paling relevan), lalu SISA Data Karyawan yg belum
+   * ada di saran, supaya siapa pun yg sudah terdaftar di Data Karyawan tetap
+   * bisa dicari & dipilih dari popup ini juga.
+   */
+  const { scopedMatches, otherMatches } = useMemo(() => {
     const q = value.trim().toLowerCase();
-    const list = suggestionSource ?? [];
-    const matches = q ? list.filter((e) => e.fullName.toLowerCase().includes(q)) : list;
-    return matches.slice(0, 50);
-  }, [suggestionSource, value]);
+    const scopedList = suggestions ?? [];
+    const fullList = employees ?? [];
+    const scopedIds = new Set(scopedList.map((e) => e.employeeId));
+    const scopedMatches = (q ? scopedList.filter((e) => e.fullName.toLowerCase().includes(q)) : scopedList).slice(0, 50);
+    const otherMatches = (q ? fullList.filter((e) => e.fullName.toLowerCase().includes(q)) : fullList)
+      .filter((e) => !scopedIds.has(e.employeeId))
+      .slice(0, 50 - scopedMatches.length);
+    return { scopedMatches, otherMatches };
+  }, [suggestions, employees, value]);
 
   const isInvalid = !isKnownEmployeeName(employees, value);
   const exactMatches = useMemo(() => exactNameMatches(employees, value), [employees, value]);
@@ -254,8 +272,31 @@ export default function EmployeeNameSelect({
     }
   }
 
+  function renderOption(emp: EmployeeOption) {
+    return (
+      <div
+        key={emp.employeeId}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onChange(emp.fullName, emp.employeeId);
+          setOpen(false);
+        }}
+        style={{ padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+      >
+        <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e293b" }}>{emp.fullName}</div>
+        <div style={{ fontSize: "0.72rem", color: "#64748b" }}>
+          {emp.employeeId}
+          {emp.jobPosition ? ` · ${emp.jobPosition}` : ""}
+          {emp.departemen ? ` · ${emp.departemen}` : ""}
+        </div>
+      </div>
+    );
+  }
+
   const dropdown =
-    open && rect && filtered.length > 0
+    open && rect && (scopedMatches.length > 0 || otherMatches.length > 0)
       ? createPortal(
           <div
             style={{
@@ -272,26 +313,13 @@ export default function EmployeeNameSelect({
               boxShadow: "0 8px 20px rgba(0,0,0,0.15)",
             }}
           >
-            {filtered.map((emp) => (
-              <div
-                key={emp.employeeId}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onChange(emp.fullName, emp.employeeId);
-                  setOpen(false);
-                }}
-                style={{ padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid var(--border)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
-              >
-                <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e293b" }}>{emp.fullName}</div>
-                <div style={{ fontSize: "0.72rem", color: "#64748b" }}>
-                  {emp.employeeId}
-                  {emp.jobPosition ? ` · ${emp.jobPosition}` : ""}
-                  {emp.departemen ? ` · ${emp.departemen}` : ""}
-                </div>
+            {scopedMatches.map(renderOption)}
+            {scopedMatches.length > 0 && otherMatches.length > 0 && (
+              <div style={{ padding: "4px 10px", fontSize: "0.68rem", color: "#94a3b8", background: "#f8fafc" }}>
+                Data Karyawan lainnya
               </div>
-            ))}
+            )}
+            {otherMatches.map(renderOption)}
           </div>,
           document.body
         )

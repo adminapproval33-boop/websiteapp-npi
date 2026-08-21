@@ -8,6 +8,7 @@ import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import * as stageGate from "../../lib/stageGate";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
@@ -46,9 +47,9 @@ const saveSchema = z
     // (2026-07-26), lihat handleOrderFound/checkMachineRecord di MillingPage.tsx.
     codeTanki2: z.string().optional(),
     codeMesin: z.string().trim().min(1, "Code Mesin wajib diisi."),
-    formReceived: requiredDate,
-    start: optionalDate,
-    finish: optionalDate,
+    formReceived: notFutureDate(requiredDate, "Form Received"),
+    start: notFutureDate(optionalDate, "Start"),
+    finish: notFutureDate(optionalDate, "Finish"),
     spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
     spvProduksiNik: z.string().trim().optional().nullable(),
     leader: z.string().trim().min(1, "Leader wajib diisi."),

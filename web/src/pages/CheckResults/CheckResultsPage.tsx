@@ -14,7 +14,7 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
 import { ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { openCheckSheetPrintWindow } from "../../lib/printCheckSheet";
 import { openPackingKeepSampelPrintWindow } from "../../lib/printPackingKeepSampel";
@@ -684,10 +684,16 @@ export default function CheckResultsPage({
     if (!isKnownTankCode(tanks, form.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
     if (!form.customer.trim()) return "Customer wajib diisi sebelum Save/Print.";
     if (!form.remark.trim()) return "Remark wajib diisi sebelum Save/Print.";
+    const qcEntryDateError = validateNotFutureDate(form.tanggalMasukQc, "QC Entry Date");
+    if (qcEntryDateError) return qcEntryDateError;
     const invalidPic = params.find((p) => !isKnownEmployeeName(employees, p.pic));
     if (invalidPic) return `PIC "${invalidPic.pic}" tidak ditemukan di Data Karyawan. Pilih dari daftar saran.`;
     const incompleteRow = params.find((p) => p.result.trim() && (!p.start || !p.finish || !p.pic.trim()));
     if (incompleteRow) return `Start/Finish/PIC "${incompleteRow.parameter}" wajib diisi karena Result sudah diisi.`;
+    for (const p of params) {
+      const rowDateError = validateNotFutureDate(p.start, `Start "${p.parameter}"`) ?? validateNotFutureDate(p.finish, `Finish "${p.parameter}"`);
+      if (rowDateError) return rowDateError;
+    }
     return null;
   }
 

@@ -7,6 +7,12 @@ export interface OrderRefData {
   materialNumber: string | null;
   materialDescription: string | null;
   orderQty: string | null;
+  /// Kolom "Order quantity (GMEIN)" (varian Pcs, BEDA dari `orderQty` yg
+  /// varian /LITER) di Referensi Order/PO (SAP-COOISPI) -- 2026-08-21,
+  /// instruksi eksplisit user utk Label Entry FG. Optional sama pola dgn
+  /// `orderType` di bawah -- pemanggil `onFound` yg bikin objek manual
+  /// (loadIntoInput di beberapa halaman lain) tidak semuanya peduli field ini.
+  orderQtyPcs?: string | null;
   plant: string | null;
   /// Kolom "JENIS" di Referensi Order/PO (SAP-COOISPI) -- dipakai utk saran "Types of Products" di Colour Matching.
   jenis: string | null;

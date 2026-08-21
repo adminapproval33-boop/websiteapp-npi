@@ -9,6 +9,7 @@ import * as stageGate from "../../lib/stageGate";
 import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -49,12 +50,12 @@ const saveSchema = z
       .array(z.object({ name: z.string().trim().min(1), nik: z.string().trim().optional().nullable() }))
       .optional(),
     qtyPerMan: z.string().optional(),
-    start: optionalDate,
+    start: notFutureDate(optionalDate, "Start"),
     leader: z.string().trim().min(1, "Leader wajib diisi."),
     leaderNik: z.string().trim().optional().nullable(),
-    finish: optionalDate,
+    finish: notFutureDate(optionalDate, "Finish"),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
-    formReceived: requiredDate,
+    formReceived: notFutureDate(requiredDate, "Form Received"),
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {

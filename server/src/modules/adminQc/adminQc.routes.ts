@@ -5,6 +5,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const adminQcRouter = Router();
 adminQcRouter.use(requireAuth);
@@ -27,9 +28,9 @@ const saveSchema = z
     iuPlant: z.string().trim().min(1, "IU Plant wajib diisi."),
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     typeLot: z.string().trim().min(1, "Admin QC Stage wajib diisi."),
-    lotPassed: optionalDate,
-    qcToApproval: optionalDate,
-    qcPassed: optionalDate,
+    lotPassed: notFutureDate(optionalDate, "Lot Passed"),
+    qcToApproval: notFutureDate(optionalDate, "QC to App"),
+    qcPassed: notFutureDate(optionalDate, "QC Passed"),
     remark: z.string().optional(),
   })
   .superRefine((data, ctx) => {

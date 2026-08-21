@@ -855,6 +855,11 @@ model ProductionLabelFg {
   materialDescription String?
   batch               String?
   orderQty            String?
+  /// "Order quantity (GMEIN)" varian Pcs (2026-08-21, instruksi eksplisit
+  /// user, KHUSUS FG) -- BEDA dari `orderQty` di atas (varian /LITER),
+  /// langsung dari kolom yg sama di Referensi Order/PO (SAP-COOISPI, lihat
+  /// MasterOrder.orderQtyPcs), read-only.
+  orderQtyPcs         String?
   plant               String?
   lotNo               String?
   exp                 DateTime?
@@ -868,6 +873,10 @@ model ProductionLabelFg {
   /// (SAP-COOISPI, sama sumber & pola dgn PackingLog.totalQty), tapi tetap bisa
   /// diedit manual sebelum Save.
   volume              String?
+  /// "Jumlah /Per" (2026-08-21, instruksi eksplisit user, KHUSUS FG) -- isian
+  /// manual bebas, format contoh "1/200" (unit ke-1 dari total 200), tidak
+  /// ada sumber otomatisnya di sistem manapun.
+  jumlahPer           String?
   remark              String?
   printedBy           String
 

@@ -79,6 +79,23 @@ function periodStartInstant(period: ProduktivitasPeriod, now: Date): Date | null
   return new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), 1) - WIB_OFFSET_MS);
 }
 
+/** Instant awal hari WIB (00:00:00) utk tanggal "YYYY-MM-DD" (2026-08-21,
+ * instruksi eksplisit user: filter rentang tanggal manual di Dashboard
+ * Produktivitas) -- `null` kalau formatnya tidak valid/kosong. */
+function wibDayStartInstant(dateStr: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - WIB_OFFSET_MS);
+}
+
+/** Instant akhir hari WIB (23:59:59.999) utk tanggal "YYYY-MM-DD" -- dipakai
+ * sbg batas atas "Sampai Tanggal" INKLUSIF (mencakup seluruh hari itu). */
+function wibDayEndInstant(dateStr: string): Date | null {
+  const start = wibDayStartInstant(dateStr);
+  if (!start) return null;
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
 /**
  * "Lead Time Proses": jumlah HARI KERJA (Senin-Jumat, Sabtu/Minggu TIDAK
  * dihitung) sejak Order ini PERTAMA KALI muncul di sistem (baris tercepat di
@@ -1681,9 +1698,8 @@ function parseQtyNumber(v: string | null | undefined): number {
  * boleh menjumlah kelimanya lagi (versi pertama sengaja mengecualikan Colour
  * Matching dari Total krn waktu itu masih berupa jumlah Order, bukan qty).
  */
-async function buildProduktivitasData(period: ProduktivitasPeriod) {
-  const periodStart = periodStartInstant(period, new Date());
-  const finishWhere = periodStart ? { finish: { not: null, gte: periodStart } } : { finish: { not: null } };
+async function buildProduktivitasData(finishRange: { gte?: Date; lte?: Date }) {
+  const finishWhere = { finish: { not: null, ...finishRange } };
 
   const [premixRows, aftermixRows, millingRows, colourRows, packingRows, tankMap] = await Promise.all([
     prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } }),
@@ -1812,15 +1828,184 @@ async function buildProduktivitasData(period: ProduktivitasPeriod) {
   return { productivity, productivityOrderCount, tankOccupancy };
 }
 
+/** Resolusi `period`/`from`/`to` query params jadi 1 rentang `finish` --
+ * DIPAKAI BERSAMA oleh /produktivitas & /produktivitas-trend (2026-08-21,
+ * diekstrak dari /produktivitas supaya grafik tren ikut menghormati filter
+ * tanggal yang sama, bukan filter terpisah) -- kalau salah satu `from`/`to`
+ * dikirim, itu MENGGANTIKAN `period` sepenuhnya (bukan digabung). */
+function resolveProduktivitasRange(req: { query: Record<string, unknown> }): {
+  period: ProduktivitasPeriod | "custom";
+  from: string | null;
+  to: string | null;
+  finishRange: { gte?: Date; lte?: Date };
+} {
+  const fromStr = req.query.from ? String(req.query.from) : "";
+  const toStr = req.query.to ? String(req.query.to) : "";
+
+  let period: ProduktivitasPeriod | "custom";
+  const finishRange: { gte?: Date; lte?: Date } = {};
+
+  if (fromStr || toStr) {
+    period = "custom";
+    const fromInstant = fromStr ? wibDayStartInstant(fromStr) : null;
+    const toInstant = toStr ? wibDayEndInstant(toStr) : null;
+    if (fromInstant) finishRange.gte = fromInstant;
+    if (toInstant) finishRange.lte = toInstant;
+  } else {
+    const raw = String(req.query.period ?? "month");
+    period = (["today", "week", "month", "all"] as const).includes(raw as ProduktivitasPeriod)
+      ? (raw as ProduktivitasPeriod)
+      : "month";
+    const periodStart = periodStartInstant(period, new Date());
+    if (periodStart) finishRange.gte = periodStart;
+  }
+
+  return { period, from: fromStr || null, to: toStr || null, finishRange };
+}
+
 dashboardRouter.get(
   "/produktivitas",
   asyncRoute(async (req, res) => {
-    const raw = String(req.query.period ?? "month");
-    const period: ProduktivitasPeriod = (["today", "week", "month", "all"] as const).includes(raw as ProduktivitasPeriod)
-      ? (raw as ProduktivitasPeriod)
-      : "month";
-    const data = await buildProduktivitasData(period);
-    res.json({ success: true, data: { period, ...data } });
+    const { period, from, to, finishRange } = resolveProduktivitasRange(req);
+    const data = await buildProduktivitasData(finishRange);
+    res.json({ success: true, data: { period, from, to, ...data } });
+  })
+);
+
+type TrendGranularity = "day" | "week" | "month";
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Kunci bucket ("YYYY-MM-DD") utk 1 tanggal `finish`, menurut kalender WIB --
+ * "day" = tanggal itu sendiri, "week" = Senin minggu itu, "month" = tanggal 1
+ * bulan itu. Dipakai bareng `wibDayStartInstant` (sudah ada di atas) utk dapat
+ * instant absolut bucket-nya, jadi 1 format kunci "YYYY-MM-DD" cukup utk
+ * ketiga granularitas (2026-08-21, instruksi eksplisit user: grafik tren
+ * produktivitas Harian/Mingguan/Bulanan). */
+function trendBucketKey(d: Date, granularity: TrendGranularity): string {
+  const wib = new Date(d.getTime() + WIB_OFFSET_MS);
+  if (granularity === "month") {
+    return `${wib.getUTCFullYear()}-${pad2(wib.getUTCMonth() + 1)}-01`;
+  }
+  if (granularity === "week") {
+    const dow = wib.getUTCDay(); // 0=Minggu
+    const diffToMonday = dow === 0 ? 6 : dow - 1;
+    const monday = new Date(Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate() - diffToMonday));
+    return `${monday.getUTCFullYear()}-${pad2(monday.getUTCMonth() + 1)}-${pad2(monday.getUTCDate())}`;
+  }
+  return `${wib.getUTCFullYear()}-${pad2(wib.getUTCMonth() + 1)}-${pad2(wib.getUTCDate())}`;
+}
+
+interface TrendBucket {
+  bucketKey: string;
+  bucketStart: Date;
+  premixCount: number;
+  millingCount: number;
+  aftermixCount: number;
+  colourMatchingCount: number;
+  packingCount: number;
+  premixQty: number;
+  millingQty: number;
+  aftermixQty: number;
+  colourMatchingQty: number;
+  packingQty: number;
+}
+
+/**
+ * Grafik tren produktivitas (2026-08-21, instruksi eksplisit user): "berapa
+ * rata-rata formula yang dibuat per hari/minggu/bulan" divisualisasikan
+ * sbg line chart per tahap (Premix/Milling/Aftermix/Colour Matching/Packing),
+ * 2 metrik sekaligus dlm 1 response -- jumlah Formula/Order Finish (Count)
+ * DAN total Qty KG/Ltr Finish (sama sumber datanya dgn 2 tabel Produktivitas
+ * di atas, cuma dikelompokkan per bucket tanggal, bukan per IU Plant).
+ * Menghormati rentang tanggal (`period`/`from`/`to`) yg SAMA dgn
+ * /produktivitas -- lihat `resolveProduktivitasRange`.
+ */
+async function buildProduktivitasTrendData(finishRange: { gte?: Date; lte?: Date }, granularity: TrendGranularity) {
+  const finishWhere = { finish: { not: null, ...finishRange } };
+
+  const [premixRows, aftermixRows, millingRows, colourRows, packingRows] = await Promise.all([
+    prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { orderQty: true, finish: true } }),
+    prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX", ...finishWhere }, select: { orderQty: true, finish: true } }),
+    prisma.millingLog.findMany({ where: finishWhere, select: { qtyAct: true, finish: true } }),
+    prisma.colourMatchingLog.findMany({ where: finishWhere, select: { orderQty: true, finish: true } }),
+    prisma.packingLog.findMany({ where: finishWhere, select: { qtyPcs: true, totalQty: true, finish: true } }),
+  ]);
+
+  const buckets = new Map<string, TrendBucket>();
+  function ensureBucket(finish: Date): TrendBucket {
+    const key = trendBucketKey(finish, granularity);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      const bucketStart = wibDayStartInstant(key)!;
+      bucket = {
+        bucketKey: key,
+        bucketStart,
+        premixCount: 0,
+        millingCount: 0,
+        aftermixCount: 0,
+        colourMatchingCount: 0,
+        packingCount: 0,
+        premixQty: 0,
+        millingQty: 0,
+        aftermixQty: 0,
+        colourMatchingQty: 0,
+        packingQty: 0,
+      };
+      buckets.set(key, bucket);
+    }
+    return bucket;
+  }
+
+  for (const r of premixRows) {
+    const b = ensureBucket(r.finish!);
+    b.premixCount += 1;
+    b.premixQty += parseQtyNumber(r.orderQty);
+  }
+  for (const r of aftermixRows) {
+    const b = ensureBucket(r.finish!);
+    b.aftermixCount += 1;
+    b.aftermixQty += parseQtyNumber(r.orderQty);
+  }
+  for (const r of millingRows) {
+    const b = ensureBucket(r.finish!);
+    b.millingCount += 1;
+    b.millingQty += parseQtyNumber(r.qtyAct);
+  }
+  for (const r of colourRows) {
+    const b = ensureBucket(r.finish!);
+    b.colourMatchingCount += 1;
+    b.colourMatchingQty += parseQtyNumber(r.orderQty);
+  }
+  for (const r of packingRows) {
+    const b = ensureBucket(r.finish!);
+    b.packingCount += 1;
+    b.packingQty += parseQtyNumber(r.qtyPcs) * parseQtyNumber(r.totalQty);
+  }
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return Array.from(buckets.values())
+    .sort((a, b) => a.bucketKey.localeCompare(b.bucketKey))
+    .map((b) => ({
+      ...b,
+      premixQty: round2(b.premixQty),
+      millingQty: round2(b.millingQty),
+      aftermixQty: round2(b.aftermixQty),
+      colourMatchingQty: round2(b.colourMatchingQty),
+      packingQty: round2(b.packingQty),
+    }));
+}
+
+dashboardRouter.get(
+  "/produktivitas-trend",
+  asyncRoute(async (req, res) => {
+    const { period, from, to, finishRange } = resolveProduktivitasRange(req);
+    const rawGranularity = String(req.query.granularity ?? "day");
+    const granularity: TrendGranularity = (["day", "week", "month"] as const).includes(rawGranularity as TrendGranularity)
+      ? (rawGranularity as TrendGranularity)
+      : "day";
+    const buckets = await buildProduktivitasTrendData(finishRange, granularity);
+    res.json({ success: true, data: { period, from, to, granularity, buckets } });
   })
 );
 

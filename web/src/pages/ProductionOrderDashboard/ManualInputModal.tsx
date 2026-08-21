@@ -14,7 +14,7 @@ import EmployeeNameSelect, {
   normalizeMembers,
   MemberEntry,
 } from "../../components/EmployeeNameSelect";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import MaterialFlowPanel from "./MaterialFlowPanel";
 
 interface ManualRow {
@@ -121,6 +121,11 @@ export default function ManualInputModal() {
     }
     if (!isKnownTankCode(tanks, form.codeTanki)) {
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    const dateError = validateNotFutureDate(form.start, "Start") ?? validateNotFutureDate(form.finish, "Finish");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     setError("");

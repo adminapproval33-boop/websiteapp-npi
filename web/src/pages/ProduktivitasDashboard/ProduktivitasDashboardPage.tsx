@@ -1,16 +1,75 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import TrendLineChart, { TrendChartPoint, TrendSeries } from "./TrendLineChart";
 
-type Period = "today" | "week" | "month" | "all";
+type Period = "today" | "week" | "month" | "all" | "custom";
 
-const PERIOD_OPTIONS: { value: Period; label: string }[] = [
-  { value: "today", label: "Hari Ini" },
-  { value: "week", label: "Minggu Ini" },
-  { value: "month", label: "Bulan Ini" },
-  { value: "all", label: "Semua" },
+type Granularity = "day" | "week" | "month";
+
+const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
+  { value: "day", label: "Harian" },
+  { value: "week", label: "Mingguan" },
+  { value: "month", label: "Bulanan" },
 ];
+
+/** Urutan & warna tetap per tahap (2026-08-21) -- 5 slot pertama palet
+ * kategori terverifikasi (lihat skill dataviz), urutan TIDAK BOLEH diacak
+ * krn itu bagian dari mekanisme aman-buta warnanya. */
+const STAGE_SERIES: TrendSeries[] = [
+  { key: "premix", label: "Premix", color: "#2a78d6" },
+  { key: "milling", label: "Milling", color: "#eb6834" },
+  { key: "aftermix", label: "Aftermix", color: "#1baf7a" },
+  { key: "colourMatching", label: "Colour Matching", color: "#eda100" },
+  { key: "packing", label: "Packing", color: "#e87ba4" },
+];
+
+const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+/** Label bucket dari `bucketKey` ("YYYY-MM-DD", selalu tanggal WIB) --
+ * sengaja parse manual dari string, BUKAN `new Date(bucketStart)` lalu
+ * `toLocaleDateString`, supaya tidak ketiban konversi timezone browser
+ * (bucketKey sudah pasti kalender WIB dari backend). */
+/** 0=Minggu, 6=Sabtu -- `Date.UTC` murni utk aritmetika kalender, bukan
+ * konversi timezone lokal (bucketKey sudah tanggal WIB apa adanya). */
+function isWeekendKey(bucketKey: string): boolean {
+  const [y, m, d] = bucketKey.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
+function formatBucketLabel(bucketKey: string, granularity: Granularity): string {
+  const [y, m, d] = bucketKey.split("-").map(Number);
+  if (granularity === "month") return `${MONTHS_ID[m - 1]} ${y}`;
+  if (granularity === "week") {
+    const start = new Date(Date.UTC(y, m - 1, d));
+    const end = new Date(start.getTime() + 6 * 86_400_000);
+    const endDay = end.getUTCDate();
+    const endMonth = end.getUTCMonth();
+    return endMonth === m - 1 ? `${d}-${endDay} ${MONTHS_ID[m - 1]}` : `${d} ${MONTHS_ID[m - 1]} - ${endDay} ${MONTHS_ID[endMonth]}`;
+  }
+  return `${d} ${MONTHS_ID[m - 1]}`;
+}
+
+interface TrendBucket {
+  bucketKey: string;
+  premixCount: number;
+  millingCount: number;
+  aftermixCount: number;
+  colourMatchingCount: number;
+  packingCount: number;
+  premixQty: number;
+  millingQty: number;
+  aftermixQty: number;
+  colourMatchingQty: number;
+  packingQty: number;
+}
+
+interface TrendData {
+  granularity: Granularity;
+  buckets: TrendBucket[];
+}
 
 interface ProduktivitasRow {
   iuPlant: string;
@@ -107,14 +166,104 @@ function OccupancyBar({ percent }: { percent: number }) {
  * Monitoring (GET /dashboard/produktivitas gabungkan keduanya jadi 1
  * response supaya konsisten).
  */
+type DashboardTab = "ringkasan" | "tren";
+
 export default function ProduktivitasDashboardPage() {
-  const [period, setPeriod] = useState<Period>("month");
+  // Tab terpisah utk grafik tren (2026-08-21, instruksi eksplisit user) --
+  // sebelumnya nempel jadi 1 scroll panjang bareng tabel Ringkasan, dipisah
+  // supaya lebih jelas dibaca & tidak bikin halaman kepanjangan.
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>("ringkasan");
+  // Tombol periode cepat (Hari Ini/Minggu Ini/Bulan Ini/Semua) DIHAPUS
+  // (2026-08-21, instruksi eksplisit user: sudah tidak diperlukan) --
+  // filter tanggal kustom di bawah (`customFrom`/`customTo`) satu-satunya
+  // cara filter rentang skrg. Tanpa rentang kustom diisi, defaultnya "all"
+  // (tampilkan semua data) -- BUKAN "month" spt sblm tombol cepat dihapus,
+  // supaya user tidak diam-diam kefilter ke bulan berjalan tanpa sadar.
+  const period: Period = "all";
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const usingCustomRange = Boolean(customFrom || customTo);
+  const [granularity, setGranularity] = useState<Granularity>("day");
+  // Cakupan hari utk grafik tren (2026-08-21, instruksi eksplisit user: Sabtu/
+  // Minggu produksinya tidak efektif, jangan ikut menarik rata-rata ke bawah,
+  // TAPI tetap sediakan filter supaya bisa lihat 2 cara: khusus hari kerja
+  // ATAU termasuk Sabtu/Minggu) -- default "workdays" (rekomendasi yg
+  // disetujui user). Cuma berlaku kalau granularitas "day" (bucket Mingguan/
+  // Bulanan sudah gabungan hari kerja+weekend, tidak bisa dipisah per-bucket).
+  const [dayScope, setDayScope] = useState<"workdays" | "all">("workdays");
+  // Grafik per proses (2026-08-21, instruksi eksplisit user: "grafik utk
+  // tiap-tiap proses khusus", dgn garis rata-rata output produksinya).
+  const [selectedStage, setSelectedStage] = useState<string>(STAGE_SERIES[0].key);
+  const selectedStageSeries = STAGE_SERIES.find((s) => s.key === selectedStage) ?? STAGE_SERIES[0];
+
+  function buildRangeParams(): URLSearchParams {
+    const params = new URLSearchParams();
+    if (usingCustomRange) {
+      if (customFrom) params.set("from", customFrom);
+      if (customTo) params.set("to", customTo);
+    } else {
+      params.set("period", period);
+    }
+    return params;
+  }
 
   const query = useQuery({
-    queryKey: ["dashboard-produktivitas", period],
+    queryKey: ["dashboard-produktivitas", period, customFrom, customTo],
     queryFn: () =>
-      api.get<{ success: boolean; data: ProduktivitasData }>(`/dashboard/produktivitas?period=${period}`).then((r) => r.data),
+      api
+        .get<{ success: boolean; data: ProduktivitasData }>(`/dashboard/produktivitas?${buildRangeParams().toString()}`)
+        .then((r) => r.data),
   });
+
+  // Grafik tren (2026-08-21, instruksi eksplisit user): "rata-rata formula
+  // yang dibuat per hari/minggu/bulan", menghormati rentang tanggal yg SAMA
+  // dgn tabel di atas -- cuma ditambah toggle granularitas independen.
+  const trendQuery = useQuery({
+    queryKey: ["dashboard-produktivitas-trend", period, customFrom, customTo, granularity],
+    queryFn: () => {
+      const params = buildRangeParams();
+      params.set("granularity", granularity);
+      return api.get<{ success: boolean; data: TrendData }>(`/dashboard/produktivitas-trend?${params.toString()}`).then((r) => r.data);
+    },
+  });
+
+  // "Hari Kerja Saja" cuma bisa diterapkan per-bucket kalau granularitasnya
+  // "day" (Mingguan/Bulanan sudah gabungan hari kerja+weekend dlm 1 angka).
+  const effectiveDayScope = granularity === "day" ? dayScope : "all";
+  const trendBuckets = useMemo(() => {
+    const raw = trendQuery.data?.buckets ?? [];
+    return effectiveDayScope === "workdays" ? raw.filter((b) => !isWeekendKey(b.bucketKey)) : raw;
+  }, [trendQuery.data, effectiveDayScope]);
+  const trendPointsCount: TrendChartPoint[] = useMemo(
+    () =>
+      trendBuckets.map((b) => ({
+        bucketKey: b.bucketKey,
+        label: formatBucketLabel(b.bucketKey, granularity),
+        values: {
+          premix: b.premixCount,
+          milling: b.millingCount,
+          aftermix: b.aftermixCount,
+          colourMatching: b.colourMatchingCount,
+          packing: b.packingCount,
+        },
+      })),
+    [trendBuckets, granularity]
+  );
+  const trendPointsQty: TrendChartPoint[] = useMemo(
+    () =>
+      trendBuckets.map((b) => ({
+        bucketKey: b.bucketKey,
+        label: formatBucketLabel(b.bucketKey, granularity),
+        values: {
+          premix: b.premixQty,
+          milling: b.millingQty,
+          aftermix: b.aftermixQty,
+          colourMatching: b.colourMatchingQty,
+          packing: b.packingQty,
+        },
+      })),
+    [trendBuckets, granularity]
+  );
 
   const productivity = query.data?.productivity ?? [];
   const productivityOrderCount = query.data?.productivityOrderCount ?? [];
@@ -125,28 +274,90 @@ export default function ProduktivitasDashboardPage() {
   const totalTerisi = tankOccupancy.reduce((sum, r) => sum + r.terisi, 0);
   const overallPercentTerisi = totalTanki > 0 ? Math.round((totalTerisi / totalTanki) * 100) : 0;
 
+  // Baris "Total" di bawah tiap tabel (2026-08-21, instruksi eksplisit user
+  // -- BUKAN kolom tambahan di samping, footer row lewat prop `footer` DataTable).
+  const totalKosong = tankOccupancy.reduce((sum, r) => sum + r.kosong, 0);
+  const totalDamaged = tankOccupancy.reduce((sum, r) => sum + r.damaged, 0);
+
+  const productivityTotals = productivity.reduce(
+    (acc, r) => ({
+      premix: acc.premix + r.premix,
+      milling: acc.milling + r.milling,
+      aftermix: acc.aftermix + r.aftermix,
+      colourMatching: acc.colourMatching + r.colourMatching,
+      packing: acc.packing + r.packing,
+    }),
+    { premix: 0, milling: 0, aftermix: 0, colourMatching: 0, packing: 0 }
+  );
+
+  const productivityOrderCountTotals = productivityOrderCount.reduce(
+    (acc, r) => ({
+      premix: acc.premix + r.premix,
+      milling: acc.milling + r.milling,
+      aftermix: acc.aftermix + r.aftermix,
+      colourMatching: acc.colourMatching + r.colourMatching,
+      packing: acc.packing + r.packing,
+    }),
+    { premix: 0, milling: 0, aftermix: 0, colourMatching: 0, packing: 0 }
+  );
+
   return (
     <div className="panel">
       <div className="panel-header">Dashboard Produktivitas</div>
       <div className="panel-body">
-        <p style={{ marginTop: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-          Rangkuman produktivitas tim per IU Plant (Qty KG/Ltr yang sudah Finish di tiap tahap) dan okupansi tanki
-          per Plant (sumber sama dengan Dashboard &gt; Tank Monitoring).
-        </p>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          {PERIOD_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              className={`btn ${period === opt.value ? "" : "btn-outline"}`}
-              onClick={() => setPeriod(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8, marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 12 }}>
+          <button
+            type="button"
+            className={`btn ${dashboardTab === "ringkasan" ? "" : "btn-outline"}`}
+            onClick={() => setDashboardTab("ringkasan")}
+          >
+            Ringkasan
+          </button>
+          <button type="button" className={`btn ${dashboardTab === "tren" ? "" : "btn-outline"}`} onClick={() => setDashboardTab("tren")}>
+            Tren Produktivitas
+          </button>
         </div>
 
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`btn ${granularity === opt.value ? "" : "btn-outline"}`}
+                onClick={() => setGranularity(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="field" style={{ maxWidth: 180 }}>
+            <label>Dari Tanggal</label>
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+          </div>
+          <div className="field" style={{ maxWidth: 180 }}>
+            <label>Sampai Tanggal</label>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+          </div>
+          {usingCustomRange && (
+            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
+          )}
+          {usingCustomRange && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => {
+                setCustomFrom("");
+                setCustomTo("");
+              }}
+            >
+              Reset Tanggal
+            </button>
+          )}
+        </div>
+
+        {dashboardTab === "ringkasan" && (
+        <>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
           <KpiCard label="Total Qty Diproses (KG/Ltr)" value={numberFmt.format(totalQtyDiproses)} color="var(--navy-light)" />
           <KpiCard label="Total Tanki" value={totalTanki} color="var(--navy-light)" />
@@ -155,56 +366,12 @@ export default function ProduktivitasDashboardPage() {
           <KpiCard label="% Terisi Keseluruhan" value={`${overallPercentTerisi}%`} color="#d97706" />
         </div>
 
-        <h3 style={{ marginBottom: 4 }}>Produktivitas IU Plant/LTR</h3>
+        <h3 style={{ marginBottom: 4 }}>Okupansi Tanki per Plant</h3>
         <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Semua kolom = <strong>jumlah Qty (KG/Ltr)</strong> yang sudah selesai (Finish) di tahap itu (Premix/
-          Aftermix/Colour Matching dari Order Qty, Milling dari Qty Act, Packing dari Qty/Pcs x Volume).
-        </p>
-        <DataTable
-          rowKey={(r: ProduktivitasRow) => r.iuPlant}
-          exportFileName="dashboard-produktivitas-tim"
-          storageKey="dashboard-produktivitas-tim-v3"
-          rows={productivity}
-          emptyMessage="Belum ada proses yang Finish pada periode ini."
-          columns={[
-            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
-            { key: "premix", label: "Premix (KG/Ltr)", render: (r) => numberFmt.format(r.premix), csvValue: (r) => r.premix },
-            { key: "milling", label: "Milling (KG/Ltr)", render: (r) => numberFmt.format(r.milling), csvValue: (r) => r.milling },
-            { key: "aftermix", label: "Aftermix (KG/Ltr)", render: (r) => numberFmt.format(r.aftermix), csvValue: (r) => r.aftermix },
-            {
-              key: "colourMatching",
-              label: "Colour Matching (KG/Ltr)",
-              render: (r) => numberFmt.format(r.colourMatching),
-              csvValue: (r) => r.colourMatching,
-            },
-            { key: "packing", label: "Packing (KG/Ltr)", render: (r) => numberFmt.format(r.packing), csvValue: (r) => r.packing },
-          ]}
-        />
-
-        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Produktivitas IU Plant/No Order</h3>
-        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Semua kolom = <strong>jumlah No Order</strong> yang sudah selesai (Finish) di tahap itu, per IU Plant.
-        </p>
-        <DataTable
-          rowKey={(r: ProduktivitasCountRow) => r.iuPlant}
-          exportFileName="dashboard-produktivitas-tim-order-count"
-          storageKey="dashboard-produktivitas-tim-order-count"
-          rows={productivityOrderCount}
-          emptyMessage="Belum ada proses yang Finish pada periode ini."
-          columns={[
-            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
-            { key: "premix", label: "Premix", render: (r) => r.premix },
-            { key: "milling", label: "Milling", render: (r) => r.milling },
-            { key: "aftermix", label: "Aftermix", render: (r) => r.aftermix },
-            { key: "colourMatching", label: "Colour Matching", render: (r) => r.colourMatching },
-            { key: "packing", label: "Packing", render: (r) => r.packing },
-          ]}
-        />
-
-        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Okupansi Tanki per Plant</h3>
-        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Tanki yang ditandai <strong>Damaged</strong> (Master Data &gt; Tanki) dikeluarkan dari Total/Kosong/Terisi/%
-          Terisi -- dihitung terpisah di kolom Damaged.
+          Menampilkan kondisi tanki <strong>saat ini</strong> (real-time, sama dengan Dashboard &gt; Tank Monitoring) --
+          tombol periode/rentang tanggal di atas TIDAK berpengaruh ke tabel ini. Tanki yang ditandai{" "}
+          <strong>Damaged</strong> (Master Data &gt; Tanki) dikeluarkan dari Total/Kosong/Terisi/% Terisi -- dihitung
+          terpisah di kolom Damaged.
         </p>
         <DataTable
           rowKey={(r: TankOccupancyRow) => `${r.plant}-${r.tipeTanki}`}
@@ -232,7 +399,172 @@ export default function ProduktivitasDashboardPage() {
               csvValue: (r) => `${r.percentTerisi}%`,
             },
           ]}
+          footer={{
+            plant: "Total",
+            total: totalTanki,
+            terisi: totalTerisi,
+            kosong: totalKosong,
+            damaged: totalDamaged,
+            percentTerisi: `${overallPercentTerisi}%`,
+          }}
         />
+
+        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Produktivitas IU Plant/LTR</h3>
+        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Semua kolom = <strong>jumlah Qty (KG/Ltr)</strong> yang sudah selesai (Finish) di tahap itu (Premix/
+          Aftermix/Colour Matching dari Order Qty, Milling dari Qty Act, Packing dari Qty/Pcs x Volume).
+        </p>
+        <DataTable
+          rowKey={(r: ProduktivitasRow) => r.iuPlant}
+          exportFileName="dashboard-produktivitas-tim"
+          storageKey="dashboard-produktivitas-tim-v3"
+          rows={productivity}
+          emptyMessage="Belum ada proses yang Finish pada periode ini."
+          columns={[
+            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+            { key: "premix", label: "Premix (KG/Ltr)", render: (r) => numberFmt.format(r.premix), csvValue: (r) => r.premix },
+            { key: "milling", label: "Milling (KG/Ltr)", render: (r) => numberFmt.format(r.milling), csvValue: (r) => r.milling },
+            { key: "aftermix", label: "Aftermix (KG/Ltr)", render: (r) => numberFmt.format(r.aftermix), csvValue: (r) => r.aftermix },
+            {
+              key: "colourMatching",
+              label: "Colour Matching (KG/Ltr)",
+              render: (r) => numberFmt.format(r.colourMatching),
+              csvValue: (r) => r.colourMatching,
+            },
+            { key: "packing", label: "Packing (KG/Ltr)", render: (r) => numberFmt.format(r.packing), csvValue: (r) => r.packing },
+          ]}
+          footer={{
+            iuPlant: "Total",
+            premix: numberFmt.format(productivityTotals.premix),
+            milling: numberFmt.format(productivityTotals.milling),
+            aftermix: numberFmt.format(productivityTotals.aftermix),
+            colourMatching: numberFmt.format(productivityTotals.colourMatching),
+            packing: numberFmt.format(productivityTotals.packing),
+          }}
+        />
+
+        <h3 style={{ marginTop: 28, marginBottom: 4 }}>Produktivitas IU Plant/No Order</h3>
+        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Semua kolom = <strong>jumlah No Order</strong> yang sudah selesai (Finish) di tahap itu, per IU Plant.
+        </p>
+        <DataTable
+          rowKey={(r: ProduktivitasCountRow) => r.iuPlant}
+          exportFileName="dashboard-produktivitas-tim-order-count"
+          storageKey="dashboard-produktivitas-tim-order-count"
+          rows={productivityOrderCount}
+          emptyMessage="Belum ada proses yang Finish pada periode ini."
+          columns={[
+            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
+            { key: "premix", label: "Premix", render: (r) => r.premix },
+            { key: "milling", label: "Milling", render: (r) => r.milling },
+            { key: "aftermix", label: "Aftermix", render: (r) => r.aftermix },
+            { key: "colourMatching", label: "Colour Matching", render: (r) => r.colourMatching },
+            { key: "packing", label: "Packing", render: (r) => r.packing },
+          ]}
+          footer={{
+            iuPlant: "Total",
+            premix: productivityOrderCountTotals.premix,
+            milling: productivityOrderCountTotals.milling,
+            aftermix: productivityOrderCountTotals.aftermix,
+            colourMatching: productivityOrderCountTotals.colourMatching,
+            packing: productivityOrderCountTotals.packing,
+          }}
+        />
+        </>
+        )}
+
+        {dashboardTab === "tren" && (
+        <>
+        <div style={{ display: "flex", gap: 8, marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            className={`btn ${dayScope === "workdays" ? "" : "btn-outline"}`}
+            disabled={granularity !== "day"}
+            onClick={() => setDayScope("workdays")}
+          >
+            Hari Kerja Saja
+          </button>
+          <button
+            type="button"
+            className={`btn ${dayScope === "all" ? "" : "btn-outline"}`}
+            disabled={granularity !== "day"}
+            onClick={() => setDayScope("all")}
+          >
+            Termasuk Sabtu/Minggu
+          </button>
+          <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Cakupan hari:</span>
+        </div>
+        {granularity !== "day" && (
+          <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.72rem" }}>
+            Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
+            hari kerja & Sabtu/Minggu jadi 1 angka.
+          </p>
+        )}
+        {granularity === "day" && <div style={{ marginBottom: 16 }} />}
+
+        <h3 style={{ marginTop: 8, marginBottom: 4 }}>Grafik per Proses</h3>
+        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Pilih 1 tahap utk lihat tren khusus tahap itu, lengkap dengan garis rata-rata output produksinya.
+        </p>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+          {STAGE_SERIES.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              className={`btn ${selectedStage === s.key ? "" : "btn-outline"}`}
+              onClick={() => setSelectedStage(s.key)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {selectedStageSeries.label} -- Jumlah Formula (Order) Selesai
+          </div>
+          <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            Garis putus-putus = rata-rata jumlah Order per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}
+            {" "}pada rentang ini.
+          </p>
+          <TrendLineChart points={trendPointsCount} series={[selectedStageSeries]} yAxisLabel="Jumlah Order" granularity={granularity} showAverage />
+        </div>
+
+        <div className="panel" style={{ padding: 16, marginBottom: 24 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {selectedStageSeries.label} -- Rata-rata Output Produksi (KG/Ltr)
+          </div>
+          <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            Garis putus-putus = rata-rata Qty (KG/Ltr) output produksi per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}
+            {" "}pada rentang ini.
+          </p>
+          <TrendLineChart
+            points={trendPointsQty}
+            series={[selectedStageSeries]}
+            yAxisLabel="KG/Ltr"
+            valueFormatter={(n) => numberFmt.format(n)}
+            granularity={granularity}
+            showAverage
+          />
+        </div>
+
+        <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah Formula (Order) Selesai</div>
+          <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            Jumlah Order/Batch yang Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
+          </p>
+          <TrendLineChart points={trendPointsCount} series={STAGE_SERIES} yAxisLabel="Jumlah Order" granularity={granularity} />
+        </div>
+
+        <div className="panel" style={{ padding: 16, marginBottom: 8 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Total Qty (KG/Ltr) Diproses</div>
+          <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+            Total Qty (KG/Ltr) Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
+          </p>
+          <TrendLineChart points={trendPointsQty} series={STAGE_SERIES} yAxisLabel="KG/Ltr" valueFormatter={(n) => numberFmt.format(n)} granularity={granularity} />
+        </div>
+        </>
+        )}
       </div>
     </div>
   );

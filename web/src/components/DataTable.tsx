@@ -55,6 +55,9 @@ export default function DataTable<T>({
   storageKey,
   freezeFirstColumn = false,
   toolbarExtra,
+  toolbarExtraLeft,
+  footer,
+  onVisibleRowsChange,
 }: {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -73,6 +76,28 @@ export default function DataTable<T>({
    * (2026-08-02, instruksi eksplisit user utk tombol "+New PO Produk" di Production Order
    * Monitoring). Default undefined supaya tabel lain yg tidak pakai ini tidak berubah. */
   toolbarExtra?: ReactNode;
+  /** Tombol/elemen custom tambahan di toolbar, dirender PALING KIRI (sebelum
+   * "Kolom"/"Filter"/"Reset Kolom") -- 2026-08-21, instruksi eksplisit user
+   * (Tank Monitoring: tombol filter TA/TB & Status Tanki harus tampil di
+   * baris toolbar yg SAMA, di depan tombol bawaan). Default undefined supaya
+   * tabel lain yg tidak pakai ini tidak berubah tampilannya. */
+  toolbarExtraLeft?: ReactNode;
+  /** Baris "Total" di BAWAH tabel (bukan kolom tambahan di samping) -- 2026-08-21,
+   * instruksi eksplisit user (Dashboard Produktivitas: Okupansi Tanki/Produktivitas
+   * IU Plant). Key = `key` kolom (lihat `DataTableColumn.key`), value = isi sel footer-nya
+   * (biasanya angka total yg sudah di-format). Kolom yg key-nya tidak ada di map ini
+   * dirender kosong. Urutan/lebar sel mengikuti urutan & lebar kolom SAAT INI (ikut
+   * drag-reorder/resize/show-hide user), sama seperti header. Default undefined supaya
+   * tabel lain yg tidak pakai ini tidak berubah tampilannya. */
+  footer?: Partial<Record<string, ReactNode>>;
+  /** Dipanggil tiap kali baris yg BENAR-BENAR tampil di tabel berubah (2026-08-21,
+   * instruksi eksplisit user: Tank Monitoring -- KPI card di halaman induk harus
+   * ikut berubah kalau user pakai tombol "Filter" per-kolom bawaan tabel ini,
+   * BUKAN cuma filter custom yg dibuat halaman itu sendiri). Baris yg dikirim
+   * SUDAH melalui filter per-kolom ("Filter") DAN sort, TAPI belum di-virtualize
+   * (semua baris yg lolos filter, bukan cuma yg lagi terlihat di viewport).
+   * Default undefined supaya tabel lain yg tidak pakai ini tidak terpengaruh. */
+  onVisibleRowsChange?: (rows: T[]) => void;
 }) {
   const persisted = useMemo(() => loadPersisted(storageKey), [storageKey]);
   const defaultOrder = useMemo(() => columns.map((c) => c.key), [columns]);
@@ -226,6 +251,12 @@ export default function DataTable<T>({
   // kolom pertama + resize/drag kolom yg sudah ada TETAP jalan apa adanya.
   const scrollRef = useRef<HTMLDivElement>(null);
   const tableRows = table.getRowModel().rows;
+
+  useEffect(() => {
+    onVisibleRowsChange?.(tableRows.map((r) => r.original));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableRows]);
+
   const rowVirtualizer = useVirtualizer({
     count: tableRows.length,
     getScrollElement: () => scrollRef.current,
@@ -244,9 +275,7 @@ export default function DataTable<T>({
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2">
-          <button className={`btn ${showFilters ? "" : "btn-outline"}`} type="button" onClick={() => setShowFilters((s) => !s)}>
-            🔍 Filter
-          </button>
+          {toolbarExtraLeft}
           <div style={{ position: "relative" }}>
             <button className={`btn ${showColumnPanel ? "" : "btn-outline"}`} type="button" onClick={() => setShowColumnPanel((s) => !s)}>
               ☰ Kolom
@@ -274,6 +303,9 @@ export default function DataTable<T>({
               </div>
             )}
           </div>
+          <button className={`btn ${showFilters ? "" : "btn-outline"}`} type="button" onClick={() => setShowFilters((s) => !s)}>
+            🔍 Filter
+          </button>
           <button className="btn btn-outline" type="button" onClick={resetColumns}>
             ↺ Reset Kolom
           </button>
@@ -426,6 +458,31 @@ export default function DataTable<T>({
               </tr>
             )}
           </tbody>
+          {footer && rows.length > 0 && (
+            <tfoot>
+              <tr>
+                {table.getHeaderGroups()[0].headers.map((header, headerIdx) => {
+                  const isFrozen = freezeFirstColumn && headerIdx === 0;
+                  return (
+                    <td
+                      key={header.id}
+                      style={{
+                        width: header.getSize(),
+                        fontWeight: 700,
+                        background: "#f8fafc",
+                        borderTop: "2px solid var(--border)",
+                        position: isFrozen ? "sticky" : undefined,
+                        left: isFrozen ? 0 : undefined,
+                        boxShadow: isFrozen ? "2px 0 4px -2px rgba(0,0,0,0.15)" : undefined,
+                      }}
+                    >
+                      {footer[header.column.id] ?? ""}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>

@@ -5,7 +5,7 @@ import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import BarcodeSvg from "../../components/BarcodeSvg";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import { formatDateDDMMYYYY } from "../../lib/datetime";
+import { formatDateDDMMYYYY, validateNotFutureDate } from "../../lib/datetime";
 import LabelHistoryPage from "./LabelHistoryPage";
 import "../../styles/printLabel.css";
 
@@ -37,7 +37,14 @@ type ProductionLabelField = "materialType" | "drumColour" | "codeTanki" | "iuPla
  * KHUSUS utk Label Entry FG (2026-08-20, instruksi eksplisit user), krn FG
  * sudah tidak punya panel Preview Label lagi (showPreview=false) yg dulu
  * satu-satunya tempat Material Number/Description/Batch kelihatan. */
-type ProductionLabelExtraField = "materialNumber" | "materialDescription" | "batch" | "volume";
+type ProductionLabelExtraField =
+  | "materialNumber"
+  | "materialDescription"
+  | "batch"
+  | "volume"
+  | "jumlahPer"
+  | "orderQtyLiter"
+  | "orderQtyPcs";
 
 /** Baris History Production Label TERAKHIR utk 1 Order (dari GET
  * /production-label/latest-by-order/:order) -- dipakai utk autofill semua
@@ -52,6 +59,8 @@ interface ProductionLabelHistoryRow {
   drumColour: string | null;
   /// Cuma ada di ProductionLabelFg (kolom baru KHUSUS FG) -- undefined saat apiBase SFG, aman krn dibaca via `?? "" `.
   volume?: string | null;
+  /// Cuma ada di ProductionLabelFg (kolom baru KHUSUS FG) -- undefined saat apiBase SFG, aman krn dibaca via `?? "" `.
+  jumlahPer?: string | null;
   remark: string | null;
 }
 
@@ -180,6 +189,7 @@ export default function ProductionLabelEntryPage({
   const [pasteType, setPasteType] = useState("");
   const [drumColour, setDrumColour] = useState("");
   const [volume, setVolume] = useState("");
+  const [jumlahPer, setJumlahPer] = useState("");
   const [remark, setRemark] = useState("");
 
   // QR Code (2026-08-04, revisi ke-7, instruksi eksplisit user: dipersempit
@@ -261,6 +271,7 @@ export default function ProductionLabelEntryPage({
     setDrumColour("");
     setCodeTanki("");
     setIuPlant("");
+    setJumlahPer("");
     setRemark("");
     // Volume (2026-08-20, instruksi eksplisit user, KHUSUS extra.has("volume"))
     // -- default-nya dari Master Data Referensi Order/PO (SAP-COOISPI, sama
@@ -290,6 +301,7 @@ export default function ProductionLabelEntryPage({
         setPasteType(latest.pasteType ?? "");
         setDrumColour(latest.drumColour ?? "");
         if (latest.volume) setVolume(latest.volume);
+        if (latest.jumlahPer) setJumlahPer(latest.jumlahPer);
         ownCodeTanki = latest.codeTanki ?? "";
         ownIuPlant = latest.iuPlant ?? "";
         ownRemark = latest.remark ?? "";
@@ -346,6 +358,11 @@ export default function ProductionLabelEntryPage({
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
       return false;
     }
+    const lotNoDateError = validateNotFutureDate(lotNo, "Lot No");
+    if (lotNoDateError) {
+      setError(lotNoDateError);
+      return false;
+    }
     setSaving(true);
     setError("");
     setMessage("");
@@ -356,6 +373,10 @@ export default function ProductionLabelEntryPage({
         materialDescription: data.materialDescription ?? "",
         batch: data.batch ?? "",
         orderQty: data.orderQty ?? "",
+        // orderQtyPcs (2026-08-21, instruksi eksplisit user, KHUSUS FG) -- aman
+        // dikirim apa adanya walau modul SFG tidak punya kolom ini di skemanya
+        // (Zod default STRIP nilai yg tidak dikenal, sama pola dgn volume/jumlahPer).
+        orderQtyPcs: data.orderQtyPcs ?? "",
         plant: data.plant ?? "",
         lotNo: formatDateDDMMYYYY(lotNo),
         exp: exp || "",
@@ -368,6 +389,7 @@ export default function ProductionLabelEntryPage({
         // dikirim apa adanya walau modul SFG tidak punya kolom `volume` di
         // skemanya (Zod default STRIP nilai yg tidak dikenal, bukan error).
         volume,
+        jumlahPer,
         remark,
       });
       setMessage("Data tersimpan ke History.");
@@ -404,7 +426,14 @@ export default function ProductionLabelEntryPage({
         </div>
       )}
 
-      {!embedded && tab === "history" && <LabelHistoryPage apiBase={apiBase} showVolumeColumn={extra.has("volume")} />}
+      {!embedded && tab === "history" && (
+        <LabelHistoryPage
+          apiBase={apiBase}
+          showVolumeColumn={extra.has("volume")}
+          showJumlahPerColumn={extra.has("jumlahPer")}
+          showOrderQtyPcsColumn={extra.has("orderQtyPcs")}
+        />
+      )}
 
       {(embedded || tab === "input") && (
         <>
@@ -423,39 +452,23 @@ export default function ProductionLabelEntryPage({
               hanya menampilkan kolom no order saja" -- langsung ke layout
               lengkap begitu buka menu ini, bukan reveal bertahap). */}
           <div className="field-grid" style={{ marginTop: 12 }}>
-            {/* Material Number/Description/Batch/Volume (2026-08-20, instruksi
-                eksplisit user, opt-in lewat `extraFields`) -- KHUSUS Label
-                Entry FG, krn showPreview=false disana artinya Material
-                Number/Description/Batch tidak kelihatan sama sekali lagi
-                (dulu cuma tampil di panel Preview Label). Read-only, murni
-                display dari Order Lookup (bukan state terpisah -- Save
-                selalu kirim data.materialNumber/dst apa adanya). Volume BEDA
-                -- state sendiri (`volume`), auto-saran dari kolom "Volume" di
-                Referensi Order/PO (SAP-COOISPI, sama pola dgn Packing) TAPI
-                tetap bisa diedit manual & ikut tersimpan ke History (kolom
-                DB `volume`, cuma ada di ProductionLabelFg). */}
-            {extra.has("materialNumber") && (
+            {/* Urutan kolom (2026-08-21, instruksi eksplisit user): Jumlah /Per,
+                Shelf Life, Lot No, Exp, Material Number, Material Description,
+                Batch, Order quantity (GMEIN)/LITER, Order quantity (GMEIN),
+                Volume, baru Remark (paling bawah, di luar blok ini).
+                Material Number/Description/Batch/Order Qty/Volume (2026-08-20,
+                instruksi eksplisit user, opt-in lewat `extraFields`) -- KHUSUS
+                Label Entry FG, krn showPreview=false disana artinya field2 ini
+                tidak kelihatan sama sekali lagi (dulu cuma tampil di panel
+                Preview Label). Material Number/Description/Batch & Order Qty
+                read-only, murni display dari Order Lookup (bukan state
+                terpisah). Volume & Jumlah /Per BEDA -- state sendiri, tetap
+                bisa diedit manual & ikut tersimpan ke History (kolom DB
+                `volume`/`jumlahPer`, cuma ada di ProductionLabelFg). */}
+            {extra.has("jumlahPer") && (
               <div className="field">
-                <label>Material Number</label>
-                <input value={data?.materialNumber ?? ""} disabled />
-              </div>
-            )}
-            {extra.has("materialDescription") && (
-              <div className="field">
-                <label>Material Description</label>
-                <input value={data?.materialDescription ?? ""} disabled />
-              </div>
-            )}
-            {extra.has("batch") && (
-              <div className="field">
-                <label>Batch</label>
-                <input value={data?.batch ?? ""} disabled />
-              </div>
-            )}
-            {extra.has("volume") && (
-              <div className="field">
-                <label>Volume</label>
-                <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
+                <label>Jumlah /Per</label>
+                <input value={jumlahPer} onChange={(e) => setJumlahPer(e.target.value)} placeholder="mis. 1/200" />
               </div>
             )}
             <div className="field">
@@ -476,6 +489,49 @@ export default function ProductionLabelEntryPage({
               <label title="Otomatis: Lot No + Shelf Life">Exp</label>
               <input type="date" value={exp} disabled />
             </div>
+            {extra.has("materialNumber") && (
+              <div className="field">
+                <label>Material Number</label>
+                <input value={data?.materialNumber ?? ""} disabled />
+              </div>
+            )}
+            {extra.has("materialDescription") && (
+              <div className="field">
+                <label>Material Description</label>
+                <input value={data?.materialDescription ?? ""} disabled />
+              </div>
+            )}
+            {extra.has("batch") && (
+              <div className="field">
+                <label>Batch</label>
+                <input value={data?.batch ?? ""} disabled />
+              </div>
+            )}
+            {/* Order quantity (GMEIN)/LITER & Order quantity (GMEIN) (2026-08-21,
+                instruksi eksplisit user) -- read-only, murni display dari Order
+                Lookup sama pola dgn Material Number/Description/Batch di atas,
+                BUKAN state terpisah. `orderQty` = varian /LITER (sudah lama
+                ikut tersimpan ke History lewat saveLabel, cuma belum pernah
+                ditampilkan di form ini); `orderQtyPcs` = varian Pcs (baru,
+                kolom DB `orderQtyPcs` cuma ada di ProductionLabelFg). */}
+            {extra.has("orderQtyLiter") && (
+              <div className="field">
+                <label>Quantity/LITER</label>
+                <input value={data?.orderQty ?? ""} disabled />
+              </div>
+            )}
+            {extra.has("orderQtyPcs") && (
+              <div className="field">
+                <label>Quantity/PCS</label>
+                <input value={data?.orderQtyPcs ?? ""} disabled />
+              </div>
+            )}
+            {extra.has("volume") && (
+              <div className="field">
+                <label>Volume</label>
+                <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
+              </div>
+            )}
             {!hidden.has("codeTanki") && (
               <TankSelect id="production-label-code-tanki" value={codeTanki} onChange={setCodeTanki} required={false} />
             )}

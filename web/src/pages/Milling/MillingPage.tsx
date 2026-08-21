@@ -17,7 +17,7 @@ import EmployeeNameSelect, {
 } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
@@ -675,6 +675,14 @@ export default function MillingPage({
     }
     if (!isKnownTankCode(tanks, form.codeTanki2)) {
       setError("Code Tanki 2 (Moving) tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    const dateError =
+      validateNotFutureDate(form.formReceived, "Form Received") ??
+      validateNotFutureDate(form.start, "Start") ??
+      validateNotFutureDate(form.finish, "Finish");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

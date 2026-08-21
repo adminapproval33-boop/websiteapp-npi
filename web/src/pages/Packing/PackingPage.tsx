@@ -16,7 +16,7 @@ import EmployeeNameSelect, {
 } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeQtyPerManFromPcsVolume } from "../../lib/qty";
 
 /** Total Qty/Pcs seluruh Member (2026-08-10, instruksi eksplisit user) --
@@ -545,6 +545,14 @@ export default function PackingPage({
       setError(
         `Total Qty/Man (Ltr) (${form.qtyPerMan} Ltr) melebihi Order Qty (${form.orderQty}). Naikkan Order Qty dulu kalau memang ingin lebih.`
       );
+      return;
+    }
+    const dateError =
+      validateNotFutureDate(form.formReceived, "Form Received") ??
+      validateNotFutureDate(form.start, "Start") ??
+      validateNotFutureDate(form.finish, "Finish");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

@@ -8,7 +8,7 @@ import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
@@ -484,6 +484,14 @@ export default function AdminQcPage() {
     setError("");
     if (!isKnownTankCode(tanks, form.codeTanki)) {
       setError("Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    const dateError =
+      validateNotFutureDate(form.lotPassed, "Lot Passed") ??
+      validateNotFutureDate(form.qcToApproval, "QC to App") ??
+      validateNotFutureDate(form.qcPassed, "QC Passed");
+    if (dateError) {
+      setError(dateError);
       return;
     }
     saveMutation.mutate();

@@ -6,6 +6,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, AuthedRequest } from "../../middleware/auth";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
+import { notFutureDate } from "../../lib/dateValidation";
 
 export const productionOrderManualInputRouter = Router();
 productionOrderManualInputRouter.use(requireAuth);
@@ -18,8 +19,8 @@ const saveSchema = z.object({
   plant: z.string().optional(),
   iuPlant: z.string().optional(),
   codeTanki: z.string().optional(),
-  start: z.coerce.date().optional().nullable(),
-  finish: z.coerce.date().optional().nullable(),
+  start: notFutureDate(z.coerce.date().optional().nullable(), "Start"),
+  finish: notFutureDate(z.coerce.date().optional().nullable(), "Finish"),
   spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
   spvProduksiNik: z.string().trim().optional().nullable(),
   leader: z.string().optional(),

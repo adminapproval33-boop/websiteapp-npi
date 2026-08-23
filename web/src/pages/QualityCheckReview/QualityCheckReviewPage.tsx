@@ -356,15 +356,16 @@ export default function QualityCheckReviewPage() {
     else if (r.status === "Approval") summary.approval++;
   }
 
-  // Kartu KPI "Belum OK (QC Passed) -- Lama Menunggu" (2026-08-23, instruksi
+  // Kartu KPI "Belum OK (QC Passed) -- Lama Proses" (2026-08-23, instruksi
   // eksplisit user) -- dihitung dari `filteredRows` juga (sama konvensi
-  // reaktif-thd-filter Status/Lama Menunggu dgn kartu2 lain), pakai
+  // reaktif-thd-filter Status/Lama Proses dgn kartu2 lain), pakai
   // `rowAgeBucket` yg sama dgn yg dipakai filter di atas (1 sumber logika).
   const ageBucketCounts: Record<string, number> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, 0]));
   for (const r of filteredRows) {
     const bucket = rowAgeBucket(r);
     if (bucket) ageBucketCounts[bucket]++;
   }
+  const ageTotal = Object.values(ageBucketCounts).reduce((sum, n) => sum + n, 0);
 
   const statusFilterButton = (
     <div style={{ position: "relative" }}>
@@ -445,8 +446,9 @@ export default function QualityCheckReviewPage() {
         </div>
 
         <div>
-          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Menunggu</div>
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Proses</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <KpiCard label="Total" value={ageTotal} color="var(--navy-light)" />
             {AGE_BUCKETS.map((b) => (
               <KpiCard key={b.key} label={b.label} value={ageBucketCounts[b.key]} color={b.color} />
             ))}

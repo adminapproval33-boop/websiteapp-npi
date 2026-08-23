@@ -20,6 +20,7 @@ interface QualityReviewRow {
   adminQcStage: string | null;
   qcTimestamp: string | null;
   qcPassed: string | null;
+  sinceQcEntry: string | null;
 }
 
 interface QualityReviewData {
@@ -105,6 +106,27 @@ const STATUS_OPTIONS: { value: OrderQcStatus; label: string }[] = [
   { value: "Improve", label: "Improve" },
   { value: "Approval", label: "Approval" },
 ];
+
+// Kartu KPI "Belum OK (QC Passed) -- Lama Menunggu" (2026-08-23, instruksi
+// eksplisit user, tab Ringkasan). Batas bucket NON-OVERLAP secara internal
+// (`maxDays`) meski label "15-21 Hari" & "21-30 Hari" sekilas tumpang tindih
+// di angka 21 -- itu murni teks label sesuai kalimat eksplisit user, logika
+// pembagiannya tetap tanpa duplikasi (bucket "21-30" sebenarnya menampung
+// hari ke-22 s.d. 30, bukan 21).
+const AGE_BUCKETS: { key: string; label: string; maxDays: number; color: string }[] = [
+  { key: "1-7", label: "1-7 Hari", maxDays: 7, color: "#fecaca" },
+  { key: "8-14", label: "8-14 Hari", maxDays: 14, color: "#fca5a5" },
+  { key: "15-21", label: "15-21 Hari", maxDays: 21, color: "#f87171" },
+  { key: "21-30", label: "21-30 Hari", maxDays: 30, color: "#ef4444" },
+  { key: ">30", label: ">30 Hari", maxDays: Infinity, color: "#b91c1c" },
+];
+
+/** Sudah berapa hari sejak `sinceIso` (dibulatkan ke atas, min 1 -- Order yg
+ * baru masuk hari ini tetap dihitung "1 hari", bukan "0 hari"). */
+function ageDaysSince(sinceIso: string, nowMs: number): number {
+  const diff = nowMs - new Date(sinceIso).getTime();
+  return Math.max(1, Math.ceil(diff / 86_400_000));
+}
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -315,6 +337,22 @@ export default function QualityCheckReviewPage() {
     else if (r.status === "Approval") summary.approval++;
   }
 
+  // Kartu KPI "Belum OK (QC Passed) -- Lama Menunggu" (2026-08-23, instruksi
+  // eksplisit user) -- dihitung dari `filteredRows` juga (sama konvensi
+  // reaktif-thd-filter-Status dgn 5 kartu di atas), tapi cuma Order yg
+  // BELUM OK (`status !== "OK"`) & py `sinceQcEntry` (lihat komentar backend
+  // -- 4 dari 179 Order non-OK saat live-test tidak py Tanggal Masuk QC sama
+  // sekali krn belum pernah lewat Input Check Results, jadi tidak bisa
+  // dihitung umurnya & sengaja TIDAK masuk bucket manapun).
+  const ageBucketCounts: Record<string, number> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, 0]));
+  const nowMs = Date.now();
+  for (const r of filteredRows) {
+    if (r.status === "OK" || !r.sinceQcEntry) continue;
+    const ageDays = ageDaysSince(r.sinceQcEntry, nowMs);
+    const bucket = AGE_BUCKETS.find((b) => ageDays <= b.maxDays) ?? AGE_BUCKETS[AGE_BUCKETS.length - 1];
+    ageBucketCounts[bucket.key]++;
+  }
+
   const statusFilterButton = (
     <div style={{ position: "relative" }}>
       <button
@@ -365,6 +403,15 @@ export default function QualityCheckReviewPage() {
           <KpiCard label="On Check" value={summary.onCheck} color={STATUS_COLOR["On Check"]} />
           <KpiCard label="Improve" value={summary.improve} color={STATUS_COLOR.Improve} />
           <KpiCard label="Approval" value={summary.approval} color={STATUS_COLOR.Approval} />
+        </div>
+
+        <div>
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Menunggu</div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {AGE_BUCKETS.map((b) => (
+              <KpiCard key={b.key} label={b.label} value={ageBucketCounts[b.key]} color={b.color} />
+            ))}
+          </div>
         </div>
 
         <DataTable

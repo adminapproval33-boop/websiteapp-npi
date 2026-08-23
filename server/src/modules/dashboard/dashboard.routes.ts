@@ -2149,6 +2149,14 @@ interface QualityReviewRow {
   adminQcStage: string | null;
   qcTimestamp: Date | null;
   qcPassed: Date | null;
+  /** Kapan Order ini mulai masuk proses QC -- dipakai utk hitung "sudah
+   * berapa lama belum OK" (2026-08-23, instruksi eksplisit user, kartu KPI
+   * Ringkasan). Pref `qcTimestamp` (Tanggal Masuk QC, dari CheckResult),
+   * fallback ke `AdminQc.timestamp` kalau Order-nya belum pernah py baris
+   * CheckResult tapi sudah py AdminQc (mis. langsung "Approval" tanpa lewat
+   * Input Check Results dulu -- kasus nyata ditemukan saat live-test, 4 dari
+   * 179 Order non-OK). */
+  sinceQcEntry: Date | null;
 }
 
 /**
@@ -2244,6 +2252,7 @@ dashboardRouter.get(
         adminQcStage: typeLot,
         qcTimestamp: check?.timestamp ?? null,
         qcPassed,
+        sinceQcEntry: check?.timestamp ?? adminQc?.timestamp ?? null,
       });
     }
 

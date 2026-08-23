@@ -21,6 +21,7 @@ interface QualityReviewRow {
   qcTimestamp: string | null;
   qcPassed: string | null;
   sinceQcEntry: string | null;
+  orderQty: string | null;
 }
 
 interface QualityReviewData {
@@ -135,11 +136,29 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
-function KpiCard({ label, value, color }: { label: string; value: number; color: string }) {
+/** Qty di `orderQty` adalah free-text (dari MasterOrder/AdminQc) -- pola
+ * parsing SAMA dgn `parseQtyNumber` server (lib/qty.ts) & `parseQtyLocal` di
+ * MillingPage.tsx, diduplikasi lokal per konvensi codebase ini. */
+function parseQtyLocal(v: string | null | undefined): number {
+  if (!v) return 0;
+  const n = parseFloat(v.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
+
+/** Kartu KPI (2026-08-23, instruksi eksplisit user) -- setiap kartu di
+ * Ringkasan sekarang menampilkan 2 metrik: "Jumlah Formula (Order)" (jumlah
+ * baris, spt sebelumnya) & "Total Qty (KG/Ltr)" (jumlah `orderQty` semua
+ * baris di kelompok itu). */
+function KpiCard({ label, count, qty, color }: { label: string; count: number; qty: number; color: string }) {
   return (
-    <div className="panel" style={{ flex: "1 1 160px", padding: 16, borderTop: `4px solid ${color}` }}>
-      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{value}</div>
+    <div className="panel" style={{ flex: "1 1 190px", padding: 16, borderTop: `4px solid ${color}` }}>
+      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>Jumlah Formula (Order)</div>
+      <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "var(--navy-dark)" }}>{count}</div>
+      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 6 }}>Total Qty (KG/Ltr)</div>
+      <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--navy-dark)" }}>{numberFmt.format(qty)}</div>
     </div>
   );
 }
@@ -350,24 +369,37 @@ export default function QualityCheckReviewPage() {
     .filter((r) => statusFilter.size === 0 || statusFilter.has(r.status))
     .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""));
 
-  const summary = { ok: 0, onCheck: 0, improve: 0, approval: 0 };
+  // Tiap kartu KPI skrg py 2 metrik (2026-08-23, instruksi eksplisit user):
+  // "Jumlah Formula (Order)" (jumlah baris, spt sebelumnya) & "Total Qty
+  // (KG/Ltr)" (jumlah `orderQty` baris2 itu, lewat `parseQtyLocal`).
+  const zeroMetric = () => ({ count: 0, qty: 0 });
+  const summary = { ok: zeroMetric(), onCheck: zeroMetric(), improve: zeroMetric(), approval: zeroMetric() };
   for (const r of filteredRows) {
-    if (r.status === "OK") summary.ok++;
-    else if (r.status === "On Check") summary.onCheck++;
-    else if (r.status === "Improve") summary.improve++;
-    else if (r.status === "Approval") summary.approval++;
+    const bucket = r.status === "OK" ? summary.ok : r.status === "On Check" ? summary.onCheck : r.status === "Improve" ? summary.improve : summary.approval;
+    bucket.count++;
+    bucket.qty += parseQtyLocal(r.orderQty);
   }
+  const total = filteredRows.reduce(
+    (acc, r) => ({ count: acc.count + 1, qty: acc.qty + parseQtyLocal(r.orderQty) }),
+    zeroMetric()
+  );
 
   // Kartu KPI "Belum OK (QC Passed) -- Lama Proses" (2026-08-23, instruksi
   // eksplisit user) -- dihitung dari `filteredRows` juga (sama konvensi
   // reaktif-thd-filter Status/Lama Proses dgn kartu2 lain), pakai
   // `rowAgeBucket` yg sama dgn yg dipakai filter di atas (1 sumber logika).
-  const ageBucketCounts: Record<string, number> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, 0]));
+  const ageBuckets: Record<string, { count: number; qty: number }> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, zeroMetric()]));
   for (const r of filteredRows) {
     const bucket = rowAgeBucket(r);
-    if (bucket) ageBucketCounts[bucket]++;
+    if (bucket) {
+      ageBuckets[bucket].count++;
+      ageBuckets[bucket].qty += parseQtyLocal(r.orderQty);
+    }
   }
-  const ageTotal = Object.values(ageBucketCounts).reduce((sum, n) => sum + n, 0);
+  const ageTotal = Object.values(ageBuckets).reduce(
+    (acc, b) => ({ count: acc.count + b.count, qty: acc.qty + b.qty }),
+    zeroMetric()
+  );
 
   const statusFilterButton = (
     <div style={{ position: "relative" }}>
@@ -440,19 +472,19 @@ export default function QualityCheckReviewPage() {
           <div className="panel-header">Quality Check Review</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <KpiCard label="Total" value={filteredRows.length} color="var(--navy-light)" />
-          <KpiCard label="OK (QC Passed)" value={summary.ok} color={STATUS_COLOR.OK} />
-          <KpiCard label="On Check" value={summary.onCheck} color={STATUS_COLOR["On Check"]} />
-          <KpiCard label="Improve" value={summary.improve} color={STATUS_COLOR.Improve} />
-          <KpiCard label="Approval" value={summary.approval} color={STATUS_COLOR.Approval} />
+          <KpiCard label="Total" count={total.count} qty={total.qty} color="var(--navy-light)" />
+          <KpiCard label="OK (QC Passed)" count={summary.ok.count} qty={summary.ok.qty} color={STATUS_COLOR.OK} />
+          <KpiCard label="On Check" count={summary.onCheck.count} qty={summary.onCheck.qty} color={STATUS_COLOR["On Check"]} />
+          <KpiCard label="Improve" count={summary.improve.count} qty={summary.improve.qty} color={STATUS_COLOR.Improve} />
+          <KpiCard label="Approval" count={summary.approval.count} qty={summary.approval.qty} color={STATUS_COLOR.Approval} />
         </div>
 
         <div>
           <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Proses</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <KpiCard label="Total" value={ageTotal} color="var(--navy-light)" />
+            <KpiCard label="Total" count={ageTotal.count} qty={ageTotal.qty} color="var(--navy-light)" />
             {AGE_BUCKETS.map((b) => (
-              <KpiCard key={b.key} label={b.label} value={ageBucketCounts[b.key]} color={b.color} />
+              <KpiCard key={b.key} label={b.label} count={ageBuckets[b.key].count} qty={ageBuckets[b.key].qty} color={b.color} />
             ))}
           </div>
         </div>

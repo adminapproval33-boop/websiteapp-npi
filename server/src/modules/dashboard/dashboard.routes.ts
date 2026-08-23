@@ -2157,6 +2157,11 @@ interface QualityReviewRow {
    * Input Check Results dulu -- kasus nyata ditemukan saat live-test, 4 dari
    * 179 Order non-OK). */
   sinceQcEntry: Date | null;
+  /** Utk kartu KPI "Total Qty (KG/Ltr)" (2026-08-23, instruksi eksplisit
+   * user) -- pref `MasterOrder.orderQty` (data hidup), fallback ke
+   * `AdminQc.orderQty` (snapshot yg tersimpan di baris QC-nya sendiri;
+   * `CheckResult` tidak py kolom Order Qty sama sekali). */
+  orderQty: string | null;
 }
 
 /**
@@ -2194,7 +2199,7 @@ dashboardRouter.get(
         orderBy: { timestamp: "desc" },
       }),
       prisma.adminQc.findMany({
-        select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, typeLot: true, qcPassed: true, timestamp: true },
+        select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, typeLot: true, qcPassed: true, timestamp: true, orderQty: true },
         orderBy: { timestamp: "desc" },
       }),
     ]);
@@ -2214,7 +2219,7 @@ dashboardRouter.get(
 
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: Array.from(allOrders) } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, orderQty: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
@@ -2253,6 +2258,7 @@ dashboardRouter.get(
         qcTimestamp: check?.timestamp ?? null,
         qcPassed,
         sinceQcEntry: check?.timestamp ?? adminQc?.timestamp ?? null,
+        orderQty: master?.orderQty ?? adminQc?.orderQty ?? null,
       });
     }
 

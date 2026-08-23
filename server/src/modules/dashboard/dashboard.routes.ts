@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth } from "../../middleware/auth";
-import { evaluateSpec, evaluateSpecDetailed, DetailedSpecVerdict } from "../../lib/specEval";
+import { evaluateSpec } from "../../lib/specEval";
 import { parseQtyNumber } from "../../lib/qty";
 
 export const dashboardRouter = Router();
@@ -2136,80 +2136,279 @@ dashboardRouter.get(
   })
 );
 
+type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval";
+
 interface QualityReviewRow {
-  checkId: string;
-  timestamp: Date;
   order: string;
   materialNumber: string | null;
   materialDescription: string | null;
   batch: string | null;
+  plant: string | null;
   customer: string | null;
-  itemCheck: string;
-  spec: string | null;
-  result: string | null;
-  verdict: DetailedSpecVerdict;
-  pic: string | null;
-  inputBy: string;
+  status: OrderQcStatus;
+  adminQcStage: string | null;
+  qcTimestamp: Date | null;
+  qcPassed: Date | null;
 }
 
 /**
- * Dashboard > Quality Check Review (2026-08-05, instruksi eksplisit user) --
- * merekap SEMUA baris Spec Parameter dari seluruh histori Input Check Results
- * (bukan cuma 1 Order), dihitung berapa item per verdict: OK, OK Lower, OK
- * Center, OK Upper, NG (2026-08-05, instruksi eksplisit user: breakdown
- * lengkap, bukan cuma OK/NG digabung) pakai evaluateSpecDetailed -- versi
- * detail dari evaluateSpec yg dipakai checkQcGate (itu cuma butuh pass/fail
- * polos, jadi TETAP pakai evaluateSpec biasa, tidak diubah). Filter `from`/
- * `to` opsional (berdasar CheckResult.timestamp, bukan start/finish
- * per-parameter -- field itu sering kosong).
+ * Dashboard > Quality Check Review (2026-08-23, REVISI TOTAL sesuai instruksi
+ * eksplisit user -- versi lama merekap per-baris Spec Parameter/verdict OK-NG,
+ * DIGANTI TOTAL jadi rekap per NO ORDER dgn 4 status kerja QC, bukan lagi
+ * per-item spec):
+ *
+ *   - "OK"        : Order ini SUDAH py AdminQc.qcPassed terisi (kolom "QC
+ *                    Passed") -- TIDAK PEDULI Admin QC Stage-nya apa, begitu
+ *                    QC Passed terisi otomatis "OK". Prioritas PALING TINGGI
+ *                    (dicek duluan drpd 3 status lain).
+ *   - "Approval"   : BELUM py qcPassed, DAN Admin QC Stage (typeLot) TERBARU
+ *                    Order ini = "Approval".
+ *   - "Improve"    : BELUM py qcPassed, DAN Admin QC Stage TERBARU = "Improve".
+ *   - "On Check"   : BELUM py qcPassed, Admin QC Stage TERBARU BUKAN
+ *                    "Approval"/"Improve" (termasuk kalau belum py baris
+ *                    AdminQc sama sekali), TAPI Order ini SUDAH py minimal 1
+ *                    baris CheckResult (sudah masuk antrian QC).
+ *   Order yg tidak masuk 4 kategori itu (mis. Admin QC Stage "Joint Lot"/"Lot
+ *   Packing" tanpa qcPassed, dan BELUM PERNAH ada CheckResult) SENGAJA tidak
+ *   dihitung sama sekali -- 4 definisi di atas persis instruksi eksplisit
+ *   user, tidak ditambah kategori "lain-lain".
+ *
+ * "TERBARU" = baris AdminQc/CheckResult PALING BARU (timestamp desc) per
+ * Order -- status SELALU mengikuti histori Admin QC Stage terakhir, bukan
+ * cek "pernah ada Approval di histori manapun".
  */
 dashboardRouter.get(
   "/quality-check-review",
+  asyncRoute(async (_req, res) => {
+    const [checkResults, adminQcRows] = await Promise.all([
+      prisma.checkResult.findMany({
+        select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, customer: true, timestamp: true },
+        orderBy: { timestamp: "desc" },
+      }),
+      prisma.adminQc.findMany({
+        select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, typeLot: true, qcPassed: true, timestamp: true },
+        orderBy: { timestamp: "desc" },
+      }),
+    ]);
+
+    // Dedupe ke baris PALING BARU per Order (baris pertama yg ditemui, krn
+    // sudah diurutkan timestamp desc).
+    const latestCheckByOrder = new Map<string, (typeof checkResults)[number]>();
+    for (const r of checkResults) {
+      if (!latestCheckByOrder.has(r.order)) latestCheckByOrder.set(r.order, r);
+    }
+    const latestAdminQcByOrder = new Map<string, (typeof adminQcRows)[number]>();
+    for (const r of adminQcRows) {
+      if (!latestAdminQcByOrder.has(r.order)) latestAdminQcByOrder.set(r.order, r);
+    }
+
+    const allOrders = new Set<string>([...latestCheckByOrder.keys(), ...latestAdminQcByOrder.keys()]);
+
+    const masterOrders = await prisma.masterOrder.findMany({
+      where: { order: { in: Array.from(allOrders) } },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true },
+    });
+    const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    // Summary per status SENGAJA tidak dihitung di sini (2026-08-23) --
+    // frontend sekarang butuh summary yg REAKTIF thd filter Status yg dipilih
+    // user (kartu KPI berubah begitu difilter), jadi dihitung client-side dari
+    // `rows` (lihat QualityCheckReviewPage.tsx) supaya 1 sumber angka saja,
+    // tidak ada 2 versi summary (server vs client) yg bisa beda krn filter.
+    const rows: QualityReviewRow[] = [];
+
+    for (const order of allOrders) {
+      const check = latestCheckByOrder.get(order);
+      const adminQc = latestAdminQcByOrder.get(order);
+      const typeLot = adminQc?.typeLot ?? null;
+      const qcPassed = adminQc?.qcPassed ?? null;
+
+      let status: OrderQcStatus | null = null;
+      if (qcPassed) status = "OK";
+      else if (typeLot === "Approval") status = "Approval";
+      else if (typeLot === "Improve") status = "Improve";
+      else if (check) status = "On Check";
+
+      if (!status) continue;
+
+      const master = masterByOrder.get(order);
+      const source = check ?? adminQc!;
+      rows.push({
+        order,
+        materialNumber: master?.materialNumber ?? source.materialNumber,
+        materialDescription: master?.materialDescription ?? source.materialDescription,
+        batch: master?.batch ?? source.batch,
+        plant: master?.plant ?? source.plant,
+        customer: check?.customer ?? null,
+        status,
+        adminQcStage: typeLot,
+        qcTimestamp: check?.timestamp ?? null,
+        qcPassed,
+      });
+    }
+
+    rows.sort((a, b) => a.order.localeCompare(b.order));
+
+    res.json({ success: true, data: { rows } });
+  })
+);
+
+/**
+ * Tab "Quality Check / Material Number" (2026-08-23, instruksi eksplisit
+ * user) -- daftar Material Number yg PERNAH punya histori Input Check
+ * Results, dipakai utk saran/datalist di kolom cari Material Number. Diambil
+ * dari CheckResult (bukan MasterOrder) krn yg relevan di sini SPESIFIK
+ * material yg pernah dicek QC, bukan semua material yg pernah dipesan.
+ */
+dashboardRouter.get(
+  "/quality-check-review/material-numbers",
+  asyncRoute(async (_req, res) => {
+    const rows = await prisma.checkResult.findMany({
+      where: { materialNumber: { not: null } },
+      select: { materialNumber: true, materialDescription: true },
+      distinct: ["materialNumber"],
+      orderBy: { materialNumber: "asc" },
+    });
+    res.json({ success: true, data: rows });
+  })
+);
+
+interface MaterialTrendRow {
+  order: string;
+  batch: string | null;
+  timestamp: Date;
+  itemCheck: string;
+  spec: string | null;
+  result: string | null;
+}
+
+/**
+ * Tab "Quality Check / Material Number" -- histori LENGKAP semua Item Check
+ * (Spec Parameter) dari SEMUA CheckResult 1 Material Number, diurutkan ASC
+ * by timestamp (2026-08-23, instruksi eksplisit user: grafik history hasil
+ * pengecekan per Material Number). Sengaja kembalikan SEMUA baris/parameter
+ * (bukan per-Item-Check terpisah) -- frontend yg memfilter ke 1 Item Check
+ * terpilih utk digambar grafiknya, supaya ganti-ganti dropdown Item Check
+ * tidak perlu request ulang ke server. `timestamp` pakai `tanggalMasukQc`
+ * kalau ada (tanggal sampel FISIK masuk QC, lebih akurat utk sumbu waktu
+ * tren drpd kapan record-nya disimpan ke sistem), fallback ke
+ * `CheckResult.timestamp` kalau field itu kosong (record lama sebelum field
+ * ini ada, lihat komentar di schema.prisma).
+ */
+dashboardRouter.get(
+  "/quality-check-review/material-trend",
   asyncRoute(async (req, res) => {
-    const from = req.query.from ? new Date(String(req.query.from)) : undefined;
-    const to = req.query.to ? new Date(String(req.query.to)) : undefined;
+    const materialNumber = String(req.query.materialNumber ?? "").trim();
+    if (!materialNumber) {
+      res.json({ success: true, data: { itemChecks: [], rows: [] } });
+      return;
+    }
 
     const checks = await prisma.checkResult.findMany({
-      where: {
-        AND: [from ? { timestamp: { gte: from } } : {}, to ? { timestamp: { lte: to } } : {}],
-      },
+      where: { materialNumber },
       include: { parameters: { orderBy: { no: "asc" } } },
-      orderBy: { timestamp: "desc" },
+      orderBy: { timestamp: "asc" },
     });
 
-    const rows: QualityReviewRow[] = [];
-    const summary = { ok: 0, okLower: 0, okCenter: 0, okUpper: 0, ng: 0, unknown: 0, total: 0 };
+    const rows: MaterialTrendRow[] = [];
+    const itemChecks: string[] = [];
+    const seenItemChecks = new Set<string>();
+
     for (const c of checks) {
       for (const p of c.parameters) {
-        const verdict = evaluateSpecDetailed(p.standard, p.result);
-        if (verdict === "ok") summary.ok++;
-        else if (verdict === "ok-lower") summary.okLower++;
-        else if (verdict === "ok-center") summary.okCenter++;
-        else if (verdict === "ok-upper") summary.okUpper++;
-        else if (verdict === "ng") summary.ng++;
-        else summary.unknown++;
+        if (!seenItemChecks.has(p.parameter)) {
+          seenItemChecks.add(p.parameter);
+          itemChecks.push(p.parameter);
+        }
         rows.push({
-          checkId: c.checkId,
-          timestamp: c.timestamp,
           order: c.order,
-          materialNumber: c.materialNumber,
-          materialDescription: c.materialDescription,
           batch: c.batch,
-          customer: c.customer,
+          timestamp: c.tanggalMasukQc ?? c.timestamp,
           itemCheck: p.parameter,
           spec: p.standard,
           result: p.result,
-          verdict,
-          pic: p.pic,
-          inputBy: c.inputBy,
         });
       }
     }
-    summary.total = rows.length;
 
-    res.json({
-      success: true,
-      data: { summary, rows },
-    });
+    res.json({ success: true, data: { itemChecks, rows } });
+  })
+);
+
+interface QcOkTrendBucket {
+  bucketKey: string;
+  bucketStart: Date;
+  orderCount: number;
+  qty: number;
+}
+
+/**
+ * Tab "OK (QC Passed) - Tren" (2026-08-23, instruksi eksplisit user) --
+ * grafik tren berapa Order "OK (QC Passed)" per Harian/Mingguan/Bulanan,
+ * 2 metrik: jumlah Formula/Order OK, dan Total Qty (KG/Ltr) OK. Order
+ * dianggap OK dgn definisi PERSIS SAMA dgn /quality-check-review (baris
+ * AdminQc TERBARU per Order py `qcPassed` terisi) -- dedupe latest-by-order
+ * dulu SEBELUM filter qcPassed, supaya Order yg pernah py qcPassed tp lalu
+ * "dibuka lagi" (baris AdminQc lebih baru tanpa qcPassed) TIDAK ikut
+ * terhitung, konsisten dgn definisi status "OK" di tab Ringkasan. Bucket by
+ * tanggal `qcPassed` (kapan jadi OK), bukan `timestamp` input baris.
+ */
+async function buildQcOkTrendData(qcPassedRange: { gte?: Date; lte?: Date }, granularity: TrendGranularity) {
+  const adminQcRows = await prisma.adminQc.findMany({
+    select: { order: true, orderQty: true, qcPassed: true, timestamp: true },
+    orderBy: { timestamp: "desc" },
+  });
+
+  const latestByOrder = new Map<string, (typeof adminQcRows)[number]>();
+  for (const r of adminQcRows) {
+    if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+  }
+
+  const okOrders = Array.from(latestByOrder.values()).filter((r): r is typeof r & { qcPassed: Date } => {
+    if (!r.qcPassed) return false;
+    if (qcPassedRange.gte && r.qcPassed < qcPassedRange.gte) return false;
+    if (qcPassedRange.lte && r.qcPassed > qcPassedRange.lte) return false;
+    return true;
+  });
+
+  const masterOrders = await prisma.masterOrder.findMany({
+    where: { order: { in: okOrders.map((o) => o.order) } },
+    select: { order: true, orderQty: true },
+  });
+  const masterQtyByOrder = new Map(masterOrders.map((m) => [m.order, m.orderQty]));
+
+  const buckets = new Map<string, QcOkTrendBucket>();
+  function ensureBucket(d: Date): QcOkTrendBucket {
+    const key = trendBucketKey(d, granularity);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { bucketKey: key, bucketStart: wibDayStartInstant(key)!, orderCount: 0, qty: 0 };
+      buckets.set(key, bucket);
+    }
+    return bucket;
+  }
+
+  for (const o of okOrders) {
+    const b = ensureBucket(o.qcPassed);
+    b.orderCount += 1;
+    b.qty += parseQtyNumber(masterQtyByOrder.get(o.order) ?? o.orderQty);
+  }
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return Array.from(buckets.values())
+    .sort((a, b) => a.bucketKey.localeCompare(b.bucketKey))
+    .map((b) => ({ ...b, qty: round2(b.qty) }));
+}
+
+dashboardRouter.get(
+  "/quality-check-review/ok-trend",
+  asyncRoute(async (req, res) => {
+    const { period, from, to, finishRange } = resolveProduktivitasRange(req);
+    const rawGranularity = String(req.query.granularity ?? "day");
+    const granularity: TrendGranularity = (["day", "week", "month"] as const).includes(rawGranularity as TrendGranularity)
+      ? (rawGranularity as TrendGranularity)
+      : "day";
+    const buckets = await buildQcOkTrendData(finishRange, granularity);
+    res.json({ success: true, data: { period, from, to, granularity, buckets } });
   })
 );

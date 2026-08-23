@@ -173,6 +173,13 @@ export default function QualityCheckReviewPage() {
   const [tab, setTab] = useState<"ringkasan" | "trend" | "ok-trend">("ringkasan");
   const [statusFilter, setStatusFilter] = useState<Set<OrderQcStatus>>(new Set());
   const [showStatusPanel, setShowStatusPanel] = useState(false);
+  // Filter "Lama Menunggu" (2026-08-23, instruksi eksplisit user) -- tombol
+  // sama gayanya dgn "☰ Status", tapi memfilter berdasarkan bucket umur
+  // (AGE_BUCKETS.key). Memilih 1+ bucket otomatis cuma nyisain Order yg
+  // BELUM OK & py `sinceQcEntry` (Order OK/tanpa sinceQcEntry tidak py umur,
+  // jadi tidak pernah cocok bucket manapun begitu filter ini aktif).
+  const [ageFilter, setAgeFilter] = useState<Set<string>>(new Set());
+  const [showAgePanel, setShowAgePanel] = useState(false);
 
   const query = useQuery({
     queryKey: ["quality-check-review"],
@@ -326,8 +333,20 @@ export default function QualityCheckReviewPage() {
     }
   }
 
+  const nowMs = Date.now();
+  /** Bucket umur 1 row, atau `null` kalau tidak ternilai (sudah OK, atau
+   * belum py `sinceQcEntry` sama sekali) -- dipakai bareng oleh perhitungan
+   * kartu KPI & filter "Lama Menunggu" di bawah, supaya 1 logika saja. */
+  function rowAgeBucket(r: QualityReviewRow): string | null {
+    if (r.status === "OK" || !r.sinceQcEntry) return null;
+    const ageDays = ageDaysSince(r.sinceQcEntry, nowMs);
+    return (AGE_BUCKETS.find((b) => ageDays <= b.maxDays) ?? AGE_BUCKETS[AGE_BUCKETS.length - 1]).key;
+  }
+
   const rows = query.data?.rows ?? [];
-  const filteredRows = statusFilter.size > 0 ? rows.filter((r) => statusFilter.has(r.status)) : rows;
+  const filteredRows = rows
+    .filter((r) => statusFilter.size === 0 || statusFilter.has(r.status))
+    .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""));
 
   const summary = { ok: 0, onCheck: 0, improve: 0, approval: 0 };
   for (const r of filteredRows) {
@@ -339,18 +358,12 @@ export default function QualityCheckReviewPage() {
 
   // Kartu KPI "Belum OK (QC Passed) -- Lama Menunggu" (2026-08-23, instruksi
   // eksplisit user) -- dihitung dari `filteredRows` juga (sama konvensi
-  // reaktif-thd-filter-Status dgn 5 kartu di atas), tapi cuma Order yg
-  // BELUM OK (`status !== "OK"`) & py `sinceQcEntry` (lihat komentar backend
-  // -- 4 dari 179 Order non-OK saat live-test tidak py Tanggal Masuk QC sama
-  // sekali krn belum pernah lewat Input Check Results, jadi tidak bisa
-  // dihitung umurnya & sengaja TIDAK masuk bucket manapun).
+  // reaktif-thd-filter Status/Lama Menunggu dgn kartu2 lain), pakai
+  // `rowAgeBucket` yg sama dgn yg dipakai filter di atas (1 sumber logika).
   const ageBucketCounts: Record<string, number> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, 0]));
-  const nowMs = Date.now();
   for (const r of filteredRows) {
-    if (r.status === "OK" || !r.sinceQcEntry) continue;
-    const ageDays = ageDaysSince(r.sinceQcEntry, nowMs);
-    const bucket = AGE_BUCKETS.find((b) => ageDays <= b.maxDays) ?? AGE_BUCKETS[AGE_BUCKETS.length - 1];
-    ageBucketCounts[bucket.key]++;
+    const bucket = rowAgeBucket(r);
+    if (bucket) ageBucketCounts[bucket]++;
   }
 
   const statusFilterButton = (
@@ -370,6 +383,32 @@ export default function QualityCheckReviewPage() {
                 type="checkbox"
                 checked={statusFilter.has(opt.value)}
                 onChange={() => setStatusFilter((s) => toggleInSet(s, opt.value))}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const ageFilterButton = (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        className={`btn ${showAgePanel || ageFilter.size > 0 ? "" : "btn-outline"}`}
+        onClick={() => setShowAgePanel((s) => !s)}
+      >
+        ☰ Lama Menunggu{ageFilter.size > 0 ? ` (${ageFilter.size})` : ""}
+      </button>
+      {showAgePanel && (
+        <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 180, padding: 10 }}>
+          {AGE_BUCKETS.map((opt) => (
+            <label key={opt.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+              <input
+                type="checkbox"
+                checked={ageFilter.has(opt.key)}
+                onChange={() => setAgeFilter((s) => toggleInSet(s, opt.key))}
               />
               {opt.label}
             </label>
@@ -420,7 +459,12 @@ export default function QualityCheckReviewPage() {
             storageKey="quality-check-review"
             rows={filteredRows}
             freezeFirstColumn
-            toolbarExtraLeft={statusFilterButton}
+            toolbarExtraLeft={
+              <div style={{ display: "flex", gap: 8 }}>
+                {statusFilterButton}
+                {ageFilterButton}
+              </div>
+            }
             emptyMessage={query.isLoading ? "Memuat..." : "Belum ada Order yang masuk status ini."}
             columns={[
               { key: "order", label: "Order", render: (r) => r.order },

@@ -1,6 +1,6 @@
-import { CSSProperties, Fragment, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import { CSSProperties, Fragment, FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError } from "../../api/client";
+import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import MesinSelect from "../../components/MesinSelect";
@@ -14,8 +14,10 @@ import EmployeeNameSelect, {
   displayNameWithNik,
   resolveEmployeeId,
   MemberEntry,
+  EmployeeOption,
 } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
+import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
@@ -305,6 +307,230 @@ function PassReadingsTable({
   );
 }
 
+/** Qty di form ini disimpan sbg free-text (diketik manual, tanpa validasi
+ * format) -- SAMA pola parsing dgn parseQtyNumber di server (lib/qty.ts),
+ * dipakai di sini utk hitung "Qty Act selesai: X / Order Qty" di
+ * TankBranchPanel di bawah (murni tampilan, keputusan resmi "Milling Selesai"
+ * tetap di backend/stageGate.isMillingDone). */
+function parseQtyLocal(v: string | null | undefined): number {
+  if (!v) return 0;
+  const n = parseFloat(v.replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Panel "Tanki Turunan" (2026-08-23, sistem tanki turunan -- instruksi
+ * eksplisit user: 1 Order boleh dipecah ke 2-4 tanki, jalannya bisa
+ * bersamaan/satu per satu tergantung ketersediaan mesin, TAPI admin
+ * inputnya selalu satu per satu sesuai tanki mana dulu yg selesai).
+ * Menampilkan semua tanki (baris MillingLog) yg sudah pernah diinput utk
+ * Order yg lagi ada di form, + tombol Edit EKSPLISIT per tanki & tombol
+ * "+ Tanki Baru" -- menggantikan mekanisme lama yg auto masuk mode Edit
+ * begitu Code Mesin kebetulan cocok (silent-overwrite bug, lihat komentar
+ * panjang di handleOrderFound MillingPage di bawah). "Tanki N" dihitung dari
+ * URUTAN ARRAY (backend sudah mengurutkan ASC by timestamp, lihat
+ * GET /milling/by-order), bukan kolom sequence tersendiri. */
+function TankBranchPanel({
+  order,
+  orderQty,
+  tanks,
+  editingId,
+  onEdit,
+  onAddNew,
+  onDelete,
+  canDelete,
+  onView,
+}: {
+  order: string;
+  orderQty: string;
+  tanks: LogRow[];
+  editingId: number | null;
+  onEdit: (row: LogRow) => void;
+  onAddNew: () => void;
+  /** Tombol "Hapus" per tanki (2026-08-23, instruksi eksplisit user -- utk
+   * admin yg salah input tanki). Sama gerbang akses dgn tombol Hapus di tab
+   * History (getMenuLevel === "INPUT", lihat MillingPage). */
+  onDelete: (row: LogRow) => void;
+  canDelete: boolean;
+  /** Klik barisnya sendiri (2026-08-23, instruksi eksplisit user: "bisa klik
+   * tanki 1,2,3 ketika hanya ingin melihat data") -- buka modal READ-ONLY,
+   * BEDA dari tombol "Edit" yg memuat data ke form Input (bisa berubah kalau
+   * ke-klik Save tanpa sengaja). Klik Edit/Hapus TIDAK ikut memicu ini
+   * (stopPropagation di kedua tombol itu). */
+  onView: (row: LogRow) => void;
+}) {
+  const finishedQty = tanks.filter((t) => t.finish).reduce((sum, t) => sum + parseQtyLocal(t.qtyAct), 0);
+  const targetQty = parseQtyLocal(orderQty);
+
+  return (
+    <div className="excel-block" style={{ marginBottom: 14, border: GRID_BORDER }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "6px 10px",
+          background: "#f1f5f9",
+          borderBottom: GRID_BORDER,
+        }}
+      >
+        <div>
+          <strong>Tanki Turunan — Order {order}</strong>
+          {targetQty > 0 && (
+            <span style={{ marginLeft: 10, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              Qty Act selesai: {finishedQty} / {targetQty}
+              {finishedQty >= targetQty ? " (Milling selesai)" : ""}
+            </span>
+          )}
+        </div>
+        <button type="button" className="btn btn-success" style={{ padding: "4px 12px", fontSize: "0.8rem" }} onClick={onAddNew}>
+          + Tanki Baru
+        </button>
+      </div>
+      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+        {tanks.map((t, idx) => {
+          const status = t.finish ? "Selesai" : t.start ? "Proses" : "Baru";
+          const isEditing = editingId === t.id;
+          return (
+            <div
+              key={t.id}
+              onClick={() => onView(t)}
+              title="Klik untuk lihat detail lengkap tanki ini (read-only)"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-start",
+                gap: 12,
+                padding: "6px 8px",
+                border: isEditing ? "1px solid var(--navy)" : GRID_BORDER,
+                borderRadius: 4,
+                background: isEditing ? "#eef2ff" : "transparent",
+                fontSize: "0.85rem",
+                flexWrap: "wrap",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ fontWeight: 600, minWidth: 70 }}>Tanki {idx + 1}</span>
+              <span style={{ color: "var(--text-muted)" }}>Code Tanki 1: {t.codeTanki1 || "-"}</span>
+              <span style={{ color: "var(--text-muted)" }}>Code Mesin: {t.codeMesin || "-"}</span>
+              <span style={{ color: "var(--text-muted)" }}>Qty Act: {t.qtyAct || "-"}</span>
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 10,
+                  fontSize: "0.75rem",
+                  background: status === "Selesai" ? "#dcfce7" : status === "Proses" ? "#fef3c7" : "#f1f5f9",
+                  color: status === "Selesai" ? "#166534" : status === "Proses" ? "#92400e" : "#475569",
+                }}
+              >
+                {status}
+              </span>
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(t);
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(t);
+                    }}
+                  >
+                    🗑️ Hapus
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 1 baris label:value di modal detail read-only (TankViewDetail di bawah). */
+function ViewField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: "1px solid #f1f5f9", fontSize: "0.85rem" }}>
+      <span style={{ minWidth: 150, flexShrink: 0, fontWeight: 600, color: "var(--text-muted)" }}>{label}</span>
+      <span>{value ?? "-"}</span>
+    </div>
+  );
+}
+
+/** Isi modal "Detail Tanki" (2026-08-23, instruksi eksplisit user: klik baris
+ * di panel Tanki Turunan utk lihat data lengkap 1 tanki, READ-ONLY, tanpa
+ * risiko kesenggol Save krn tidak menyentuh form Input sama sekali). Nama
+ * Member/SPV/Leader/Input By ditampilkan dgn NIK lewat helper yg sama dgn tab
+ * History (displayNameWithNik/formatInputBy), reuse flattenHistory (sama
+ * fungsi yg dipakai tab History utk "unpivot" Fineness/Visco/Suhu per Pass)
+ * supaya format Pass-nya konsisten dgn tabel History. */
+function TankViewDetail({ row, employees }: { row: LogRow; employees: EmployeeOption[] | undefined }) {
+  const members = normalizeMembers(row.members);
+  const passes = flattenHistory([row]);
+
+  return (
+    <div>
+      <ViewField label="Timestamp" value={formatDateTime(row.timestamp)} />
+      <ViewField label="Material Number" value={row.materialNumber} />
+      <ViewField label="Material Description" value={row.materialDescription} />
+      <ViewField label="Batch" value={row.batch} />
+      <ViewField label="Order Qty" value={row.orderQty} />
+      <ViewField label="Plant" value={row.plant} />
+      <ViewField label="IU Plant" value={row.iuPlant} />
+      <ViewField label="Code Tanki 1 (Couple)" value={row.codeTanki1} />
+      <ViewField label="Code Tanki 2 (Moving)" value={row.codeTanki2} />
+      <ViewField label="Code Mesin" value={row.codeMesin} />
+      <ViewField label="Form Received" value={row.formReceived ? formatDateTime(row.formReceived) : null} />
+      <ViewField label="Start" value={row.start ? formatDateTime(row.start) : null} />
+      <ViewField label="Finish" value={row.finish ? formatDateTime(row.finish) : null} />
+      <ViewField label="SPV Produksi" value={displayNameWithNik(employees, row.spvProduksi, row.spvProduksiNik)} />
+      <ViewField label="Leader" value={row.leader ? displayNameWithNik(employees, row.leader, row.leaderNik) : null} />
+      <ViewField label="Qty Act" value={row.qtyAct} />
+      <ViewField
+        label="Member"
+        value={members.length > 0 ? members.map((m) => displayNameWithNik(employees, m.name, m.nik)).join(", ") : null}
+      />
+      <ViewField
+        label="Fineness / Visco / Suhu"
+        value={
+          passes.length > 0 && passes.some((p) => p.passLabel)
+            ? passes.filter((p) => p.passLabel).map((p) => `${p.passLabel}: ${p.fineness || "-"} / ${p.visco || "-"} / ${p.suhu || "-"}`).join("  |  ")
+            : null
+        }
+      />
+      <ViewField label="Remark" value={row.remark} />
+      <ViewField label="Input By" value={formatInputBy(employees, row.inputBy)} />
+      <ViewField
+        label="Lampiran"
+        value={
+          row.attachments.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {row.attachments.map((a) => (
+                <a key={a.id} href={fileUrl(a.filePath)} target="_blank" rel="noreferrer">
+                  {a.fileName}
+                </a>
+              ))}
+            </div>
+          ) : null
+        }
+      />
+    </div>
+  );
+}
+
 export default function MillingPage({
   embedded = false,
   initialOrder,
@@ -328,6 +554,10 @@ export default function MillingPage({
   const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
+  /** Tanki yg lagi dilihat read-only (2026-08-23, klik baris di panel Tanki
+   * Turunan) -- BEDA state dari editingId/form, supaya "cuma lihat" tidak
+   * pernah menyentuh/mengubah apa yg lagi ada di form Input. */
+  const [viewingTank, setViewingTank] = useState<LogRow | null>(null);
   const [memberInput, setMemberInput] = useState("");
   const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -355,6 +585,19 @@ export default function MillingPage({
     enabled: !embedded,
   });
 
+  /** Semua tanki (baris MillingLog) yg sudah pernah diinput utk Order yg lagi
+   * ada di form ini -- dasar panel "Tanki Turunan" (2026-08-23, sistem tanki
+   * turunan: 1 Order boleh dipecah ke beberapa tanki, diinput satu per satu
+   * di sesi terpisah). Diurutkan ASC dari backend (lihat /milling/by-order),
+   * jadi index array = nomor "Tanki N". */
+  const orderForTanks = form.order.trim();
+  const tanksQuery = useQuery({
+    queryKey: ["milling-by-order", orderForTanks],
+    queryFn: () => api.get<{ success: boolean; data: LogRow[] }>(`/milling/by-order/${encodeURIComponent(orderForTanks)}`).then((r) => r.data),
+    enabled: orderForTanks.length > 0,
+  });
+  const existingTanks = tanksQuery.data ?? [];
+
   const queueQuery = useQuery({
     queryKey: ["milling-pwo-queue"],
     queryFn: () => api.get<{ success: boolean; data: QueueRow[] }>("/milling/pwo-queue").then((r) => r.data),
@@ -372,6 +615,7 @@ export default function MillingPage({
       setForm(emptyForm);
       setEditingId(null);
       queryClient.invalidateQueries({ queryKey: ["milling-history"] });
+      queryClient.invalidateQueries({ queryKey: ["milling-by-order"] });
       if (attachmentFile) {
         uploadMutation.mutate({ id: res.data.id, file: attachmentFile });
       } else {
@@ -384,9 +628,14 @@ export default function MillingPage({
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/milling/${id}`),
-    onSuccess: () => {
+    onSuccess: (_res, deletedId) => {
       setMessage("Data Milling berhasil dihapus.");
       queryClient.invalidateQueries({ queryKey: ["milling-history"] });
+      queryClient.invalidateQueries({ queryKey: ["milling-by-order"] });
+      // Kalau tanki yg dihapus itu yg SEDANG diedit di form (2026-08-23, tombol
+      // Hapus di panel Tanki Turunan) -- keluar dari mode Edit, drpd form
+      // nyangkut nunjuk ke baris yg sudah tidak ada lagi.
+      setEditingId((current) => (current === deletedId ? null : current));
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menghapus data."),
   });
@@ -438,46 +687,21 @@ export default function MillingPage({
     } catch {
       /* belum ada data Premix utk Order ini -- biarkan Code Tanki 2 kosong, diisi manual */
     }
-    // Kolom lain (SPV Produksi, Leader, Member, Code Tanki 1, Code Mesin,
-    // Start, Finish, Fineness/Visco/Suhu, Remark) diambil dari input TERAKHIR
-    // (mesin manapun) untuk Order ini di Milling. Asumsi default: user
-    // melanjutkan/mengedit mesin yg SAMA dgn histori paling akhir -- kalau
-    // user lalu mengganti Code Mesin secara manual, lihat checkMachineRecord
-    // di bawah (dipanggil saat blur) yg akan cek ulang apakah itu mesin yg
-    // sudah pernah diinput (edit) atau mesin BARU (1 Order running di >1
-    // mesin sekaligus -- entri baru, bukan menimpa), sesuai instruksi
-    // eksplisit user (2026-07-26).
-    try {
-      const latestRes = await api.get<{ success: boolean; data: LogRow | null }>(
-        `/milling/latest-by-order/${encodeURIComponent(data.order)}`
-      );
-      const latest = latestRes.data;
-      if (latest) {
-        setEditingId(latest.id);
-        setForm((f) => ({
-          ...f,
-          spvProduksi: f.spvProduksi || latest.spvProduksi || "",
-          spvProduksiNik: f.spvProduksi ? f.spvProduksiNik : latest.spvProduksiNik ?? null,
-          leader: f.leader || latest.leader || "",
-          leaderNik: f.leader ? f.leaderNik : latest.leaderNik ?? null,
-          qtyAct: f.qtyAct || latest.qtyAct || "",
-          members: f.members.length > 0 ? f.members : normalizeMembers(latest.members),
-          codeTanki1: f.codeTanki1 || latest.codeTanki1 || "",
-          codeMesin: f.codeMesin || latest.codeMesin || "",
-          formReceived: f.formReceived || latest.formReceived || "",
-          start: f.start || latest.start || "",
-          finish: f.finish || latest.finish || "",
-          fineness: f.fineness.some(Boolean) ? f.fineness : normalizeReadings(latest.fineness),
-          visco: f.visco.some(Boolean) ? f.visco : normalizeReadings(latest.visco),
-          suhu: f.suhu.some(Boolean) ? f.suhu : normalizeReadings(latest.suhu),
-          remark: f.remark || latest.remark || "",
-        }));
-      } else {
-        setEditingId(null);
-      }
-    } catch {
-      /* belum ada input sebelumnya untuk Order ini -- biarkan kosong */
-    }
+    // Sistem "tanki turunan" (2026-08-23, REVISI TOTAL dari mekanisme lama):
+    // Order lookup baru SELALU dianggap entri tanki BARU (form kosong utk
+    // field tanki-spesifik: Code Tanki 1, Code Mesin, SPV/Leader/Member, Form
+    // Received/Start/Finish, Qty Act, Fineness/Visco/Suhu -- field2 itu
+    // MELEKAT ke 1 tanki fisik, tidak aman di-template dari tanki lain krn
+    // Start/Finish/Qty/bacaan QC pasti beda per tanki). Utk benar2 mengedit
+    // tanki yg SUDAH ada, user WAJIB klik tombol "Edit" eksplisit di panel
+    // "Tanki Turunan" di bawah form (lihat existingTanks/startEdit) -- BUKAN
+    // lagi otomatis lewat Order/Code Mesin yg kebetulan sama. Mekanisme lama
+    // (auto-fill dari tanki TERAKHIR + auto masuk mode Edit begitu Code Mesin
+    // kebetulan cocok, lihat checkMachineRecord) DIHAPUS TOTAL -- itu bug
+    // nyata: bisa menimpa baris tanki lain tanpa sadar kalau 2 tanki turunan
+    // kebetulan pakai Code Mesin yg sama (sangat mungkin, krn 1 mesin sering
+    // dipakai bergantian utk semua tanki 1 Order).
+    setEditingId(null);
   }
 
   // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
@@ -493,50 +717,6 @@ export default function MillingPage({
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded, initialOrder]);
-
-  /** Dipanggil saat user selesai mengetik/mengganti Code Mesin (blur) -- cek
-   * ulang apakah kombinasi Order + Code Mesin ini SUDAH pernah diinput
-   * sebelumnya (berarti sedang mengedit record mesin itu) atau BELUM (berarti
-   * Order ini sedang running di mesin lain scr bersamaan -- harus jadi entri
-   * BARU, bukan menimpa record mesin sebelumnya), sesuai instruksi eksplisit
-   * user (2026-07-26). */
-  async function checkMachineRecord() {
-    const order = form.order.trim();
-    const codeMesin = form.codeMesin.trim();
-    if (!order || !codeMesin) return;
-    try {
-      const res = await api.get<{ success: boolean; data: LogRow | null }>(
-        `/milling/latest-by-order/${encodeURIComponent(order)}?codeMesin=${encodeURIComponent(codeMesin)}`
-      );
-      const match = res.data;
-      if (match) {
-        setEditingId(match.id);
-        setForm((f) => ({
-          ...f,
-          spvProduksi: match.spvProduksi || f.spvProduksi,
-          spvProduksiNik: match.spvProduksiNik ?? f.spvProduksiNik,
-          leader: match.leader ?? f.leader,
-          leaderNik: match.leaderNik ?? f.leaderNik,
-          qtyAct: match.qtyAct ?? f.qtyAct,
-          members: match.members ? normalizeMembers(match.members) : f.members,
-          codeTanki1: match.codeTanki1 ?? f.codeTanki1,
-          formReceived: match.formReceived ?? f.formReceived,
-          start: match.start ?? f.start,
-          finish: match.finish ?? f.finish,
-          fineness: match.fineness ? normalizeReadings(match.fineness) : f.fineness,
-          visco: match.visco ? normalizeReadings(match.visco) : f.visco,
-          suhu: match.suhu ? normalizeReadings(match.suhu) : f.suhu,
-          remark: match.remark ?? f.remark,
-        }));
-      } else {
-        // Kombinasi Order + Code Mesin ini belum pernah ada -- entri BARU
-        // (POST) begitu Save, BUKAN menimpa record mesin lain utk Order yg sama.
-        setEditingId(null);
-      }
-    } catch {
-      /* biarkan state form apa adanya kalau lookup gagal */
-    }
-  }
 
   function addMember() {
     const name = memberInput.trim();
@@ -657,6 +837,32 @@ export default function MillingPage({
     setError("");
   }
 
+  /** Tombol "+ Tanki Baru" di panel "Tanki Turunan" (2026-08-23) -- kosongkan
+   * semua field yg MELEKAT ke 1 tanki fisik (Code Tanki 1, Code Mesin,
+   * SPV/Leader/Member, Form Received/Start/Finish, Qty Act,
+   * Fineness/Visco/Suhu, Remark, lampiran), TAPI pertahankan konteks Order-nya
+   * (Material/Batch/Order Qty/Plant/IU Plant) & Code Tanki 2 (Moving, itu
+   * milik proses Premix Order ini, dipakai bareng oleh semua tanki
+   * turunannya, bukan per-tanki) supaya admin tidak perlu ketik ulang Order
+   * dari nol tiap mulai tanki baru. */
+  function startNewTank() {
+    setEditingId(null);
+    setForm((f) => ({
+      ...emptyForm,
+      order: f.order,
+      materialNumber: f.materialNumber,
+      materialDescription: f.materialDescription,
+      batch: f.batch,
+      orderQty: f.orderQty,
+      plant: f.plant,
+      iuPlant: f.iuPlant,
+      codeTanki2: f.codeTanki2,
+    }));
+    setAttachmentFile(null);
+    setMessage("");
+    setError("");
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage("");
@@ -686,6 +892,27 @@ export default function MillingPage({
       return;
     }
     saveMutation.mutate();
+  }
+
+  /** Nomor "Tanki N" per baris History (2026-08-23, instruksi eksplisit user:
+   * History harus kelihatan mana data tanki 1/2/3/dst, sama pola penomoran
+   * dgn panel "Tanki Turunan" di tab Input -- urutan ASC by timestamp per
+   * Order). SENGAJA dihitung dari `historyQuery.data` YANG BELUM DIFILTER
+   * search (bukan dari `filteredHistory` di bawah) supaya nomornya tetap
+   * benar/absolut (Tanki 2 tetap "Tanki 2") walau lagi difilter ke Order lain
+   * yg kebetulan cuma nampilin sebagian tanki-nya. */
+  const tankNumberByLogId = new Map<number, number>();
+  {
+    const rowsByOrder = new Map<string, LogRow[]>();
+    for (const row of historyQuery.data ?? []) {
+      const arr = rowsByOrder.get(row.order);
+      if (arr) arr.push(row);
+      else rowsByOrder.set(row.order, [row]);
+    }
+    for (const rows of rowsByOrder.values()) {
+      const sorted = [...rows].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      sorted.forEach((r, idx) => tankNumberByLogId.set(r.id, idx + 1));
+    }
   }
 
   const filteredHistory = (historyQuery.data ?? []).filter((row) =>
@@ -723,6 +950,25 @@ export default function MillingPage({
                 ↺ Reset Lebar Kolom
               </button>
             </div>
+
+            {orderForTanks.length > 0 && existingTanks.length > 0 && (
+              <TankBranchPanel
+                order={orderForTanks}
+                orderQty={form.orderQty}
+                tanks={existingTanks}
+                editingId={editingId}
+                onEdit={startEdit}
+                onAddNew={startNewTank}
+                canDelete={getMenuLevel(user, "milling") === "INPUT"}
+                onDelete={(row) => {
+                  if (confirm(`Hapus data Milling Tanki ini (Order ${row.order}, Code Mesin ${row.codeMesin || "-"})?`)) {
+                    deleteMutation.mutate(row.id);
+                  }
+                }}
+                onView={setViewingTank}
+              />
+            )}
+
             <ExcelBlock title="Production & MRP Schedule » Milling, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
@@ -761,7 +1007,6 @@ export default function MillingPage({
                     id="milling-mesin"
                     value={form.codeMesin}
                     onChange={(v) => setForm({ ...form, codeMesin: v })}
-                    onBlur={checkMachineRecord}
                     required={false}
                   />
                 </ExcelField>
@@ -940,6 +1185,15 @@ export default function MillingPage({
                   csvValue: (r) => toExcelDateTimeString(r.log.timestamp),
                 },
                 { key: "order", label: "Order", render: (r) => r.log.order },
+                {
+                  key: "tankNumber",
+                  label: "Tanki Ke-",
+                  render: (r) => {
+                    const n = tankNumberByLogId.get(r.log.id);
+                    return n ? `Tanki ${n}` : "-";
+                  },
+                  csvValue: (r) => String(tankNumberByLogId.get(r.log.id) ?? ""),
+                },
                 { key: "materialNumber", label: "Material Number", render: (r) => r.log.materialNumber },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.log.materialDescription },
                 { key: "batch", label: "Batch", render: (r) => r.log.batch },
@@ -1098,6 +1352,12 @@ export default function MillingPage({
             />
           </div>
         </div>
+      )}
+
+      {viewingTank && (
+        <Modal title={`Detail Tanki — Order ${viewingTank.order}`} onClose={() => setViewingTank(null)} width={640}>
+          <TankViewDetail row={viewingTank} employees={employees} />
+        </Modal>
       )}
     </div>
   );

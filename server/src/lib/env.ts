@@ -29,4 +29,13 @@ export const env = {
   // dengan set MAINTENANCE_MODE=false lalu restart server.
   maintenanceMode: (process.env.MAINTENANCE_MODE ?? "false").toLowerCase() === "true",
   maintenanceAllowedNik: process.env.MAINTENANCE_ALLOWED_NIK ?? "",
+  // Sync "Lot History" Approval -> Google Sheet (2026-08-23, instruksi eksplisit
+  // user). Sengaja TIDAK pakai required() -- kalau belum di-set, server tetap
+  // boleh jalan normal, cuma tombol Sync yang akan gagal dgn pesan jelas (lihat
+  // lib/googleSheets.ts) sampai user isi 3 variabel ini di .env.
+  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "",
+  // Private key dari file JSON Service Account biasanya multi-baris dgn "\n"
+  // literal kalau ditempel ke .env dalam satu baris -- di-unescape di sini.
+  googleServiceAccountPrivateKey: (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
+  googleApprovalSheetId: process.env.GOOGLE_APPROVAL_SHEET_ID ?? "",
 };

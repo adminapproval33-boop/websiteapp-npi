@@ -7,6 +7,7 @@ import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 import { notFutureDate } from "../../lib/dateValidation";
+import { overwriteSheet } from "../../lib/googleSheets";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -342,35 +343,144 @@ const FILTERABLE_COLUMNS = [
   "remark",
 ] as const;
 
+/** Dipakai bareng oleh GET /lot-history & POST /lot-history/sync-to-sheet
+ * (2026-08-23) supaya filter & kolom turunan (status/processing time/lampiran)
+ * SELALU konsisten antara yang ditampilkan di tabel dan yang di-sync. */
+async function fetchLotHistory(filterCol: string, filterValue: string, statusFilter: string) {
+  const where =
+    filterValue && (FILTERABLE_COLUMNS as readonly string[]).includes(filterCol)
+      ? { [filterCol]: { contains: filterValue, mode: "insensitive" as const } }
+      : {};
+
+  const rows = await prisma.approvalSchedule.findMany({
+    where,
+    include: { attachments: { select: { id: true } } },
+    orderBy: { timestamp: "desc" },
+    take: 1000,
+  });
+
+  const enriched = rows.map((row) => ({
+    ...row,
+    status: computeStatus(row.techName, row.finishApp),
+    processingTime: formatProcessingTime(row.timestamp, row.finishApp),
+    hasAttachment: row.attachments.length > 0,
+  }));
+
+  return statusFilter ? enriched.filter((r) => r.status === statusFilter) : enriched;
+}
+
 approvalRouter.get(
   "/lot-history",
   asyncRoute(async (req, res) => {
     const filterCol = String(req.query.filterCol ?? "");
     const filterValue = String(req.query.filterValue ?? "").trim();
     const statusFilter = String(req.query.status ?? "");
+    const data = await fetchLotHistory(filterCol, filterValue, statusFilter);
+    res.json({ success: true, data });
+  })
+);
 
-    const where =
-      filterValue && (FILTERABLE_COLUMNS as readonly string[]).includes(filterCol)
-        ? { [filterCol]: { contains: filterValue, mode: "insensitive" as const } }
-        : {};
+// ===================== Sync Lot History -> Google Sheet =====================
 
-    const rows = await prisma.approvalSchedule.findMany({
-      where,
-      include: { attachments: { select: { id: true } } },
-      orderBy: { timestamp: "desc" },
-      take: 1000,
-    });
+/** Tombol "Sync ke Google Sheet" DIBATASI cuma utk 5 NIK ini (2026-08-23,
+ * instruksi eksplisit user) -- TIDAK terkait level akses menu Approval
+ * (INPUT/VIEW/FULL_ACCESS) yg biasa, jadi dicek terpisah di sini, bukan lewat
+ * requireMenuInput/requireFullAccess biasa. Kalau daftarnya perlu diubah
+ * lagi nanti, edit array ini (dan cermin-nya di frontend, lihat
+ * ALLOWED_SYNC_NIKS di ApprovalPage.tsx -- frontend cuma utk sembunyikan
+ * tombol, validasi yg SESUNGGUHNYA tetap di sini krn frontend bisa dilewati). */
+const ALLOWED_SYNC_NIKS = ["000001", "019375", "001475", "012385", "019701"];
 
-    const enriched = rows.map((row) => ({
-      ...row,
-      status: computeStatus(row.techName, row.finishApp),
-      processingTime: formatProcessingTime(row.timestamp, row.finishApp),
-      hasAttachment: row.attachments.length > 0,
-    }));
+const LOT_HISTORY_SHEET_NAME = "New List Approval";
 
-    const filtered = statusFilter ? enriched.filter((r) => r.status === statusFilter) : enriched;
+const LOT_HISTORY_SHEET_HEADERS = [
+  "Order",
+  "Timestamp",
+  "Material Number",
+  "Material Description",
+  "Batch",
+  "Order Qty",
+  "Plant",
+  "IU Plant",
+  "Code Tanki",
+  "Mrp Pic",
+  "Sales Pic",
+  "Prepare Date",
+  "Spray Man",
+  "Wet Sample",
+  "Panel",
+  "Lot COA",
+  "Send To Tech",
+  "Submit Tech",
+  "Submit Cust",
+  "Customer",
+  "Cust Segmen",
+  "Tech Name",
+  "Finish App",
+  "Remark",
+  "Input By",
+  "Status",
+  "Processing Time",
+  "Lampiran",
+];
 
-    res.json({ success: true, data: filtered });
+function sheetDate(d: Date | null): string {
+  return d ? d.toISOString().slice(0, 19).replace("T", " ") : "";
+}
+
+/** Sync manual (tombol "Sync ke Google Sheet" di tab Lot History, 2026-08-23,
+ * instruksi eksplisit user) -- OVERWRITE TOTAL isi tab "New List Approval"
+ * (pilihan eksplisit user drpd mode Append, supaya aman diklik berkali-kali
+ * tanpa duplikat) dengan hasil query yang SAMA PERSIS dgn filter yang lagi
+ * aktif di tabel Lot History (bukan seluruh data tanpa filter). */
+approvalRouter.post(
+  "/lot-history/sync-to-sheet",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    if (!ALLOWED_SYNC_NIKS.includes(req.auth!.nik)) {
+      res.status(403).json({ success: false, message: "Akses ditolak. Fitur Sync ke Google Sheet dibatasi utk user tertentu saja." });
+      return;
+    }
+    const filterCol = String(req.body?.filterCol ?? "");
+    const filterValue = String(req.body?.filterValue ?? "").trim();
+    const statusFilter = String(req.body?.status ?? "");
+    const rows = await fetchLotHistory(filterCol, filterValue, statusFilter);
+
+    const sheetRows: (string | number | null)[][] = [
+      LOT_HISTORY_SHEET_HEADERS,
+      ...rows.map((r) => [
+        r.order,
+        sheetDate(r.timestamp),
+        r.materialNumber,
+        r.materialDescription,
+        r.batch,
+        r.orderQty,
+        r.plant,
+        r.iuPlant,
+        r.codeTanki,
+        r.mrpPic,
+        r.salesPic,
+        sheetDate(r.prepareProduksi),
+        r.sprayMan,
+        r.wetSample,
+        r.panel,
+        sheetDate(r.lotCoa),
+        sheetDate(r.sendToTech),
+        sheetDate(r.technicalDateReceiving),
+        sheetDate(r.submitToCustomer),
+        r.customer,
+        r.custSegmen,
+        r.techName,
+        sheetDate(r.finishApp),
+        r.remark,
+        r.inputBy,
+        r.status,
+        r.processingTime,
+        r.hasAttachment ? "Filled" : "No File",
+      ]),
+    ];
+
+    await overwriteSheet(LOT_HISTORY_SHEET_NAME, sheetRows);
+    res.json({ success: true, message: `Berhasil sync ${rows.length} baris Lot History ke Google Sheet.` });
   })
 );
 

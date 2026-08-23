@@ -3,6 +3,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth } from "../../middleware/auth";
 import { evaluateSpec, evaluateSpecDetailed, DetailedSpecVerdict } from "../../lib/specEval";
+import { parseQtyNumber } from "../../lib/qty";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -1671,16 +1672,6 @@ const UNKNOWN_PLANT_LABEL = "Tidak Diketahui";
  * IU Plant/Plant kosong ("" atau null) dikelompokkan ke "Tidak Diketahui"
  * (BUKAN dibuang), supaya total baris tetap cocok dgn jumlah data aslinya.
  */
-/** Qty di semua modul disimpan sbg free-text String (diketik manual di lantai
- * produksi, tanpa validasi format), jadi tidak bisa pakai Prisma `_sum`
- * (butuh kolom numerik). Parse manual: buang semua karakter selain
- * digit/titik/minus, lalu `parseFloat`; string kosong/non-numerik -> 0. */
-function parseQtyNumber(v: string | null | undefined): number {
-  if (!v) return 0;
-  const cleaned = v.replace(/[^\d.-]/g, "");
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) ? n : 0;
-}
 
 /** Kolom Premix/Aftermix/Milling/Colour Matching/Packing (2026-08-06,
  * instruksi eksplisit user, REVISI KEDUA sore hari yg sama) semuanya JUMLAH

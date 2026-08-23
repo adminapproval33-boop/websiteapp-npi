@@ -10,6 +10,7 @@ import { MENU_LABELS, getMenuLevel } from "../../lib/menuAccess";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 import { notFutureDate } from "../../lib/dateValidation";
+import { parseQtyNumber } from "../../lib/qty";
 
 export const premixAftermixRouter = Router();
 premixAftermixRouter.use(requireAuth);
@@ -191,13 +192,16 @@ premixAftermixRouter.get(
 );
 
 /**
- * "Milling - DN" -- syarat lengkap tahap terakhir Milling (Finish, Start,
- * Form Received, Leader, Code Tanki 1, Code Mesin, Member, Qty Act, Fineness,
+ * 1 baris MillingLog "selesai" -- syarat lengkap (Finish, Start, Form
+ * Received, Leader, Code Tanki 1, Code Mesin, Member, Qty Act, Fineness,
  * Visco, Suhu semua terisi) -- SAMA PERSIS dgn millingProcessLabel di
- * dashboard.routes.ts, tapi cuma butuh boolean "sudah selesai atau belum"
- * (bukan label lengkap 3 tahap) utk keperluan queue di bawah.
+ * dashboard.routes.ts. Dulu namanya `isMillingDone` dan dipakai langsung ke
+ * baris PALING TERAKHIR per Order -- DIREVISI 2026-08-23 (dukung "tanki
+ * turunan", lihat komentar isMillingDoneForOrder di bawah) jadi cuma predikat
+ * PER-BARIS, keputusan "Order ini sudah Milling - DN atau belum" sekarang di
+ * isMillingDoneForOrder (agregat SEMUA baris tanki utk Order itu).
  */
-function isMillingDone(r: {
+function isMillingRowComplete(r: {
   formReceived: Date | null;
   start: Date | null;
   finish: Date | null;
@@ -229,6 +233,30 @@ function isMillingDone(r: {
       hasReadings(r.visco) &&
       hasReadings(r.suhu)
   );
+}
+
+/**
+ * "Milling - DN" per Order (2026-08-23, dukung "tanki turunan" -- 1 Order
+ * boleh dipecah ke beberapa baris MillingLog/tanki, diinput satu per satu di
+ * sesi terpisah, lihat komentar sama & lebih lengkap di
+ * stageGate.isMillingDone). SAMA definisinya dgn stageGate.isMillingDone
+ * (SUM Qty Act dari semua baris tanki yg "selesai" >= Order Qty), TAPI
+ * fungsi ini SENGAJA terpisah (bukan reuse stageGate.isMillingDone) krn
+ * syarat "baris selesai"-nya lebih ketat di sini (isMillingRowComplete --
+ * ikut mensyaratkan Leader/Code Tanki 1/Code Mesin/Member/Fineness/Visco/Suhu,
+ * bukan cuma formReceived+start+finish) sesuai kebutuhan gerbang antrian
+ * Aftermix yg lebih strict drpd gerbang Milling->Aftermix biasa.
+ */
+function isMillingDoneForOrder(
+  rowsForOrder: (Parameters<typeof isMillingRowComplete>[0] & { orderQty: string | null })[],
+  masterOrderQty: string | null | undefined
+): boolean {
+  const finishedRows = rowsForOrder.filter(isMillingRowComplete);
+  if (finishedRows.length === 0) return false;
+  const targetQty = parseQtyNumber(masterOrderQty ?? finishedRows[0].orderQty);
+  if (targetQty <= 0) return true;
+  const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);
+  return sumQtyAct >= targetQty;
 }
 
 /**
@@ -287,31 +315,54 @@ premixAftermixRouter.get(
     ]);
 
     // Dedupe ke status PALING TERAKHIR per Order (baris pertama yg ditemui,
-    // krn millingLogs sudah diurutkan timestamp desc) -- konsisten dgn pola
-    // "1 baris per Order" yg dipakai di /dashboard/production-orders.
+    // krn millingLogs sudah diurutkan timestamp desc) -- dipakai utk field
+    // DISPLAY (Code Tanki/Code Mesin/dst di tabel antrian, ringkasan tanki
+    // TERAKHIR yg diinput utk Order itu). TIDAK LAGI dipakai utk keputusan
+    // "Milling - DN"-nya sendiri (lihat groupedByOrder + isMillingDoneForOrder
+    // di bawah, 2026-08-23, dukung "tanki turunan" -- 1 Order boleh py
+    // beberapa baris MillingLog/tanki, jadi latest-row-only akan salah
+    // menganggap Order belum Milling - DN begitu tanki BARU mulai diinput
+    // walau tanki-tanki sebelumnya sudah tuntas).
     const latestByOrder = new Map<string, (typeof millingLogs)[number]>();
+    const rowsByOrder = new Map<string, typeof millingLogs>();
     for (const r of millingLogs) {
       if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+      const arr = rowsByOrder.get(r.order);
+      if (arr) arr.push(r);
+      else rowsByOrder.set(r.order, [r]);
     }
 
-    const queueRows = Array.from(latestByOrder.values()).filter(
-      (r) =>
-        isMillingDone(r) &&
-        r.materialNumber != null &&
-        aftermixMaterialSet.has(r.materialNumber) &&
-        !startedAftermixOrderSet.has(r.order) &&
-        !pastAftermixOrderSet.has(r.order)
-    );
-    queueRows.sort((a, b) => a.finish!.getTime() - b.finish!.getTime());
-
-    const uniqueOrders = queueRows.map((r) => r.order);
     const masterOrders = await prisma.masterOrder.findMany({
-      where: { order: { in: uniqueOrders } },
+      where: { order: { in: Array.from(rowsByOrder.keys()) } },
       select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
-    const data = queueRows.map((r) => {
+    const queueRows = Array.from(rowsByOrder.entries())
+      .filter(([order, rows]) => {
+        const latest = latestByOrder.get(order)!;
+        return (
+          isMillingDoneForOrder(rows, masterByOrder.get(order)?.orderQty) &&
+          latest.materialNumber != null &&
+          aftermixMaterialSet.has(latest.materialNumber) &&
+          !startedAftermixOrderSet.has(order) &&
+          !pastAftermixOrderSet.has(order)
+        );
+      })
+      .map(([order, rows]) => {
+        // Momen Milling BENAR2 tuntas utk Order ini = Finish PALING AKHIR di
+        // antara baris2 tanki yg "selesai" (bisa jadi bukan finish milik
+        // baris `latest` kalau ada tanki baru yg BELUM selesai ditambahkan
+        // setelah target Qty tercapai) -- dipakai utk urutan FIFO di bawah,
+        // BUKAN r.finish latest yg bisa saja null.
+        const finishedRows = rows.filter(isMillingRowComplete);
+        const doneAt = finishedRows.reduce((max, r) => (r.finish!.getTime() > max.getTime() ? r.finish! : max), finishedRows[0].finish!);
+        return { order, doneAt };
+      });
+    queueRows.sort((a, b) => a.doneAt.getTime() - b.doneAt.getTime());
+
+    const data = queueRows.map(({ order }) => {
+      const r = latestByOrder.get(order)!;
       const master = masterByOrder.get(r.order);
       return {
         order: r.order,

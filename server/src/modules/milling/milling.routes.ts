@@ -9,6 +9,7 @@ import * as stageGate from "../../lib/stageGate";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 import { notFutureDate } from "../../lib/dateValidation";
+import { parseQtyNumber } from "../../lib/qty";
 
 export const millingRouter = Router();
 millingRouter.use(requireAuth);
@@ -103,6 +104,44 @@ async function validateTankFields(data: { codeTanki1: string; codeTanki2?: strin
   return null;
 }
 
+/**
+ * Cegah total Qty Act semua tanki turunan 1 Order melebihi Order Qty
+ * (2026-08-23, instruksi eksplisit user -- ditemukan lewat contoh nyata Order
+ * dgn Order Qty 1923.261 tapi 3 tanki total Qty Act 2400). Blocking (400),
+ * BUKAN sekedar warning -- sesuai instruksi eksplisit user: "harusnya
+ * disetting untuk tidak melebihi, kalaupun memang lebih harusnya buatkan
+ * pemberitahuan dahulu kepada admin agar kolom Order Qty harus diperbesar
+ * dahulu Qty-nya supaya data bisa disave". Target Order Qty diambil dari
+ * VALUE YANG SEDANG DISUBMIT di form ini (kolom Order Qty tsb bisa diedit
+ * manual oleh admin, sama field yg ditampilkan) -- BUKAN dari Master Data
+ * Order terpisah, supaya instruksi "perbesar Order Qty dulu" itu literal
+ * berlaku ke kolom yg sama yg admin lihat & edit di form Milling ini.
+ * `excludeId` dipakai saat Edit (PUT) supaya baris yg lagi diedit sendiri
+ * tidak dihitung dobel (qtyAct lamanya di-exclude, diganti qtyAct baru dari
+ * request ini). Return null kalau Order Qty tidak bisa diparse jadi angka
+ * (>0) -- tidak bisa/tidak perlu menegakkan batas yg tidak diketahui.
+ */
+async function validateQtyNotExceedOrder(
+  order: string,
+  orderQty: string,
+  newQtyAct: string | undefined,
+  excludeId: number | null
+): Promise<string | null> {
+  const targetQty = parseQtyNumber(orderQty);
+  if (targetQty <= 0) return null;
+
+  const otherRows = await prisma.millingLog.findMany({
+    where: excludeId ? { order, id: { not: excludeId } } : { order },
+    select: { qtyAct: true },
+  });
+  const sumQty = otherRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0) + parseQtyNumber(newQtyAct);
+
+  if (sumQty > targetQty) {
+    return `Total Qty Act semua tanki turunan Order ini akan jadi ${sumQty} -- melebihi Order Qty (${targetQty}). Perbesar Order Qty dulu di kolom Order Qty (atau kurangi Qty Act tanki ini) sebelum bisa disimpan.`;
+  }
+  return null;
+}
+
 /// Data terakhir untuk Order ini di Milling -- dipakai supaya begitu Order
 /// yang sama diketik lagi, semua kolom yang sudah pernah diisi langsung muncul.
 /// Kalau query `?codeMesin=` diisi, cocokkan Order + Code Mesin SEKALIGUS --
@@ -119,6 +158,34 @@ millingRouter.get(
       orderBy: { timestamp: "desc" },
     });
     res.json({ success: true, data: latest });
+  })
+);
+
+/** Semua baris tanki milik 1 Order, diurutkan timestamp ASC (2026-08-23,
+ * sistem "tanki turunan" -- 1 Order boleh dipecah ke beberapa tanki, tiap
+ * tanki 1 baris MillingLog, diinput satu per satu di sesi terpisah sesuai
+ * tanki mana dulu yang selesai, TIDAK harus 1 form sekali sesi). Dipakai
+ * MillingPage.tsx utk render panel "Tanki Turunan Order Ini" (daftar tanki yg
+ * sudah pernah diinput + tombol Edit per tanki + tombol "+ Tanki Baru"),
+ * menggantikan mekanisme lama yg auto masuk mode Edit berdasar Code Mesin yg
+ * sama (checkMachineRecord) -- itu ternyata BISA MENIMPA TANPA SADAR baris
+ * tanki lain kalau 2 tanki kebetulan pakai Code Mesin yg sama (1 mesin
+ * dipakai bergantian utk semua tanki 1 Order, sangat mungkin terjadi). Urutan
+ * ASC (bukan DESC spt /latest-by-order) supaya index array = nomor "Tanki N"
+ * (tanki pertama diinput = Tanki 1, dst) langsung dari urutan array di
+ * frontend, tidak perlu kolom sequence baru di DB. */
+millingRouter.get(
+  "/by-order/:order",
+  asyncRoute(async (req, res) => {
+    const order = String(req.params.order).trim();
+    const rows = order
+      ? await prisma.millingLog.findMany({
+          where: { order },
+          include: { attachments: true },
+          orderBy: { timestamp: "asc" },
+        })
+      : [];
+    res.json({ success: true, data: rows });
   })
 );
 
@@ -260,6 +327,11 @@ millingRouter.post(
       res.status(400).json({ success: false, message: tankError });
       return;
     }
+    const qtyError = await validateQtyNotExceedOrder(parsed.data.order, parsed.data.orderQty, parsed.data.qtyAct, null);
+    if (qtyError) {
+      res.status(400).json({ success: false, message: qtyError });
+      return;
+    }
     // Material ini benar2 memakai tahap Milling? (2026-08-06, instruksi
     // eksplisit user -- gerbang BARU, terpisah dari gerbang prasyarat di
     // bawah. Lihat komentar checkStageApplicableGate di lib/stageGate.ts.)
@@ -299,10 +371,13 @@ millingRouter.post(
   })
 );
 
-// Sengaja requireWrite (bukan requireFullAccess) -- Input Milling otomatis
-// masuk mode Edit (replace) begitu Order yang sama diketik ulang, jadi user
-// ber-akses INPUT (bukan cuma Full Access) tetap harus bisa Save. Full Access
-// tetap satu-satunya yg boleh Hapus (lihat route DELETE di bawah).
+// Sengaja requireWrite (bukan requireFullAccess) -- user ber-akses INPUT
+// (bukan cuma Full Access) tetap harus bisa Save begitu klik "Edit" eksplisit
+// di panel "Tanki Turunan" (2026-08-23, lihat TankBranchPanel/startEdit di
+// MillingPage.tsx -- SEBELUMNYA form otomatis masuk mode Edit begitu Order
+// yang sama diketik ulang, mekanisme itu sudah dihapus krn silent-overwrite
+// bug, sekarang edit HARUS lewat klik eksplisit). Full Access tetap
+// satu-satunya yg boleh Hapus (lihat route DELETE di bawah).
 millingRouter.put(
   "/:id",
   requireWrite,
@@ -321,6 +396,12 @@ millingRouter.put(
     const id = Number(req.params.id);
     const existing = await prisma.millingLog.findUnique({ where: { id } });
     if (!existing) throw new HttpError(404, "Data Milling tidak ditemukan.");
+
+    const qtyError = await validateQtyNotExceedOrder(parsed.data.order, parsed.data.orderQty, parsed.data.qtyAct, id);
+    if (qtyError) {
+      res.status(400).json({ success: false, message: qtyError });
+      return;
+    }
 
     const [spvProduksiNik, leaderNik, members] = await Promise.all([
       sanitizeNik(parsed.data.spvProduksiNik),

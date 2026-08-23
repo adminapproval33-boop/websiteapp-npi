@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { parseQtyNumber } from "./qty";
 
 /**
  * Penguncian urutan tahap produksi (2026-07-31, instruksi eksplisit bos user
@@ -57,14 +58,6 @@ async function latestAftermix(order: string) {
   });
 }
 
-async function latestMilling(order: string) {
-  return prisma.millingLog.findFirst({
-    where: { order },
-    orderBy: { timestamp: "desc" },
-    select: { formReceived: true, start: true, finish: true },
-  });
-}
-
 async function latestColourMatching(order: string) {
   return prisma.colourMatchingLog.findFirst({
     where: { order },
@@ -81,8 +74,42 @@ export async function isPremixDone(order: string): Promise<boolean> {
   return isDn(await latestPremix(order));
 }
 
+/**
+ * "Milling - DN" (2026-08-23, REVISI utk dukung "tanki turunan" -- 1 Order
+ * boleh dipecah ke beberapa baris MillingLog, 1 baris per tanki, tanki bisa
+ * diinput satu per satu di sesi terpisah -- lihat MillingPage.tsx). SEBELUMNYA
+ * cuma cek baris MillingLog PALING TERAKHIR utk Order ini (formReceived/
+ * start/finish terisi) -- BUG dgn tanki turunan: begitu tanki ke-2/3/4 mulai
+ * diinput (baris baru, belum Finish), status "Milling - DN" akan MUNDUR lagi
+ * jadi belum-selesai walau tanki-tanki sebelumnya sudah tuntas.
+ *
+ * Definisi baru (instruksi eksplisit user, 2026-08-11 mid-pause & dikonfirmasi
+ * lagi 2026-08-23): "Karena setiap tanki nantinya mempunyai Qty yang
+ * berbeda-beda, jadi saya anggap finish kalau Qty-nya sudah finish semua" --
+ * bukan lagi "semua baris tanki sudah Finish", tapi SUM(Qty Act) dari semua
+ * baris tanki yg SUDAH Finish (formReceived+start+finish terisi) >= Order Qty
+ * (dari Master Data, fallback ke Order Qty yg tersimpan di baris MillingLog
+ * itu sendiri kalau Master Data belum/tidak ada). Order Qty berupa
+ * free-text -- diparse via parseQtyNumber (sama dgn dashboard.routes.ts).
+ *
+ * Kalau Order Qty tidak bisa diparse jadi angka (>0) sama sekali -- fallback
+ * ke definisi lama (any 1 baris sudah Finish) supaya tidak memblokir Order yg
+ * Master Data-nya belum lengkap/qty-nya memang bukan format angka.
+ */
 export async function isMillingDone(order: string): Promise<boolean> {
-  return isDn(await latestMilling(order));
+  const rows = await prisma.millingLog.findMany({
+    where: { order },
+    select: { formReceived: true, start: true, finish: true, qtyAct: true, orderQty: true },
+  });
+  const finishedRows = rows.filter(isDn);
+  if (finishedRows.length === 0) return false;
+
+  const master = await prisma.masterOrder.findUnique({ where: { order }, select: { orderQty: true } });
+  const targetQty = parseQtyNumber(master?.orderQty ?? finishedRows[0].orderQty);
+  if (targetQty <= 0) return true; // fallback: qty tidak diketahui/tidak numerik -- any 1 baris Finish sudah cukup
+
+  const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);
+  return sumQtyAct >= targetQty;
 }
 
 export async function isAftermixDone(order: string): Promise<boolean> {

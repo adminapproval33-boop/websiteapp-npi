@@ -86,6 +86,12 @@ interface Attachment {
   timestamp: string;
 }
 
+/** Tombol "Sync ke Google Sheet" DIBATASI cuma utk 5 NIK ini (2026-08-23,
+ * instruksi eksplisit user) -- cuma utk sembunyikan tombolnya di sini,
+ * validasi yg SESUNGGUHNYA ada di backend (ALLOWED_SYNC_NIKS di
+ * approval.routes.ts) krn frontend bisa dilewati lewat panggilan API langsung. */
+const ALLOWED_SYNC_NIKS = ["000001", "019375", "001475", "012385", "019701"];
+
 const FILTER_COLUMNS = [
   { value: "order", label: "Order" },
   { value: "materialNumber", label: "Material Number" },
@@ -354,6 +360,19 @@ export default function ApprovalPage({
     },
   });
 
+  /** Tombol "Sync ke Google Sheet" di tab Lot History (2026-08-23, instruksi
+   * eksplisit user) -- kirim filter yg SEDANG AKTIF di tabel (status/filterCol/
+   * filterValue) supaya sheet-nya OVERWRITE TOTAL dgn data yg PERSIS SAMA dgn
+   * yg lagi ditampilkan, bukan seluruh data tanpa filter. */
+  const syncSheetMutation = useMutation({
+    mutationFn: () => api.post<{ success: boolean; message: string }>("/approvals/lot-history/sync-to-sheet", { filterCol, filterValue, status: statusFilter }),
+    onSuccess: (res) => {
+      setError("");
+      setMessage(res.message);
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal sync ke Google Sheet."),
+  });
+
   async function handleOrderFound(data: OrderRefData) {
     setForm((f) => ({
       ...f,
@@ -568,14 +587,35 @@ export default function ApprovalPage({
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
           {!isViewOnly && (
-            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            <button
+              className={`btn ${tab === "input" ? "" : "btn-outline"}`}
+              onClick={() => {
+                setTab("input");
+                setMessage("");
+                setError("");
+              }}
+            >
               Input Approval
             </button>
           )}
-          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+          <button
+            className={`btn ${tab === "history" ? "" : "btn-outline"}`}
+            onClick={() => {
+              setTab("history");
+              setMessage("");
+              setError("");
+            }}
+          >
             Lot History
           </button>
-          <button className={`btn ${tab === "queue" ? "" : "btn-outline"}`} onClick={() => setTab("queue")}>
+          <button
+            className={`btn ${tab === "queue" ? "" : "btn-outline"}`}
+            onClick={() => {
+              setTab("queue");
+              setMessage("");
+              setError("");
+            }}
+          >
             List Antrian Approval
           </button>
         </div>
@@ -787,8 +827,27 @@ export default function ApprovalPage({
 
       {tab === "history" && (
         <div className="panel">
-          <div className="panel-header">Approval — Lot History</div>
+          <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>Approval — Lot History</span>
+            {user && ALLOWED_SYNC_NIKS.includes(user.nik) && (
+              <button
+                className="btn btn-outline"
+                type="button"
+                title='Timpa isi tab "New List Approval" di Google Sheet dengan data Lot History yang sedang ditampilkan (sesuai filter aktif)'
+                onClick={() => {
+                  setError("");
+                  setMessage("");
+                  syncSheetMutation.mutate();
+                }}
+                disabled={syncSheetMutation.isPending}
+              >
+                {syncSheetMutation.isPending ? "Sync..." : "🔄 Sync ke Google Sheet"}
+              </button>
+            )}
+          </div>
           <div className="panel-body">
+            {error && <p className="error-text">{error}</p>}
+            {message && <p className="status-text">{message}</p>}
             <div className="field-grid" style={{ marginBottom: 12 }}>
               <div className="field">
                 <label>Status</label>

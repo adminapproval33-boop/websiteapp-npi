@@ -552,6 +552,31 @@ export default function QualityCheckReviewPage() {
           <div className="panel-header">OK (QC Passed) - Tren</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
+                  disabled={okTrendGranularity !== "day"}
+                  onClick={() => setShowDayScopePanel((s) => !s)}
+                >
+                  ☰ Cakupan Hari ({DAY_SCOPE_OPTIONS.find((o) => o.value === okTrendDayScope)?.label})
+                </button>
+                {showDayScopePanel && (
+                  <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
+                    {DAY_SCOPE_OPTIONS.map((opt) => (
+                      <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                        <input
+                          type="radio"
+                          name="ok-trend-day-scope"
+                          checked={okTrendDayScope === opt.value}
+                          onChange={() => setOkTrendDayScope(opt.value)}
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {GRANULARITY_OPTIONS.map((opt) => (
                   <button
@@ -589,39 +614,12 @@ export default function QualityCheckReviewPage() {
               )}
             </div>
 
-            <div>
-              <div style={{ position: "relative", display: "inline-block", marginBottom: 4 }}>
-                <button
-                  type="button"
-                  className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
-                  disabled={okTrendGranularity !== "day"}
-                  onClick={() => setShowDayScopePanel((s) => !s)}
-                >
-                  ☰ Cakupan Hari ({DAY_SCOPE_OPTIONS.find((o) => o.value === okTrendDayScope)?.label})
-                </button>
-                {showDayScopePanel && (
-                  <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
-                    {DAY_SCOPE_OPTIONS.map((opt) => (
-                      <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
-                        <input
-                          type="radio"
-                          name="ok-trend-day-scope"
-                          checked={okTrendDayScope === opt.value}
-                          onChange={() => setOkTrendDayScope(opt.value)}
-                        />
-                        {opt.label}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {okTrendGranularity !== "day" && (
-                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.72rem" }}>
-                  Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
-                  hari kerja & Sabtu/Minggu jadi 1 angka.
-                </p>
-              )}
-            </div>
+            {okTrendGranularity !== "day" && (
+              <p style={{ margin: 0, marginTop: -12, color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
+                hari kerja & Sabtu/Minggu jadi 1 angka.
+              </p>
+            )}
 
             {okTrendQuery.isLoading && (
               <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>Memuat...</p>

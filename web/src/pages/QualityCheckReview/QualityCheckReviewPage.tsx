@@ -399,7 +399,7 @@ export default function QualityCheckReviewPage() {
         className={`btn ${showAgePanel || ageFilter.size > 0 ? "" : "btn-outline"}`}
         onClick={() => setShowAgePanel((s) => !s)}
       >
-        ☰ Lama Menunggu{ageFilter.size > 0 ? ` (${ageFilter.size})` : ""}
+        ☰ Lama Proses{ageFilter.size > 0 ? ` (${ageFilter.size})` : ""}
       </button>
       {showAgePanel && (
         <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 180, padding: 10 }}>

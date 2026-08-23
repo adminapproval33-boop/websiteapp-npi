@@ -334,11 +334,13 @@ export default function QualityCheckReviewPage() {
   }
 
   const nowMs = Date.now();
-  /** Bucket umur 1 row, atau `null` kalau tidak ternilai (sudah OK, atau
-   * belum py `sinceQcEntry` sama sekali) -- dipakai bareng oleh perhitungan
-   * kartu KPI & filter "Lama Menunggu" di bawah, supaya 1 logika saja. */
+  /** Bucket umur 1 row, atau `null` kalau tidak ternilai (sudah OK, sudah
+   * "Approval" -- dikeluarkan atas instruksi eksplisit user, tahapnya sudah
+   * lewat dari QC jadi tidak relevan dihitung "lama proses QC" -- atau belum
+   * py `sinceQcEntry` sama sekali) -- dipakai bareng oleh perhitungan kartu
+   * KPI & filter "Lama Proses" di bawah, supaya 1 logika saja. */
   function rowAgeBucket(r: QualityReviewRow): string | null {
-    if (r.status === "OK" || !r.sinceQcEntry) return null;
+    if (r.status === "OK" || r.status === "Approval" || !r.sinceQcEntry) return null;
     const ageDays = ageDaysSince(r.sinceQcEntry, nowMs);
     return (AGE_BUCKETS.find((b) => ageDays <= b.maxDays) ?? AGE_BUCKETS[AGE_BUCKETS.length - 1]).key;
   }

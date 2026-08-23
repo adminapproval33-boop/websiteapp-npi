@@ -55,6 +55,12 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
 
 const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
+function isWeekendKey(bucketKey: string): boolean {
+  const [y, m, d] = bucketKey.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dow === 0 || dow === 6;
+}
+
 function formatBucketLabel(bucketKey: string, granularity: Granularity): string {
   const [y, m, d] = bucketKey.split("-").map(Number);
   if (granularity === "month") return `${MONTHS_ID[m - 1]} ${y}`;
@@ -188,19 +194,39 @@ export default function QualityCheckReviewPage() {
 
   // Tab "OK (QC Passed) - Tren" (2026-08-23, instruksi eksplisit user):
   // berapa No Order yg "OK (QC Passed)" per Harian/Mingguan/Bulanan, dalam 2
-  // grafik -- jumlah Formula (Order) & Total Qty (KG/Ltr). Selalu rentang
-  // "all" (tanpa filter tanggal, tidak diminta) -- cuma granularitas yg bisa
-  // diganti, pola sama persis dgn Tren Produktivitas.
+  // grafik -- jumlah Formula (Order) & Total Qty (KG/Ltr). Rentang
+  // tanggal/cakupan hari (2026-08-23, follow-up instruksi eksplisit user) --
+  // pola SAMA PERSIS dgn Tren Produktivitas: default "all" (tanpa filter,
+  // tampilkan semua data) sampai user isi Dari/Sampai Tanggal, dan "Hari
+  // Kerja Saja" cuma berlaku kalau granularitasnya "day" (bucket Mingguan/
+  // Bulanan sudah gabungan hari kerja+weekend, tidak bisa dipisah per-bucket).
   const [okTrendGranularity, setOkTrendGranularity] = useState<Granularity>("day");
+  const [okTrendFrom, setOkTrendFrom] = useState("");
+  const [okTrendTo, setOkTrendTo] = useState("");
+  const okTrendUsingCustomRange = Boolean(okTrendFrom || okTrendTo);
+  const [okTrendDayScope, setOkTrendDayScope] = useState<"workdays" | "all">("workdays");
+
   const okTrendQuery = useQuery({
-    queryKey: ["quality-check-review-ok-trend", okTrendGranularity],
-    queryFn: () =>
-      api
-        .get<{ success: boolean; data: QcOkTrendData }>(`/dashboard/quality-check-review/ok-trend?period=all&granularity=${okTrendGranularity}`)
-        .then((r) => r.data),
+    queryKey: ["quality-check-review-ok-trend", okTrendGranularity, okTrendFrom, okTrendTo],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set("granularity", okTrendGranularity);
+      if (okTrendUsingCustomRange) {
+        if (okTrendFrom) params.set("from", okTrendFrom);
+        if (okTrendTo) params.set("to", okTrendTo);
+      } else {
+        params.set("period", "all");
+      }
+      return api.get<{ success: boolean; data: QcOkTrendData }>(`/dashboard/quality-check-review/ok-trend?${params.toString()}`).then((r) => r.data);
+    },
     enabled: tab === "ok-trend",
   });
-  const okTrendBuckets = okTrendQuery.data?.buckets ?? [];
+
+  const okTrendEffectiveDayScope = okTrendGranularity === "day" ? okTrendDayScope : "all";
+  const okTrendBuckets = useMemo(() => {
+    const raw = okTrendQuery.data?.buckets ?? [];
+    return okTrendEffectiveDayScope === "workdays" ? raw.filter((b) => !isWeekendKey(b.bucketKey)) : raw;
+  }, [okTrendQuery.data, okTrendEffectiveDayScope]);
   const okTrendPointsCount: TrendChartPoint[] = useMemo(
     () =>
       okTrendBuckets.map((b) => ({
@@ -519,17 +545,70 @@ export default function QualityCheckReviewPage() {
         <div className="panel">
           <div className="panel-header">OK (QC Passed) - Tren</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ display: "flex", gap: 8 }}>
-              {GRANULARITY_OPTIONS.map((opt) => (
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                {GRANULARITY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`btn ${okTrendGranularity === opt.value ? "" : "btn-outline"}`}
+                    onClick={() => setOkTrendGranularity(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="field" style={{ maxWidth: 180 }}>
+                <label>Dari Tanggal</label>
+                <input type="date" value={okTrendFrom} onChange={(e) => setOkTrendFrom(e.target.value)} />
+              </div>
+              <div className="field" style={{ maxWidth: 180 }}>
+                <label>Sampai Tanggal</label>
+                <input type="date" value={okTrendTo} onChange={(e) => setOkTrendTo(e.target.value)} />
+              </div>
+              {okTrendUsingCustomRange && (
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
+              )}
+              {okTrendUsingCustomRange && (
                 <button
-                  key={opt.value}
                   type="button"
-                  className={`btn ${okTrendGranularity === opt.value ? "" : "btn-outline"}`}
-                  onClick={() => setOkTrendGranularity(opt.value)}
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setOkTrendFrom("");
+                    setOkTrendTo("");
+                  }}
                 >
-                  {opt.label}
+                  Reset Tanggal
                 </button>
-              ))}
+              )}
+            </div>
+
+            <div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Cakupan hari:</span>
+                <button
+                  type="button"
+                  className={`btn ${okTrendDayScope === "workdays" ? "" : "btn-outline"}`}
+                  disabled={okTrendGranularity !== "day"}
+                  onClick={() => setOkTrendDayScope("workdays")}
+                >
+                  Hari Kerja Saja
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${okTrendDayScope === "all" ? "" : "btn-outline"}`}
+                  disabled={okTrendGranularity !== "day"}
+                  onClick={() => setOkTrendDayScope("all")}
+                >
+                  Termasuk Sabtu/Minggu
+                </button>
+              </div>
+              {okTrendGranularity !== "day" && (
+                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                  Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
+                  hari kerja & Sabtu/Minggu jadi 1 angka.
+                </p>
+              )}
             </div>
 
             {okTrendQuery.isLoading && (

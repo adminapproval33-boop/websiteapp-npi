@@ -87,6 +87,11 @@ interface QcOkTrendData {
 
 const OK_TREND_SERIES: TrendSeries = { key: "ok", label: "OK (QC Passed)", color: "#22c55e" };
 
+const DAY_SCOPE_OPTIONS: { value: "workdays" | "all"; label: string }[] = [
+  { value: "workdays", label: "Hari Kerja Saja" },
+  { value: "all", label: "Termasuk Sabtu/Minggu" },
+];
+
 const STATUS_COLOR: Record<OrderQcStatus, string> = {
   OK: "#22c55e",
   "On Check": "#94a3b8",
@@ -205,6 +210,7 @@ export default function QualityCheckReviewPage() {
   const [okTrendTo, setOkTrendTo] = useState("");
   const okTrendUsingCustomRange = Boolean(okTrendFrom || okTrendTo);
   const [okTrendDayScope, setOkTrendDayScope] = useState<"workdays" | "all">("workdays");
+  const [showDayScopePanel, setShowDayScopePanel] = useState(false);
 
   const okTrendQuery = useQuery({
     queryKey: ["quality-check-review-ok-trend", okTrendGranularity, okTrendFrom, okTrendTo],
@@ -584,16 +590,30 @@ export default function QualityCheckReviewPage() {
             </div>
 
             <div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Cakupan hari:</span>
+              <div style={{ position: "relative", display: "inline-block", marginBottom: 4 }}>
                 <button
                   type="button"
-                  className="btn btn-outline"
+                  className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
                   disabled={okTrendGranularity !== "day"}
-                  onClick={() => setOkTrendDayScope((s) => (s === "workdays" ? "all" : "workdays"))}
+                  onClick={() => setShowDayScopePanel((s) => !s)}
                 >
-                  {okTrendDayScope === "workdays" ? "Hari Kerja Saja" : "Termasuk Sabtu/Minggu"}
+                  ☰ Cakupan Hari ({DAY_SCOPE_OPTIONS.find((o) => o.value === okTrendDayScope)?.label})
                 </button>
+                {showDayScopePanel && (
+                  <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
+                    {DAY_SCOPE_OPTIONS.map((opt) => (
+                      <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                        <input
+                          type="radio"
+                          name="ok-trend-day-scope"
+                          checked={okTrendDayScope === opt.value}
+                          onChange={() => setOkTrendDayScope(opt.value)}
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
               {okTrendGranularity !== "day" && (
                 <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.72rem" }}>

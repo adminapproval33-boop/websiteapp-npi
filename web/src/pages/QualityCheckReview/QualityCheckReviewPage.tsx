@@ -199,32 +199,22 @@ export default function QualityCheckReviewPage() {
 
   // Tab "OK (QC Passed) - Tren" (2026-08-23, instruksi eksplisit user):
   // berapa No Order yg "OK (QC Passed)" per Harian/Mingguan/Bulanan, dalam 2
-  // grafik -- jumlah Formula (Order) & Total Qty (KG/Ltr). Rentang
-  // tanggal/cakupan hari (2026-08-23, follow-up instruksi eksplisit user) --
-  // pola SAMA PERSIS dgn Tren Produktivitas: default "all" (tanpa filter,
-  // tampilkan semua data) sampai user isi Dari/Sampai Tanggal, dan "Hari
-  // Kerja Saja" cuma berlaku kalau granularitasnya "day" (bucket Mingguan/
-  // Bulanan sudah gabungan hari kerja+weekend, tidak bisa dipisah per-bucket).
+  // grafik -- jumlah Formula (Order) & Total Qty (KG/Ltr). Selalu rentang
+  // "all" (filter Dari/Sampai Tanggal sempat dibuat lalu DIHAPUS LAGI --
+  // instruksi eksplisit user, "sepertinya sudah tidak diperlukan") -- cuma
+  // granularitas & Cakupan Hari yg bisa diganti. "Hari Kerja Saja" cuma
+  // berlaku kalau granularitasnya "day" (bucket Mingguan/Bulanan sudah
+  // gabungan hari kerja+weekend, tidak bisa dipisah per-bucket).
   const [okTrendGranularity, setOkTrendGranularity] = useState<Granularity>("day");
-  const [okTrendFrom, setOkTrendFrom] = useState("");
-  const [okTrendTo, setOkTrendTo] = useState("");
-  const okTrendUsingCustomRange = Boolean(okTrendFrom || okTrendTo);
   const [okTrendDayScope, setOkTrendDayScope] = useState<"workdays" | "all">("workdays");
   const [showDayScopePanel, setShowDayScopePanel] = useState(false);
 
   const okTrendQuery = useQuery({
-    queryKey: ["quality-check-review-ok-trend", okTrendGranularity, okTrendFrom, okTrendTo],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      params.set("granularity", okTrendGranularity);
-      if (okTrendUsingCustomRange) {
-        if (okTrendFrom) params.set("from", okTrendFrom);
-        if (okTrendTo) params.set("to", okTrendTo);
-      } else {
-        params.set("period", "all");
-      }
-      return api.get<{ success: boolean; data: QcOkTrendData }>(`/dashboard/quality-check-review/ok-trend?${params.toString()}`).then((r) => r.data);
-    },
+    queryKey: ["quality-check-review-ok-trend", okTrendGranularity],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: QcOkTrendData }>(`/dashboard/quality-check-review/ok-trend?period=all&granularity=${okTrendGranularity}`)
+        .then((r) => r.data),
     enabled: tab === "ok-trend",
   });
 
@@ -559,7 +549,7 @@ export default function QualityCheckReviewPage() {
                   disabled={okTrendGranularity !== "day"}
                   onClick={() => setShowDayScopePanel((s) => !s)}
                 >
-                  ☰ Cakupan Hari ({DAY_SCOPE_OPTIONS.find((o) => o.value === okTrendDayScope)?.label})
+                  ☰ Cakupan Hari
                 </button>
                 {showDayScopePanel && (
                   <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
@@ -589,29 +579,6 @@ export default function QualityCheckReviewPage() {
                   </button>
                 ))}
               </div>
-              <div className="field" style={{ maxWidth: 180 }}>
-                <label>Dari Tanggal</label>
-                <input type="date" value={okTrendFrom} onChange={(e) => setOkTrendFrom(e.target.value)} />
-              </div>
-              <div className="field" style={{ maxWidth: 180 }}>
-                <label>Sampai Tanggal</label>
-                <input type="date" value={okTrendTo} onChange={(e) => setOkTrendTo(e.target.value)} />
-              </div>
-              {okTrendUsingCustomRange && (
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
-              )}
-              {okTrendUsingCustomRange && (
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => {
-                    setOkTrendFrom("");
-                    setOkTrendTo("");
-                  }}
-                >
-                  Reset Tanggal
-                </button>
-              )}
             </div>
 
             {okTrendGranularity !== "day" && (

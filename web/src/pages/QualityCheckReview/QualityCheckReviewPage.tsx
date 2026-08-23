@@ -147,21 +147,22 @@ function parseQtyLocal(v: string | null | undefined): number {
 
 const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
 
-/** Kartu KPI (2026-08-23, instruksi eksplisit user) -- setiap kartu di
- * Ringkasan menampilkan 2 metrik: "Qty Formula" (jumlah baris, angka besar
- * spt kartu aslinya SEBELUM fitur ini ditambahkan -- ukuran kartu sengaja
- * dijaga tetap sama) & "Qty (Ltr)" (jumlah `orderQty` semua baris di
- * kelompok itu, sengaja dibuat KECIL -- follow-up instruksi eksplisit user,
- * cuma info tambahan, bukan metrik utama kartu). */
+/** Kartu KPI (2026-08-23, instruksi eksplisit user) -- ukuran & layout
+ * dikembalikan sedekat mungkin ke kartu aslinya SEBELUM fitur Qty
+ * ditambahkan: label judul kartu (mis. "OK (QC Passed)") sejajar 1 baris
+ * dgn "Qty (Ltr): X" (kecil, kanan) supaya tidak nambah tinggi kartu, lalu
+ * label "Qty Formula" (kecil) DI ATAS angka besarnya (bukan di bawah). */
 function KpiCard({ label, count, qty, color }: { label: string; count: number; qty: number; color: string }) {
   return (
     <div className="panel" style={{ flex: "1 1 160px", padding: 16, borderTop: `4px solid ${color}` }}>
-      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{count}</div>
-      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>Qty Formula</div>
-      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 4 }}>
-        Qty (Ltr): <span style={{ fontWeight: 600, color: "var(--navy-dark)" }}>{numberFmt.format(qty)}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+          Qty (Ltr): <span style={{ fontWeight: 600, color: "var(--navy-dark)" }}>{numberFmt.format(qty)}</span>
+        </div>
       </div>
+      <div style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>Qty Formula</div>
+      <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{count}</div>
     </div>
   );
 }

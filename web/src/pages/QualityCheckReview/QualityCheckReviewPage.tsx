@@ -588,19 +588,11 @@ export default function QualityCheckReviewPage() {
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Cakupan hari:</span>
                 <button
                   type="button"
-                  className={`btn ${okTrendDayScope === "workdays" ? "" : "btn-outline"}`}
+                  className="btn btn-outline"
                   disabled={okTrendGranularity !== "day"}
-                  onClick={() => setOkTrendDayScope("workdays")}
+                  onClick={() => setOkTrendDayScope((s) => (s === "workdays" ? "all" : "workdays"))}
                 >
-                  Hari Kerja Saja
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${okTrendDayScope === "all" ? "" : "btn-outline"}`}
-                  disabled={okTrendGranularity !== "day"}
-                  onClick={() => setOkTrendDayScope("all")}
-                >
-                  Termasuk Sabtu/Minggu
+                  {okTrendDayScope === "workdays" ? "Hari Kerja Saja" : "Termasuk Sabtu/Minggu"}
                 </button>
               </div>
               {okTrendGranularity !== "day" && (

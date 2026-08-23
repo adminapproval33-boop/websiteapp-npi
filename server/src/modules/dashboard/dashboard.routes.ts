@@ -2162,6 +2162,11 @@ interface QualityReviewRow {
    * `AdminQc.orderQty` (snapshot yg tersimpan di baris QC-nya sendiri;
    * `CheckResult` tidak py kolom Order Qty sama sekali). */
   orderQty: string | null;
+  /** Kolom "% GR" dari menu Master Data "Referensi Order / PO (SAP-COOISPI)"
+   * (2026-08-23, instruksi eksplisit user) -- murni dari `MasterOrder.pctGR`,
+   * tidak py fallback ke CheckResult/AdminQc krn field ini SPESIFIK milik
+   * Master Data Cooispi (beda sumber dgn kolom2 lain di tabel ini). */
+  pctGR: string | null;
 }
 
 /**
@@ -2219,7 +2224,7 @@ dashboardRouter.get(
 
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: Array.from(allOrders) } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, orderQty: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, orderQty: true, pctGR: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
@@ -2259,6 +2264,7 @@ dashboardRouter.get(
         qcPassed,
         sinceQcEntry: check?.timestamp ?? adminQc?.timestamp ?? null,
         orderQty: master?.orderQty ?? adminQc?.orderQty ?? null,
+        pctGR: master?.pctGR ?? null,
       });
     }
 

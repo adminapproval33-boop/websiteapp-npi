@@ -22,6 +22,7 @@ interface QualityReviewRow {
   qcPassed: string | null;
   sinceQcEntry: string | null;
   orderQty: string | null;
+  pctGR: string | null;
 }
 
 interface QualityReviewData {
@@ -546,6 +547,7 @@ export default function QualityCheckReviewPage() {
                 render: (r) => (r.qcPassed ? formatDateTime(r.qcPassed) : "-"),
                 csvValue: (r) => (r.qcPassed ? toExcelDateTimeString(r.qcPassed) : ""),
               },
+              { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
             ]}
             />
           </div>

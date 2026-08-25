@@ -29,6 +29,19 @@ interface CrossModuleData {
   remark: string | null;
 }
 
+/** 1 tanki (baris MillingLog) milik Order yg lagi dicari -- dipakai dropdown
+ * "Pilih Tanki" (2026-08-25, instruksi eksplisit user: bisa cetak label tanki
+ * 1/2/3/dst, bukan cuma tanki TERAKHIR yg diinput) KHUSUS Label Entry SFG
+ * (GET /production-label/milling-tanks/:order, lihat komentar di
+ * productionLabel.routes.ts) -- Label Entry FG tidak relevan krn field Code
+ * Tanki/IU Plant memang disembunyikan total dari form FG. */
+interface MillingTankOption {
+  id: number;
+  label: string;
+  codeTanki: string | null;
+  iuPlant: string | null;
+}
+
 /** Kolom manual yg bisa disembunyikan per varian lewat prop `hiddenFields` -- lihat komentar propnya. */
 type ProductionLabelField = "materialType" | "drumColour" | "codeTanki" | "iuPlant";
 
@@ -191,6 +204,8 @@ export default function ProductionLabelEntryPage({
   const [volume, setVolume] = useState("");
   const [jumlahPer, setJumlahPer] = useState("");
   const [remark, setRemark] = useState("");
+  const [tankOptions, setTankOptions] = useState<MillingTankOption[]>([]);
+  const [selectedTankId, setSelectedTankId] = useState("");
 
   // QR Code (2026-08-04, revisi ke-7, instruksi eksplisit user: dipersempit
   // dari 9 field jadi cuma 4 -- Material Number/Description/Lot No/Exp --
@@ -273,6 +288,8 @@ export default function ProductionLabelEntryPage({
     setIuPlant("");
     setJumlahPer("");
     setRemark("");
+    setTankOptions([]);
+    setSelectedTankId("");
     // Volume (2026-08-20, instruksi eksplisit user, KHUSUS extra.has("volume"))
     // -- default-nya dari Master Data Referensi Order/PO (SAP-COOISPI, sama
     // sumber dgn saran Volume di Packing), TAPI baris History Production
@@ -323,6 +340,33 @@ export default function ProductionLabelEntryPage({
     } catch {
       /* biarkan kosong -- operator isi manual */
     }
+
+    // Dropdown "Pilih Tanki" (2026-08-25) -- KHUSUS SFG (field Code Tanki
+    // tidak disembunyikan). Cuma mengisi PILIHAN, TIDAK mengubah nilai
+    // codeTanki/iuPlant yg sudah keisi dari own-history/cross-module di atas
+    // (default tetap sama spt sebelumnya) -- operator baru override manual
+    // kalau memang mau cetak label utk tanki SELAIN yg sudah tersaran.
+    if (!hidden.has("codeTanki")) {
+      try {
+        const tanksRes = await api.get<{ success: boolean; data: MillingTankOption[] }>(
+          `${apiBase}/milling-tanks/${encodeURIComponent(found.order)}`
+        );
+        setTankOptions(tanksRes.data);
+      } catch {
+        /* Order belum py tanki Milling sama sekali -- dropdown kosong, form tetap bisa dipakai spt biasa */
+      }
+    }
+  }
+
+  /** Pilih tanki tertentu dari dropdown "Pilih Tanki" (2026-08-25) -- timpa
+   * Code Tanki/IU Plant dgn nilai tanki itu, supaya label yg dicetak sesuai
+   * tanki yg dipilih (Tanki 1/2/3/dst), bukan cuma tanki terakhir. */
+  function selectTank(tankId: string) {
+    setSelectedTankId(tankId);
+    const tank = tankOptions.find((t) => String(t.id) === tankId);
+    if (!tank) return;
+    setCodeTanki(tank.codeTanki ?? "");
+    setIuPlant(tank.iuPlant ?? "");
   }
 
   // Mode pop-up "Info Proses Material" (embedded+initialOrder) -- lihat
@@ -530,6 +574,19 @@ export default function ProductionLabelEntryPage({
               <div className="field">
                 <label>Volume</label>
                 <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
+              </div>
+            )}
+            {!hidden.has("codeTanki") && tankOptions.length > 0 && (
+              <div className="field">
+                <label>Pilih Tanki</label>
+                <select value={selectedTankId} onChange={(e) => selectTank(e.target.value)}>
+                  <option value="">-- Manual / Saran Otomatis --</option>
+                  {tankOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label} ({t.codeTanki || "-"})
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
             {!hidden.has("codeTanki") && (

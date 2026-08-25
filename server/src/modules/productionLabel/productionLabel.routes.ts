@@ -42,6 +42,36 @@ productionLabelRouter.get(
   })
 );
 
+/// Daftar SEMUA tanki (baris MillingLog) milik 1 Order (2026-08-25, instruksi
+/// eksplisit user) -- dipakai dropdown "Pilih Tanki" di form Label Entry SFG,
+/// supaya operator bisa cetak label utk tanki 1/2/3/dst (bukan cuma tanki
+/// TERAKHIR yg diinput spt sebelumnya lewat getLatestCrossModule). Query
+/// LANGSUNG ke prisma.millingLog (BUKAN via GET /milling/by-order/:order)
+/// supaya TIDAK ikut kena gerbang requireMenuView("milling") -- user yg py
+/// akses Label Entry SFG tapi TIDAK py akses menu Milling tetap harus bisa
+/// pilih tanki di sini, sama pola dgn getLatestCrossModule yg jg baca lintas
+/// modul tanpa terikat akses menu asalnya. Urutan ASC (bukan DESC) supaya
+/// nomor "Tanki N" konsisten dgn penomoran di panel "Tanki Turunan Order Ini"
+/// (MillingPage.tsx, lihat GET /milling/by-order/:order).
+productionLabelRouter.get(
+  "/milling-tanks/:order",
+  asyncRoute(async (req, res) => {
+    const order = String(req.params.order).trim();
+    const rows = await prisma.millingLog.findMany({
+      where: { order },
+      select: { id: true, codeTanki1: true, codeTanki2: true, iuPlant: true },
+      orderBy: { timestamp: "asc" },
+    });
+    const data = rows.map((r, i) => ({
+      id: r.id,
+      label: `Tanki ${i + 1}`,
+      codeTanki: Array.from(new Set([r.codeTanki1, r.codeTanki2].filter(Boolean))).join(" / ") || null,
+      iuPlant: r.iuPlant,
+    }));
+    res.json({ success: true, data });
+  })
+);
+
 /// Dipakai panel "Info Proses Material" (baris "Production Label") utk tahu
 /// apakah Order ini SUDAH PERNAH dicetak labelnya, supaya kolom "Status
 /// Order Ini" bisa tampil "Selesai" (2026-08-12, instruksi eksplisit user)

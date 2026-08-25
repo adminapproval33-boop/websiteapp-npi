@@ -596,9 +596,7 @@ export default function ProduktivitasDashboardPage() {
           </p>
         )}
 
-        <h3 style={{ marginTop: 8, marginBottom: 12 }}>Grafik per Proses</h3>
-
-        <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
+        <div className="panel" style={{ padding: 16, marginBottom: 16, marginTop: 8 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
             {selectedStageSeries.label} -- Jumlah Formula (Order) Selesai
           </div>
@@ -619,7 +617,7 @@ export default function ProduktivitasDashboardPage() {
 
         <div className="panel" style={{ padding: 16, marginBottom: 24 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {selectedStageSeries.label} -- Rata-rata Output Produksi (KG/Ltr)
+            {selectedStageSeries.label} -- Jumlah KG/Ltr Selesai
           </div>
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Garis putus-putus = rata-rata Qty (KG/Ltr) output produksi per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}
@@ -638,7 +636,7 @@ export default function ProduktivitasDashboardPage() {
         </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah Formula (Order) Selesai</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah Formula (Order) Selesai All Proses</div>
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Jumlah Order/Batch yang Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
           </p>
@@ -646,7 +644,7 @@ export default function ProduktivitasDashboardPage() {
         </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 8 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Total Qty (KG/Ltr) Diproses</div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah KG/Ltr Selesai All Proses</div>
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Total Qty (KG/Ltr) Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
           </p>

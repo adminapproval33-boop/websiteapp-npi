@@ -1,7 +1,10 @@
-# Idempotent local-access startup for websiteapp-npi.
-# Starts backend + frontend + keep-awake if not already running, and prints the LAN URL
-# for coworkers on the same office network. Safe to run repeatedly (e.g. from $PROFILE
-# on every new PowerShell window) - it skips anything already up.
+# Idempotent local DEV startup for websiteapp-npi (PRIBADI - bukan untuk rekan kerja).
+# Starts backend (:4000) + frontend dev/HMR (:8080) + keep-awake if not already running.
+# Rekan kerja TIDAK pakai port ini lagi (2026-08-25) - mereka akses server "live" di
+# :5173 (lihat scripts\deploy-live.ps1 / websiteapp-npi-live), yang isinya baru berubah
+# saat di-deploy, bukan langsung ikut tiap kali Anda save di sini.
+# Safe to run repeatedly (e.g. from $PROFILE on every new PowerShell window) - it skips
+# anything already up.
 
 $ErrorActionPreference = 'SilentlyContinue'
 $repoRoot = 'C:\Users\abdad\websiteapp-npi'
@@ -31,7 +34,7 @@ function Test-MouseJiggleRunning {
 }
 
 $backendUp = Test-PortListening 4000
-$frontendUp = Test-PortListening 5173
+$frontendUp = Test-PortListening 8080
 $keepAwakeUp = Test-KeepAwakeRunning
 $mouseJiggleUp = Test-MouseJiggleRunning
 
@@ -65,7 +68,7 @@ if (-not $backendUp -or -not $frontendUp) {
         $elapsed += 2
         try {
             $r1 = Invoke-WebRequest -Uri 'http://localhost:4000/api/health' -UseBasicParsing -TimeoutSec 2
-            $r2 = Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 2
+            $r2 = Invoke-WebRequest -Uri 'http://localhost:8080' -UseBasicParsing -TimeoutSec 2
             if ($r1.StatusCode -eq 200 -and $r2.StatusCode -eq 200) { $ready = $true }
         } catch {}
     }
@@ -77,38 +80,13 @@ $lanIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 
 Write-Host ""
 if ($lanIp) {
-    Write-Host "[NPI] Akses untuk rekan kerja (WiFi/LAN kantor yang sama): http://${lanIp}:5173" -ForegroundColor Green
+    Write-Host "[NPI] Dev PRIBADI (jangan dibagikan ke rekan kerja): http://${lanIp}:8080" -ForegroundColor Cyan
 } else {
     Write-Host "[NPI] Tidak menemukan LAN IP aktif - cek koneksi jaringan." -ForegroundColor Red
 }
 Write-Host "[NPI] Backend + Frontend + Keep-awake siap. (Ngrok tidak dinyalakan - mode lokal saja.)" -ForegroundColor Green
+Write-Host "[NPI] Rekan kerja tetap pakai server live di :5173 - jalankan scripts\deploy-live.ps1 untuk merilis perubahan ke sana." -ForegroundColor DarkGray
 Write-Host ""
-
-if ($lanIp) {
-    $waMessage = @"
-Halo tim Admin,
-
-Website NPI sekarang sudah bisa diakses di jaringan kantor (WiFi/LAN) untuk input administrasi produksi.
-
-Alamat akses: http://${lanIp}:5173
-
-Catatan penting:
-- Buka link di atas dari browser (Chrome/Edge) selama terhubung ke WiFi/LAN kantor yang sama dengan komputer server.
-- Link ini tidak bisa diakses dari luar kantor (rumah/data seluler) - hanya untuk penggunaan internal di area kantor.
-- Login pakai NIK dan password masing-masing seperti biasa.
-- Kalau link tidak bisa dibuka, pastikan WiFi sudah tersambung, lalu coba refresh. Kalau masih bermasalah, hubungi [nama/kontak PIC].
-
-Silakan mulai input administrasi produksi melalui link tersebut.
-
-Terima kasih.
-"@
-    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
-    Write-Host "[NPI] Teks siap kirim ke WhatsApp tim admin (copy semua di bawah ini):" -ForegroundColor Yellow
-    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
-    Write-Host $waMessage
-    Write-Host "----------------------------------------------------------------" -ForegroundColor DarkGray
-    Write-Host ""
-}
 
 } finally {
     $mutex.ReleaseMutex()

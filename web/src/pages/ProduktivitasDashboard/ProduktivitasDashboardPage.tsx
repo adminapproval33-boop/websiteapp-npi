@@ -108,6 +108,8 @@ interface ProduktivitasCountRow {
  * per-proses) -- GET /dashboard/produktivitas-trend-detail. */
 interface TrendDetailRow {
   iuPlant: string;
+  /** "Tanki Atas"/"Tanki Bawah"/"Tidak Diketahui" (2026-08-25, instruksi eksplisit user). */
+  tipeTanki: string;
   count: number;
   qty: number;
 }
@@ -623,14 +625,16 @@ export default function ProduktivitasDashboardPage() {
                 <thead>
                   <tr>
                     <th>IU Plant</th>
+                    <th>Tipe Tanki</th>
                     <th>Jumlah Order</th>
                     <th>Qty (KG/Ltr)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detailRows.map((r) => (
-                    <tr key={r.iuPlant}>
+                    <tr key={`${r.iuPlant}-${r.tipeTanki}`}>
                       <td>{r.iuPlant}</td>
+                      <td>{r.tipeTanki}</td>
                       <td>{r.count}</td>
                       <td>{numberFmt.format(r.qty)}</td>
                     </tr>
@@ -638,7 +642,7 @@ export default function ProduktivitasDashboardPage() {
                 </tbody>
                 <tfoot>
                   <tr style={{ fontWeight: 700 }}>
-                    <td>Total</td>
+                    <td colSpan={2}>Total</td>
                     <td>{detailTotals.count}</td>
                     <td>{numberFmt.format(detailTotals.qty)}</td>
                   </tr>

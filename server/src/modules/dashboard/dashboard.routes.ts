@@ -2032,60 +2032,90 @@ const TREND_STAGES = new Set<TrendStage>(["premix", "milling", "aftermix", "colo
 
 interface TrendDetailRow {
   iuPlant: string;
+  /** "Tanki Atas"/"Tanki Bawah"/"Tidak Diketahui" (2026-08-25, instruksi
+   * eksplisit user) -- dari Master Data > Tanki (MasterTank.taTb), lihat
+   * komentar di bawah utk gimana Code Tanki tiap tahap dipetakan ke sini. */
+  tipeTanki: string;
   count: number;
   qty: number;
 }
 
-/** Breakdown per IU Plant utk 1 tahap + 1 bucket grafik tren saja (2026-08-25,
- * instruksi eksplisit user: klik titik grafik per-proses -> pop-up lihat IU
- * Plant) -- sumber data & rumus Qty SAMA PERSIS dgn buildProduktivitasData
- * (Premix/Aftermix/Colour Matching = Order Qty, Milling = Qty Act, Packing =
- * Qty/Pcs x Volume), cuma discope ke rentang tanggal bucket yg diklik (bukan
- * seluruh filter periode dashboard) DAN cuma 1 tahap (bukan gabungan 5). */
+const TREND_DETAIL_TA_TB_LABEL: Record<string, string> = { TA: "Tanki Atas", TB: "Tanki Bawah" };
+
+/** Breakdown per (IU Plant, Tanki Atas/Tanki Bawah) utk 1 tahap + 1 bucket
+ * grafik tren saja (2026-08-25, instruksi eksplisit user: klik titik grafik
+ * per-proses -> pop-up lihat IU Plant + Tanki Atas/Bawah) -- sumber data &
+ * rumus Qty SAMA PERSIS dgn buildProduktivitasData (Premix/Aftermix/Colour
+ * Matching = Order Qty, Milling = Qty Act, Packing = Qty/Pcs x Volume), cuma
+ * discope ke rentang tanggal bucket yg diklik (bukan seluruh filter periode
+ * dashboard) DAN cuma 1 tahap (bukan gabungan 5).
+ *
+ * Tipe Tanki (TA/TB) dicari dari Code Tanki YANG DIPAKAI baris log itu,
+ * di-join ke Master Data > Tanki (MasterTank.code -> taTb) -- BEDA dari
+ * "Okupansi Tanki per Plant" di Ringkasan yg berbasis INVENTORI tanki
+ * (status kosong/terisi SEKARANG), ini berbasis PEMAKAIAN NYATA di proses.
+ * Milling py 2 kolom tanki (codeTanki1 "Couple"/codeTanki2 "Moving") --
+ * SENGAJA cuma codeTanki1 yg dipakai (tanki utama/Couple) supaya 1 baris
+ * Milling tidak dihitung dobel di 2 Tipe Tanki berbeda. Packing TIDAK py
+ * kolom Code Tanki sama sekali (packing kemasan jadi, bukan tanki bulk) --
+ * selalu jatuh ke "Tidak Diketahui". */
 async function buildProduktivitasTrendDetail(stage: TrendStage, range: { gte: Date; lte: Date }): Promise<TrendDetailRow[]> {
   const finishWhere = { finish: range };
   const plantKey = (v: string | null | undefined) => (v && v.trim() ? v.trim().toUpperCase() : UNKNOWN_PLANT_LABEL);
 
-  let rows: { iuPlant: string | null; qty: number }[];
+  const tankRows = await prisma.masterTank.findMany({ select: { code: true, taTb: true } });
+  const taTbByCode = new Map(tankRows.map((t) => [t.code.trim().toUpperCase(), t.taTb]));
+  const tipeTankiFor = (codeTanki: string | null | undefined): string => {
+    const taTb = codeTanki ? taTbByCode.get(codeTanki.trim().toUpperCase()) : null;
+    return (taTb && TREND_DETAIL_TA_TB_LABEL[taTb.trim().toUpperCase()]) || "Tidak Diketahui";
+  };
+
+  let rows: { iuPlant: string | null; codeTanki: string | null; qty: number }[];
   if (stage === "premix") {
     rows = (
-      await prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } })
-    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.orderQty) }));
+      await prisma.premixAftermixLog.findMany({
+        where: { section: "PREMIX", ...finishWhere },
+        select: { iuPlant: true, codeTanki: true, orderQty: true },
+      })
+    ).map((r) => ({ iuPlant: r.iuPlant, codeTanki: r.codeTanki, qty: parseQtyNumber(r.orderQty) }));
   } else if (stage === "aftermix") {
     rows = (
-      await prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } })
-    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.orderQty) }));
+      await prisma.premixAftermixLog.findMany({
+        where: { section: "AFTERMIX", ...finishWhere },
+        select: { iuPlant: true, codeTanki: true, orderQty: true },
+      })
+    ).map((r) => ({ iuPlant: r.iuPlant, codeTanki: r.codeTanki, qty: parseQtyNumber(r.orderQty) }));
   } else if (stage === "milling") {
-    rows = (await prisma.millingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyAct: true } })).map((r) => ({
-      iuPlant: r.iuPlant,
-      qty: parseQtyNumber(r.qtyAct),
-    }));
+    rows = (await prisma.millingLog.findMany({ where: finishWhere, select: { iuPlant: true, codeTanki1: true, qtyAct: true } })).map(
+      (r) => ({ iuPlant: r.iuPlant, codeTanki: r.codeTanki1, qty: parseQtyNumber(r.qtyAct) })
+    );
   } else if (stage === "colourMatching") {
-    rows = (await prisma.colourMatchingLog.findMany({ where: finishWhere, select: { iuPlant: true, orderQty: true } })).map((r) => ({
-      iuPlant: r.iuPlant,
-      qty: parseQtyNumber(r.orderQty),
-    }));
+    rows = (
+      await prisma.colourMatchingLog.findMany({ where: finishWhere, select: { iuPlant: true, codeTanki: true, orderQty: true } })
+    ).map((r) => ({ iuPlant: r.iuPlant, codeTanki: r.codeTanki, qty: parseQtyNumber(r.orderQty) }));
   } else {
     rows = (
       await prisma.packingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyPcs: true, totalQty: true } })
-    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.qtyPcs) * parseQtyNumber(r.totalQty) }));
+    ).map((r) => ({ iuPlant: r.iuPlant, codeTanki: null, qty: parseQtyNumber(r.qtyPcs) * parseQtyNumber(r.totalQty) }));
   }
 
-  const byPlant = new Map<string, TrendDetailRow>();
+  const byPlantTank = new Map<string, TrendDetailRow>();
   for (const r of rows) {
-    const key = plantKey(r.iuPlant);
-    let row = byPlant.get(key);
+    const iuPlant = plantKey(r.iuPlant);
+    const tipeTanki = tipeTankiFor(r.codeTanki);
+    const key = `${iuPlant}|${tipeTanki}`;
+    let row = byPlantTank.get(key);
     if (!row) {
-      row = { iuPlant: key, count: 0, qty: 0 };
-      byPlant.set(key, row);
+      row = { iuPlant, tipeTanki, count: 0, qty: 0 };
+      byPlantTank.set(key, row);
     }
     row.count += 1;
     row.qty += r.qty;
   }
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  return Array.from(byPlant.values())
+  return Array.from(byPlantTank.values())
     .map((r) => ({ ...r, qty: round2(r.qty) }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => a.iuPlant.localeCompare(b.iuPlant) || a.tipeTanki.localeCompare(b.tipeTanki));
 }
 
 dashboardRouter.get(

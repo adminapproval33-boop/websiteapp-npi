@@ -207,6 +207,12 @@ export default function ProduktivitasDashboardPage() {
   // tiap-tiap proses khusus", dgn garis rata-rata output produksinya).
   const [selectedStage, setSelectedStage] = useState<string>(STAGE_SERIES[0].key);
   const selectedStageSeries = STAGE_SERIES.find((s) => s.key === selectedStage) ?? STAGE_SERIES[0];
+  // Dropdown "☰ Grafik per Proses" (2026-08-25, instruksi eksplisit user) --
+  // sebelumnya 5 tombol tahap selalu tampil di baris sendiri di dalam tab
+  // Tren; sekarang jadi 1 tombol + panel dropdown, pola SAMA PERSIS dgn
+  // "☰ Kolom" di DataTable.tsx, dinaikkan ke baris filter atas (sejajar
+  // Harian/Mingguan/Bulanan/Dari-Sampai Tanggal) supaya lebih ringkas.
+  const [showStagePanel, setShowStagePanel] = useState(false);
 
   // Pop-up "lihat IU Plant" (2026-08-25, instruksi eksplisit user) -- klik
   // titik pada grafik per-proses (Jumlah Formula/Output Produksi) -> tampilkan
@@ -367,6 +373,45 @@ export default function ProduktivitasDashboardPage() {
               </button>
             ))}
           </div>
+          {dashboardTab === "tren" && (
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className={`btn ${showStagePanel ? "" : "btn-outline"}`}
+                onClick={() => setShowStagePanel((s) => !s)}
+              >
+                ☰ Grafik per Proses: {selectedStageSeries.label}
+              </button>
+              {showStagePanel && (
+                <div
+                  className="panel"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    left: 0,
+                    zIndex: 20,
+                    minWidth: 200,
+                    padding: 10,
+                  }}
+                >
+                  {STAGE_SERIES.map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      className={`btn ${selectedStage === s.key ? "" : "btn-outline"}`}
+                      style={{ display: "block", width: "100%", marginBottom: 4, textAlign: "left" }}
+                      onClick={() => {
+                        setSelectedStage(s.key);
+                        setShowStagePanel(false);
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="field" style={{ maxWidth: 180 }}>
             <label>Dari Tanggal</label>
             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
@@ -539,21 +584,10 @@ export default function ProduktivitasDashboardPage() {
         {granularity === "day" && <div style={{ marginBottom: 16 }} />}
 
         <h3 style={{ marginTop: 8, marginBottom: 4 }}>Grafik per Proses</h3>
-        <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Pilih 1 tahap utk lihat tren khusus tahap itu, lengkap dengan garis rata-rata output produksinya.
+        <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.78rem" }}>
+          Tahap terpilih: <strong>{selectedStageSeries.label}</strong> (ganti lewat tombol "☰ Grafik per Proses" di
+          atas) -- lengkap dengan garis rata-rata output produksinya.
         </p>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          {STAGE_SERIES.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={`btn ${selectedStage === s.key ? "" : "btn-outline"}`}
-              onClick={() => setSelectedStage(s.key)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>

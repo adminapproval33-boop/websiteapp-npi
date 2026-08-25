@@ -391,33 +391,20 @@ export default function ProduktivitasDashboardPage() {
                 className={`btn ${showStagePanel ? "" : "btn-outline"}`}
                 onClick={() => setShowStagePanel((s) => !s)}
               >
-                ☰ Grafik per Proses: {selectedStageSeries.label}
+                ☰ Grafik per Proses
               </button>
               {showStagePanel && (
-                <div
-                  className="panel"
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    zIndex: 20,
-                    minWidth: 200,
-                    padding: 10,
-                  }}
-                >
+                <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
                   {STAGE_SERIES.map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      className={`btn ${selectedStage === s.key ? "" : "btn-outline"}`}
-                      style={{ display: "block", width: "100%", marginBottom: 4, textAlign: "left" }}
-                      onClick={() => {
-                        setSelectedStage(s.key);
-                        setShowStagePanel(false);
-                      }}
-                    >
+                    <label key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                      <input
+                        type="radio"
+                        name="produktivitas-trend-stage"
+                        checked={selectedStage === s.key}
+                        onChange={() => setSelectedStage(s.key)}
+                      />
                       {s.label}
-                    </button>
+                    </label>
                   ))}
                 </div>
               )}

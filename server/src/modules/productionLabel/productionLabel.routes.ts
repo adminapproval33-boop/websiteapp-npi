@@ -59,7 +59,7 @@ productionLabelRouter.get(
     const order = String(req.params.order).trim();
     const rows = await prisma.millingLog.findMany({
       where: { order },
-      select: { id: true, codeTanki1: true, codeTanki2: true, iuPlant: true },
+      select: { id: true, codeTanki1: true, codeTanki2: true, iuPlant: true, remark: true },
       orderBy: { timestamp: "asc" },
     });
     const data = rows.map((r, i) => ({
@@ -67,6 +67,7 @@ productionLabelRouter.get(
       label: `Tanki ${i + 1}`,
       codeTanki: Array.from(new Set([r.codeTanki1, r.codeTanki2].filter(Boolean))).join(" / ") || null,
       iuPlant: r.iuPlant,
+      remark: r.remark,
     }));
     res.json({ success: true, data });
   })

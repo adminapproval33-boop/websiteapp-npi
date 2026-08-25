@@ -40,6 +40,7 @@ interface MillingTankOption {
   label: string;
   codeTanki: string | null;
   iuPlant: string | null;
+  remark: string | null;
 }
 
 /** Kolom manual yg bisa disembunyikan per varian lewat prop `hiddenFields` -- lihat komentar propnya. */
@@ -359,14 +360,17 @@ export default function ProductionLabelEntryPage({
   }
 
   /** Pilih tanki tertentu dari dropdown "Pilih Tanki" (2026-08-25) -- timpa
-   * Code Tanki/IU Plant dgn nilai tanki itu, supaya label yg dicetak sesuai
-   * tanki yg dipilih (Tanki 1/2/3/dst), bukan cuma tanki terakhir. */
+   * Code Tanki/IU Plant/Remark (kolom "Other" di label cetak) dgn nilai
+   * tanki itu, supaya label yg dicetak sesuai tanki yg dipilih (Tanki
+   * 1/2/3/dst), bukan cuma tanki terakhir. Remark IKUT (bukan cuma Code
+   * Tanki/IU Plant) krn tiap baris MillingLog/tanki py Remark sendiri2. */
   function selectTank(tankId: string) {
     setSelectedTankId(tankId);
     const tank = tankOptions.find((t) => String(t.id) === tankId);
     if (!tank) return;
     setCodeTanki(tank.codeTanki ?? "");
     setIuPlant(tank.iuPlant ?? "");
+    setRemark(tank.remark ?? "");
   }
 
   // Mode pop-up "Info Proses Material" (embedded+initialOrder) -- lihat

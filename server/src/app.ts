@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import fs from "fs";
 import { env } from "./lib/env";
 import { authRouter } from "./modules/auth/auth.routes";
 import { usersRouter } from "./modules/users/users.routes";
@@ -55,6 +57,19 @@ export function createApp() {
   app.use("/api/maintenance", maintenanceRouter);
   app.use("/api/posts", postsRouter);
   app.use("/api/chat", chatRouter);
+
+  // Serve hasil build frontend (web/dist) kalau ada -- dipakai worktree "live"
+  // yang jalankan production build (server + web) dari 1 proses/port, jadi
+  // tidak perlu vite dev server terpisah. Di dev biasa (tsx watch, frontend
+  // lewat vite dev server sendiri di :5173) folder ini tidak ada, jadi blok
+  // ini otomatis tidak aktif.
+  const webDist = path.resolve(__dirname, "../../web/dist");
+  if (fs.existsSync(webDist)) {
+    app.use(express.static(webDist));
+    app.get(/^\/(?!api\/).*/, (_req, res) => {
+      res.sendFile(path.join(webDist, "index.html"));
+    });
+  }
 
   app.use(errorHandler);
 

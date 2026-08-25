@@ -583,11 +583,7 @@ export default function ProduktivitasDashboardPage() {
         )}
         {granularity === "day" && <div style={{ marginBottom: 16 }} />}
 
-        <h3 style={{ marginTop: 8, marginBottom: 4 }}>Grafik per Proses</h3>
-        <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.78rem" }}>
-          Tahap terpilih: <strong>{selectedStageSeries.label}</strong> (ganti lewat tombol "☰ Grafik per Proses" di
-          atas) -- lengkap dengan garis rata-rata output produksinya.
-        </p>
+        <h3 style={{ marginTop: 8, marginBottom: 12 }}>Grafik per Proses</h3>
 
         <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>

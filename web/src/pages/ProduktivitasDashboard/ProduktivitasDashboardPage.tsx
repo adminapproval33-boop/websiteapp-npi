@@ -15,6 +15,13 @@ const GRANULARITY_OPTIONS: { value: Granularity; label: string }[] = [
   { value: "month", label: "Bulanan" },
 ];
 
+/** Sama persis dgn DAY_SCOPE_OPTIONS di QualityCheckReviewPage.tsx (2026-08-25,
+ * instruksi eksplisit user: tampilan "☰ Cakupan Hari" disamakan). */
+const DAY_SCOPE_OPTIONS: { value: "workdays" | "all"; label: string }[] = [
+  { value: "workdays", label: "Hari Kerja Saja" },
+  { value: "all", label: "Termasuk Sabtu/Minggu" },
+];
+
 /** Urutan & warna tetap per tahap (2026-08-21) -- 5 slot pertama palet
  * kategori terverifikasi (lihat skill dataviz), urutan TIDAK BOLEH diacak
  * krn itu bagian dari mekanisme aman-buta warnanya. */
@@ -424,42 +431,21 @@ export default function ProduktivitasDashboardPage() {
                 disabled={granularity !== "day"}
                 onClick={() => setShowDayScopePanel((s) => !s)}
               >
-                ☰ Cakupan Hari: {dayScope === "workdays" ? "Hari Kerja Saja" : "Termasuk Sabtu/Minggu"}
+                ☰ Cakupan Hari
               </button>
               {showDayScopePanel && (
-                <div
-                  className="panel"
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    zIndex: 20,
-                    minWidth: 200,
-                    padding: 10,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className={`btn ${dayScope === "workdays" ? "" : "btn-outline"}`}
-                    style={{ display: "block", width: "100%", marginBottom: 4, textAlign: "left" }}
-                    onClick={() => {
-                      setDayScope("workdays");
-                      setShowDayScopePanel(false);
-                    }}
-                  >
-                    Hari Kerja Saja
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${dayScope === "all" ? "" : "btn-outline"}`}
-                    style={{ display: "block", width: "100%", textAlign: "left" }}
-                    onClick={() => {
-                      setDayScope("all");
-                      setShowDayScopePanel(false);
-                    }}
-                  >
-                    Termasuk Sabtu/Minggu
-                  </button>
+                <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
+                  {DAY_SCOPE_OPTIONS.map((opt) => (
+                    <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                      <input
+                        type="radio"
+                        name="produktivitas-trend-day-scope"
+                        checked={dayScope === opt.value}
+                        onChange={() => setDayScope(opt.value)}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
                 </div>
               )}
             </div>

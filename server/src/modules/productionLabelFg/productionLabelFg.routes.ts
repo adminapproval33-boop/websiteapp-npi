@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { getLatestCrossModule, isValidTankCodeOrJoined } from "../../lib/productionLabelHelpers";
 import { notFutureDDMMYYYY } from "../../lib/dateValidation";
 
@@ -93,9 +93,39 @@ productionLabelFgRouter.post(
   })
 );
 
+/// Edit baris History (2026-08-25, instruksi eksplisit user) -- akses SAMA
+/// dgn Save (requireMenuInput), BUKAN lagi requireFullAccess spt Hapus di
+/// bawah dulunya, supaya user level INPUT bisa perbaiki salah input tanpa
+/// perlu hapus + cetak ulang.
+productionLabelFgRouter.put(
+  "/:id",
+  requireWrite,
+  requireMenuInput("productionLabelFg"),
+  asyncRoute(async (req, res) => {
+    const id = req.params.id;
+    const existing = await prisma.productionLabelFg.findUnique({ where: { id } });
+    if (!existing) throw new HttpError(404, "Data tidak ditemukan.");
+    const parsed = saveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    if (parsed.data.codeTanki && !(await isValidTankCodeOrJoined(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
+    const updated = await prisma.productionLabelFg.update({ where: { id }, data: parsed.data });
+    res.json({ success: true, message: "Data berhasil diperbarui.", data: updated });
+  })
+);
+
+/// Hapus (2026-08-25, instruksi eksplisit user) -- dibuka dari FULL_ACCESS-only
+/// jadi requireMenuInput (level INPUT ke atas), sama gerbangnya dgn Save/Edit
+/// di atas, bukan lagi requireFullAccess.
 productionLabelFgRouter.delete(
   "/:id",
-  requireFullAccess,
+  requireWrite,
+  requireMenuInput("productionLabelFg"),
   asyncRoute(async (req, res) => {
     const id = req.params.id;
     const existing = await prisma.productionLabelFg.findUnique({ where: { id } });

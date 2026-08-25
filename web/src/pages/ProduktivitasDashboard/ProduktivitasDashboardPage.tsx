@@ -213,6 +213,10 @@ export default function ProduktivitasDashboardPage() {
   // "☰ Kolom" di DataTable.tsx, dinaikkan ke baris filter atas (sejajar
   // Harian/Mingguan/Bulanan/Dari-Sampai Tanggal) supaya lebih ringkas.
   const [showStagePanel, setShowStagePanel] = useState(false);
+  // Dropdown "☰ Cakupan Hari" (2026-08-25, instruksi eksplisit user) -- pola
+  // & posisi SAMA dgn "☰ Grafik per Proses" di atas, gantikan 2 tombol
+  // Hari Kerja Saja/Termasuk Sabtu-Minggu yg sebelumnya di baris sendiri.
+  const [showDayScopePanel, setShowDayScopePanel] = useState(false);
 
   // Pop-up "lihat IU Plant" (2026-08-25, instruksi eksplisit user) -- klik
   // titik pada grafik per-proses (Jumlah Formula/Output Produksi) -> tampilkan
@@ -412,12 +416,58 @@ export default function ProduktivitasDashboardPage() {
               )}
             </div>
           )}
+          {dashboardTab === "tren" && (
+            <div style={{ position: "relative" }}>
+              <button
+                type="button"
+                className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
+                disabled={granularity !== "day"}
+                onClick={() => setShowDayScopePanel((s) => !s)}
+              >
+                ☰ Cakupan Hari: {dayScope === "workdays" ? "Hari Kerja Saja" : "Termasuk Sabtu/Minggu"}
+              </button>
+              {showDayScopePanel && (
+                <div
+                  className="panel"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    left: 0,
+                    zIndex: 20,
+                    minWidth: 200,
+                    padding: 10,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className={`btn ${dayScope === "workdays" ? "" : "btn-outline"}`}
+                    style={{ display: "block", width: "100%", marginBottom: 4, textAlign: "left" }}
+                    onClick={() => {
+                      setDayScope("workdays");
+                      setShowDayScopePanel(false);
+                    }}
+                  >
+                    Hari Kerja Saja
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${dayScope === "all" ? "" : "btn-outline"}`}
+                    style={{ display: "block", width: "100%", textAlign: "left" }}
+                    onClick={() => {
+                      setDayScope("all");
+                      setShowDayScopePanel(false);
+                    }}
+                  >
+                    Termasuk Sabtu/Minggu
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="field" style={{ maxWidth: 180 }}>
-            <label>Dari Tanggal</label>
             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
           </div>
           <div className="field" style={{ maxWidth: 180 }}>
-            <label>Sampai Tanggal</label>
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
           </div>
           {usingCustomRange && (
@@ -556,32 +606,12 @@ export default function ProduktivitasDashboardPage() {
 
         {dashboardTab === "tren" && (
         <>
-        <div style={{ display: "flex", gap: 8, marginBottom: 4, flexWrap: "wrap", alignItems: "center" }}>
-          <button
-            type="button"
-            className={`btn ${dayScope === "workdays" ? "" : "btn-outline"}`}
-            disabled={granularity !== "day"}
-            onClick={() => setDayScope("workdays")}
-          >
-            Hari Kerja Saja
-          </button>
-          <button
-            type="button"
-            className={`btn ${dayScope === "all" ? "" : "btn-outline"}`}
-            disabled={granularity !== "day"}
-            onClick={() => setDayScope("all")}
-          >
-            Termasuk Sabtu/Minggu
-          </button>
-          <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Cakupan hari:</span>
-        </div>
         {granularity !== "day" && (
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.72rem" }}>
             Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
             hari kerja & Sabtu/Minggu jadi 1 angka.
           </p>
         )}
-        {granularity === "day" && <div style={{ marginBottom: 16 }} />}
 
         <h3 style={{ marginTop: 8, marginBottom: 12 }}>Grafik per Proses</h3>
 

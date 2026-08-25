@@ -377,18 +377,6 @@ export default function ProduktivitasDashboardPage() {
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`btn ${granularity === opt.value ? "" : "btn-outline"}`}
-                onClick={() => setGranularity(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
           {dashboardTab === "tren" && (
             <div style={{ position: "relative" }}>
               <button
@@ -447,6 +435,18 @@ export default function ProduktivitasDashboardPage() {
               {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
             </button>
           )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {GRANULARITY_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`btn ${granularity === opt.value ? "" : "btn-outline"}`}
+                onClick={() => setGranularity(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
           <div className="field" style={{ maxWidth: 180 }}>
             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
           </div>

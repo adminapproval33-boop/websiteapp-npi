@@ -513,6 +513,24 @@ export default function ProductionLabelEntryPage({
                 terpisah). Volume & Jumlah /Per BEDA -- state sendiri, tetap
                 bisa diedit manual & ikut tersimpan ke History (kolom DB
                 `volume`/`jumlahPer`, cuma ada di ProductionLabelFg). */}
+            {/* Pilih Tanki (2026-08-25, instruksi eksplisit user) -- urutan
+                kolom: Order, Pilih Tanki, Shelf Life (bulan), Lot No, Exp,
+                Code Tanki, IU Plant, Material Type, Drum Colour. Ditaruh
+                PALING ATAS field-grid (tepat setelah Order) supaya operator
+                pilih tanki dulu sebelum isi field lain. */}
+            {!hidden.has("codeTanki") && tankOptions.length > 0 && (
+              <div className="field">
+                <label>Pilih Tanki</label>
+                <select value={selectedTankId} onChange={(e) => selectTank(e.target.value)}>
+                  <option value="">-- Manual / Saran Otomatis --</option>
+                  {tankOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label} ({t.codeTanki || "-"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {extra.has("jumlahPer") && (
               <div className="field">
                 <label>Jumlah /Per</label>
@@ -578,19 +596,6 @@ export default function ProductionLabelEntryPage({
               <div className="field">
                 <label>Volume</label>
                 <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
-              </div>
-            )}
-            {!hidden.has("codeTanki") && tankOptions.length > 0 && (
-              <div className="field">
-                <label>Pilih Tanki</label>
-                <select value={selectedTankId} onChange={(e) => selectTank(e.target.value)}>
-                  <option value="">-- Manual / Saran Otomatis --</option>
-                  {tankOptions.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label} ({t.codeTanki || "-"})
-                    </option>
-                  ))}
-                </select>
               </div>
             )}
             {!hidden.has("codeTanki") && (

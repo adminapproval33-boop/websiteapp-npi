@@ -76,7 +76,8 @@ export default function LabelHistoryPage({
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [editError, setEditError] = useState<string | null>(null);
 
-  const menuKey: MenuKey = apiBase === "/production-label-fg" ? "productionLabelFg" : "productionLabel";
+  const isFg = apiBase === "/production-label-fg";
+  const menuKey: MenuKey = isFg ? "productionLabelFg" : "productionLabel";
   const canWrite = getMenuLevel(user, menuKey) === "INPUT";
 
   const historyQuery = useQuery({
@@ -111,10 +112,14 @@ export default function LabelHistoryPage({
     { key: "lotNo", label: "Lot No" },
     { key: "exp", label: "Exp", type: "date" },
     { key: "shelfLife", label: "Shelf Life" },
-    { key: "codeTanki", label: "Code Tanki" },
-    { key: "iuPlant", label: "IU Plant" },
-    { key: "pasteType", label: "Material Type" },
-    { key: "drumColour", label: "Drum Colour" },
+    ...(isFg
+      ? []
+      : [
+          { key: "codeTanki", label: "Code Tanki" },
+          { key: "iuPlant", label: "IU Plant" },
+          { key: "pasteType", label: "Material Type" },
+          { key: "drumColour", label: "Drum Colour" },
+        ]),
     { key: "remark", label: "Remark" },
   ];
 
@@ -193,10 +198,14 @@ export default function LabelHistoryPage({
               csvValue: (r) => (r.exp ? toExcelDateTimeString(r.exp) : ""),
             },
             { key: "shelfLife", label: "Shelf Life", render: (r) => r.shelfLife },
-            { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
-            { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
-            { key: "pasteType", label: "Material Type", render: (r) => r.pasteType },
-            { key: "drumColour", label: "Drum Colour", render: (r) => r.drumColour },
+            ...(isFg
+              ? []
+              : [
+                  { key: "codeTanki", label: "Code Tanki", render: (r: LabelHistoryRow) => r.codeTanki },
+                  { key: "iuPlant", label: "IU Plant", render: (r: LabelHistoryRow) => r.iuPlant },
+                  { key: "pasteType", label: "Material Type", render: (r: LabelHistoryRow) => r.pasteType },
+                  { key: "drumColour", label: "Drum Colour", render: (r: LabelHistoryRow) => r.drumColour },
+                ]),
             { key: "remark", label: "Remark", render: (r) => r.remark },
             { key: "printedBy", label: "Printed By", render: (r) => r.printedBy },
             {

@@ -52,6 +52,7 @@ export default function TrendLineChart({
   valueFormatter = (n) => n.toLocaleString("id-ID"),
   granularity,
   showAverage = false,
+  onPointClick,
 }: {
   points: TrendChartPoint[];
   series: TrendSeries[];
@@ -67,6 +68,11 @@ export default function TrendLineChart({
    * krn di grafik gabungan 5-series garis rata-rata x5 bakal penuh sesak --
    * cuma dipakai saat `series` isinya 1 tahap. */
   showAverage?: boolean;
+  /** Klik titik pada grafik -> pop-up breakdown (2026-08-25, instruksi
+   * eksplisit user: lihat IU Plant per tahap pada hari/minggu/bulan
+   * tertentu). Opsional -- kalau diisi, kursor jadi "pointer" (bukan
+   * "crosshair") sbg penanda titiknya bisa diklik. */
+  onPointClick?: (bucketKey: string) => void;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [showTable, setShowTable] = useState(false);
@@ -117,13 +123,24 @@ export default function TrendLineChart({
   // tabrakan -- tampilkan maks ~12 label.
   const xLabelStep = Math.max(1, Math.ceil(points.length / 12));
 
-  function handlePointerMove(e: React.PointerEvent<SVGRectElement>) {
-    if (!svgRef.current || points.length === 0) return;
+  function pointIndexFromEvent(e: React.PointerEvent<SVGRectElement> | React.MouseEvent<SVGRectElement>): number | null {
+    if (!svgRef.current || points.length === 0) return null;
     const rect = svgRef.current.getBoundingClientRect();
     const relX = ((e.clientX - rect.left) / rect.width) * CHART_W;
     const frac = points.length <= 1 ? 0 : (relX - PAD.left) / plotW;
     const idx = Math.round(frac * (points.length - 1));
-    setHoverIdx(Math.min(points.length - 1, Math.max(0, idx)));
+    return Math.min(points.length - 1, Math.max(0, idx));
+  }
+
+  function handlePointerMove(e: React.PointerEvent<SVGRectElement>) {
+    const idx = pointIndexFromEvent(e);
+    if (idx !== null) setHoverIdx(idx);
+  }
+
+  function handleClick(e: React.MouseEvent<SVGRectElement>) {
+    if (!onPointClick) return;
+    const idx = pointIndexFromEvent(e);
+    if (idx !== null) onPointClick(points[idx].bucketKey);
   }
 
   const hoverPoint = hoverIdx !== null ? points[hoverIdx] : null;
@@ -256,7 +273,8 @@ export default function TrendLineChart({
               fill="transparent"
               onPointerMove={handlePointerMove}
               onPointerLeave={() => setHoverIdx(null)}
-              style={{ cursor: "crosshair" }}
+              onClick={handleClick}
+              style={{ cursor: onPointClick ? "pointer" : "crosshair" }}
             />
           </svg>
 
@@ -287,6 +305,11 @@ export default function TrendLineChart({
                   <span style={{ fontWeight: 700, color: "#1e293b" }}>{valueFormatter(hoverPoint.values[s.key] ?? 0)}</span>
                 </div>
               ))}
+              {onPointClick && (
+                <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border)", color: "#94a3b8", fontSize: "0.7rem" }}>
+                  Klik untuk lihat IU Plant
+                </div>
+              )}
             </div>
           )}
         </div>

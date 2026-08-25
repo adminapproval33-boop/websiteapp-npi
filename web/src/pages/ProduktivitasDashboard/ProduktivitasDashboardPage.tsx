@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import Modal from "../../components/Modal";
 import TrendLineChart, { TrendChartPoint, TrendSeries } from "./TrendLineChart";
 
 type Period = "today" | "week" | "month" | "all" | "custom";
@@ -102,6 +103,15 @@ interface ProduktivitasCountRow {
   packing: number;
 }
 
+/** Breakdown per IU Plant utk 1 titik grafik tren yg diklik (2026-08-25,
+ * instruksi eksplisit user: pop-up "lihat IU Plant" saat klik titik grafik
+ * per-proses) -- GET /dashboard/produktivitas-trend-detail. */
+interface TrendDetailRow {
+  iuPlant: string;
+  count: number;
+  qty: number;
+}
+
 interface TankOccupancyRow {
   plant: string;
   tipeTanki: string;
@@ -196,6 +206,22 @@ export default function ProduktivitasDashboardPage() {
   const [selectedStage, setSelectedStage] = useState<string>(STAGE_SERIES[0].key);
   const selectedStageSeries = STAGE_SERIES.find((s) => s.key === selectedStage) ?? STAGE_SERIES[0];
 
+  // Pop-up "lihat IU Plant" (2026-08-25, instruksi eksplisit user) -- klik
+  // titik pada grafik per-proses (Jumlah Formula/Output Produksi) -> tampilkan
+  // breakdown per IU Plant KHUSUS tahap & bucket (hari/minggu/bulan) yg
+  // diklik itu saja, BUKAN seluruh rentang filter dashboard.
+  const [detailBucket, setDetailBucket] = useState<{ bucketKey: string; label: string } | null>(null);
+  const detailQuery = useQuery({
+    queryKey: ["dashboard-produktivitas-trend-detail", selectedStage, detailBucket?.bucketKey, granularity],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: TrendDetailRow[] }>(
+          `/dashboard/produktivitas-trend-detail?stage=${selectedStage}&bucketKey=${encodeURIComponent(detailBucket!.bucketKey)}&granularity=${granularity}`
+        )
+        .then((r) => r.data),
+    enabled: detailBucket !== null,
+  });
+
   function buildRangeParams(): URLSearchParams {
     const params = new URLSearchParams();
     if (usingCustomRange) {
@@ -264,6 +290,14 @@ export default function ProduktivitasDashboardPage() {
       })),
     [trendBuckets, granularity]
   );
+
+  function handleTrendPointClick(bucketKey: string) {
+    const point = trendPointsCount.find((p) => p.bucketKey === bucketKey);
+    setDetailBucket({ bucketKey, label: point?.label ?? bucketKey });
+  }
+
+  const detailRows = detailQuery.data ?? [];
+  const detailTotals = detailRows.reduce((acc, r) => ({ count: acc.count + r.count, qty: acc.qty + r.qty }), { count: 0, qty: 0 });
 
   const productivity = query.data?.productivity ?? [];
   const productivityOrderCount = query.data?.productivityOrderCount ?? [];
@@ -527,7 +561,14 @@ export default function ProduktivitasDashboardPage() {
             Garis putus-putus = rata-rata jumlah Order per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}
             {" "}pada rentang ini.
           </p>
-          <TrendLineChart points={trendPointsCount} series={[selectedStageSeries]} yAxisLabel="Jumlah Order" granularity={granularity} showAverage />
+          <TrendLineChart
+            points={trendPointsCount}
+            series={[selectedStageSeries]}
+            yAxisLabel="Jumlah Order"
+            granularity={granularity}
+            showAverage
+            onPointClick={handleTrendPointClick}
+          />
         </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 24 }}>
@@ -545,6 +586,7 @@ export default function ProduktivitasDashboardPage() {
             valueFormatter={(n) => numberFmt.format(n)}
             granularity={granularity}
             showAverage
+            onPointClick={handleTrendPointClick}
           />
         </div>
 
@@ -564,6 +606,46 @@ export default function ProduktivitasDashboardPage() {
           <TrendLineChart points={trendPointsQty} series={STAGE_SERIES} yAxisLabel="KG/Ltr" valueFormatter={(n) => numberFmt.format(n)} granularity={granularity} />
         </div>
         </>
+        )}
+
+        {detailBucket && (
+          <Modal
+            title={`${selectedStageSeries.label} -- ${detailBucket.label}`}
+            onClose={() => setDetailBucket(null)}
+            width={520}
+          >
+            {detailQuery.isLoading ? (
+              <p style={{ color: "var(--text-muted)" }}>Memuat...</p>
+            ) : detailRows.length === 0 ? (
+              <p style={{ color: "var(--text-muted)" }}>Belum ada proses {selectedStageSeries.label} yang Finish pada periode ini.</p>
+            ) : (
+              <table className="data-table" style={{ fontSize: "0.85rem" }}>
+                <thead>
+                  <tr>
+                    <th>IU Plant</th>
+                    <th>Jumlah Order</th>
+                    <th>Qty (KG/Ltr)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.map((r) => (
+                    <tr key={r.iuPlant}>
+                      <td>{r.iuPlant}</td>
+                      <td>{r.count}</td>
+                      <td>{numberFmt.format(r.qty)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ fontWeight: 700 }}>
+                    <td>Total</td>
+                    <td>{detailTotals.count}</td>
+                    <td>{numberFmt.format(detailTotals.qty)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+          </Modal>
         )}
       </div>
     </div>

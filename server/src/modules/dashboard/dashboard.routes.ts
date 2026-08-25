@@ -395,6 +395,19 @@ dashboardRouter.get(
     // nyari 1 Order spesifik, supaya tahu SELURUH tahap yg pernah dikerjakan
     // utk Material Number Order itu, bukan cuma yg match teks pencarian.
     // Filter `search` dipindah ke Array.filter di `result` paling akhir.
+    // SEBELUMNYA tiap query py `take: 500` -- BUG (2026-08-24, ditemukan lewat
+    // laporan user: Order 1020054507 sudah py baris Premix - DN lengkap tapi
+    // tombol "Production Label" tetap bilang "Premix belum diinput"). `take`
+    // ini membatasi 500 baris PALING BARU lintas SEMUA Order & section
+    // sekaligus (bukan per-Order), jadi begitu total baris premixAftermixLog
+    // lewat 500 (sudah kejadian: 600 baris per hari ini), baris tahap Premix
+    // milik Order yg SUDAH lama selesai (tapi Order lain masih aktif
+    // diproses terus) bisa "terlempar" keluar dari window 500 ini walau
+    // datanya sendiri lengkap -- computeStages/doneSets di bawah jadi salah
+    // menganggap tahap itu "Belum" utk Order ybs. Dihapus total krn volume
+    // data tiap tabel masih ratusan baris (bukan puluhan ribu), jadi query
+    // penuh masih murah -- downstream sudah dedupe ke 1 baris PALING TERAKHIR
+    // per Order sendiri (lihat komentar "rows" & firstSeenByOrder di bawah).
     const [premixAftermix, milling, colourMatching, bongkaran, packing, checkResults, approvals] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         select: {
@@ -413,7 +426,6 @@ dashboardRouter.get(
           codeTanki: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.millingLog.findMany({
         select: {
@@ -436,7 +448,6 @@ dashboardRouter.get(
           timestamp: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.colourMatchingLog.findMany({
         select: {
@@ -454,7 +465,6 @@ dashboardRouter.get(
           codeTanki: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.bongkaranLog.findMany({
         select: {
@@ -467,7 +477,6 @@ dashboardRouter.get(
           timestamp: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.packingLog.findMany({
         select: {
@@ -490,7 +499,6 @@ dashboardRouter.get(
           timestamp: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.checkResult.findMany({
         select: {
@@ -506,7 +514,6 @@ dashboardRouter.get(
           },
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
       prisma.approvalSchedule.findMany({
         select: {
@@ -523,7 +530,6 @@ dashboardRouter.get(
           timestamp: true,
         },
         orderBy: { timestamp: "desc" },
-        take: 500,
       }),
     ]);
 
@@ -1997,6 +2003,111 @@ dashboardRouter.get(
       : "day";
     const buckets = await buildProduktivitasTrendData(finishRange, granularity);
     res.json({ success: true, data: { period, from, to, granularity, buckets } });
+  })
+);
+
+/** Rentang instant [gte, lte] utk 1 bucket tren (2026-08-25, instruksi
+ * eksplisit user: pop-up breakdown IU Plant saat klik titik grafik
+ * per-proses) -- "day" = 1 hari itu saja; "week" = 7 hari dari `bucketKey`
+ * (Senin, sama definisi dgn trendBucketKey di atas); "month" = 1 bulan penuh
+ * dari `bucketKey` (tanggal 1). Semua dihitung dari kalender WIB via
+ * wibDayStartInstant, konsisten dgn bucketing di buildProduktivitasTrendData. */
+function trendBucketRange(bucketKey: string, granularity: TrendGranularity): { gte: Date; lte: Date } | null {
+  const start = wibDayStartInstant(bucketKey);
+  if (!start) return null;
+  if (granularity === "day") return { gte: start, lte: new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1) };
+  if (granularity === "week") return { gte: start, lte: new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1) };
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(bucketKey);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const nextMonthKey = month === 12 ? `${year + 1}-01-01` : `${year}-${pad2(month + 1)}-01`;
+  const nextStart = wibDayStartInstant(nextMonthKey);
+  if (!nextStart) return null;
+  return { gte: start, lte: new Date(nextStart.getTime() - 1) };
+}
+
+type TrendStage = "premix" | "milling" | "aftermix" | "colourMatching" | "packing";
+const TREND_STAGES = new Set<TrendStage>(["premix", "milling", "aftermix", "colourMatching", "packing"]);
+
+interface TrendDetailRow {
+  iuPlant: string;
+  count: number;
+  qty: number;
+}
+
+/** Breakdown per IU Plant utk 1 tahap + 1 bucket grafik tren saja (2026-08-25,
+ * instruksi eksplisit user: klik titik grafik per-proses -> pop-up lihat IU
+ * Plant) -- sumber data & rumus Qty SAMA PERSIS dgn buildProduktivitasData
+ * (Premix/Aftermix/Colour Matching = Order Qty, Milling = Qty Act, Packing =
+ * Qty/Pcs x Volume), cuma discope ke rentang tanggal bucket yg diklik (bukan
+ * seluruh filter periode dashboard) DAN cuma 1 tahap (bukan gabungan 5). */
+async function buildProduktivitasTrendDetail(stage: TrendStage, range: { gte: Date; lte: Date }): Promise<TrendDetailRow[]> {
+  const finishWhere = { finish: range };
+  const plantKey = (v: string | null | undefined) => (v && v.trim() ? v.trim().toUpperCase() : UNKNOWN_PLANT_LABEL);
+
+  let rows: { iuPlant: string | null; qty: number }[];
+  if (stage === "premix") {
+    rows = (
+      await prisma.premixAftermixLog.findMany({ where: { section: "PREMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } })
+    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.orderQty) }));
+  } else if (stage === "aftermix") {
+    rows = (
+      await prisma.premixAftermixLog.findMany({ where: { section: "AFTERMIX", ...finishWhere }, select: { iuPlant: true, orderQty: true } })
+    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.orderQty) }));
+  } else if (stage === "milling") {
+    rows = (await prisma.millingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyAct: true } })).map((r) => ({
+      iuPlant: r.iuPlant,
+      qty: parseQtyNumber(r.qtyAct),
+    }));
+  } else if (stage === "colourMatching") {
+    rows = (await prisma.colourMatchingLog.findMany({ where: finishWhere, select: { iuPlant: true, orderQty: true } })).map((r) => ({
+      iuPlant: r.iuPlant,
+      qty: parseQtyNumber(r.orderQty),
+    }));
+  } else {
+    rows = (
+      await prisma.packingLog.findMany({ where: finishWhere, select: { iuPlant: true, qtyPcs: true, totalQty: true } })
+    ).map((r) => ({ iuPlant: r.iuPlant, qty: parseQtyNumber(r.qtyPcs) * parseQtyNumber(r.totalQty) }));
+  }
+
+  const byPlant = new Map<string, TrendDetailRow>();
+  for (const r of rows) {
+    const key = plantKey(r.iuPlant);
+    let row = byPlant.get(key);
+    if (!row) {
+      row = { iuPlant: key, count: 0, qty: 0 };
+      byPlant.set(key, row);
+    }
+    row.count += 1;
+    row.qty += r.qty;
+  }
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  return Array.from(byPlant.values())
+    .map((r) => ({ ...r, qty: round2(r.qty) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+dashboardRouter.get(
+  "/produktivitas-trend-detail",
+  asyncRoute(async (req, res) => {
+    const stage = String(req.query.stage ?? "");
+    if (!TREND_STAGES.has(stage as TrendStage)) {
+      res.status(400).json({ success: false, message: "Parameter stage tidak valid." });
+      return;
+    }
+    const bucketKey = String(req.query.bucketKey ?? "");
+    const rawGranularity = String(req.query.granularity ?? "day");
+    const granularity: TrendGranularity = (["day", "week", "month"] as const).includes(rawGranularity as TrendGranularity)
+      ? (rawGranularity as TrendGranularity)
+      : "day";
+    const range = trendBucketRange(bucketKey, granularity);
+    if (!range) {
+      res.status(400).json({ success: false, message: "Parameter bucketKey tidak valid." });
+      return;
+    }
+    const data = await buildProduktivitasTrendDetail(stage as TrendStage, range);
+    res.json({ success: true, data });
   })
 );
 

@@ -71,7 +71,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Build frontend gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
 
     Log "Menyalakan server live yang baru (production build)..."
-    Start-Process powershell.exe -ArgumentList '-NoProfile', '-NoExit', '-Command', "`$env:NODE_ENV='production'; node dist/index.js" -WorkingDirectory "$liveRoot\server" -WindowStyle Minimized
+    # SENGAJA TANPA -NoExit (beda dari start-local.ps1) -- deploy berikutnya
+    # mem-Stop-Process node.exe-nya lewat lookup port, BUKAN window ini
+    # sendiri; tanpa -NoExit, begitu node.exe mati (dibunuh ATAU crash),
+    # powershell -Command ini otomatis selesai & jendelanya ikut tertutup
+    # sendiri -- mencegah jendela "zombie" menumpuk tiap kali deploy
+    # (ditemukan 2026-08-25: 6 jendela nyangkut dari beberapa kali deploy
+    # hari itu, sebelum -NoExit dihapus di sini).
+    Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', "`$env:NODE_ENV='production'; node dist/index.js" -WorkingDirectory "$liveRoot\server" -WindowStyle Minimized
 
     $elapsed = 0
     $ready = $false

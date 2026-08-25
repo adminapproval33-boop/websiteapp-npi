@@ -120,6 +120,25 @@ export async function isColourMatchingDone(order: string): Promise<boolean> {
   return isDn(await latestColourMatching(order));
 }
 
+/** Order Type SAP "RF01"/"RF02" (Rework, 2026-08-25 instruksi eksplisit
+ * user) -- Order rework bebas diinput ke tahap produksi mana saja
+ * (Premix/Milling/Aftermix/Colour Matching) TANPA terikat Material Flow
+ * Proses sama sekali, baik gerbang "Material ini pakai tahap ini?"
+ * (checkStageApplicableGate) maupun gerbang prasyarat tahap sebelumnya
+ * (checkMillingGate/checkAftermixGate/checkColourMatchingGate) -- rework
+ * tidak mengikuti alur produksi normal dari awal jadi urutan-wajib tidak
+ * relevan untuknya. Dipicu kasus nyata: Order 1070025036 (Order Type RF01)
+ * diblokir masuk Aftermix krn Material-nya belum terdaftar di MaterialFlow
+ * (fallback konservatif -> dianggap wajib Milling dulu), padahal seharusnya
+ * Order rework memang tidak pernah dicek sama sekali.
+ */
+const GATE_EXEMPT_ORDER_TYPES = new Set(["RF01", "RF02"]);
+
+async function isGateExemptOrder(order: string): Promise<boolean> {
+  const master = await prisma.masterOrder.findUnique({ where: { order }, select: { orderType: true } });
+  return Boolean(master?.orderType && GATE_EXEMPT_ORDER_TYPES.has(master.orderType));
+}
+
 type FlowStage = "premix" | "milling" | "aftermix" | "colourMatching";
 
 const STAGE_LABEL: Record<FlowStage, string> = {
@@ -184,8 +203,10 @@ export interface StageApplicableResult {
  */
 export async function checkStageApplicableGate(
   stage: FlowStage,
-  materialNumber: string | null | undefined
+  materialNumber: string | null | undefined,
+  order: string
 ): Promise<StageApplicableResult> {
+  if (await isGateExemptOrder(order)) return { ok: true };
   const required = await isStageRequiredForMaterial(stage, materialNumber);
   return required ? { ok: true } : { ok: false, stageLabel: STAGE_LABEL[stage] };
 }
@@ -217,6 +238,7 @@ async function gateAgainst(
   materialNumber: string | null | undefined,
   candidatesNearestFirst: FlowStage[]
 ): Promise<StageGateResult> {
+  if (await isGateExemptOrder(order)) return { ok: true };
   const predecessor = await findRequiredPredecessor(materialNumber, candidatesNearestFirst);
   if (!predecessor) return { ok: true };
   const done = await STAGE_DONE_CHECK[predecessor](order);

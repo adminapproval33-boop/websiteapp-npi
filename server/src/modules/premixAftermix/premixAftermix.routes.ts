@@ -399,7 +399,6 @@ premixAftermixRouter.get(
       where: section.success ? { section: section.data } : undefined,
       orderBy: { timestamp: "desc" },
       include: { attachments: true },
-      take: 500,
     });
     res.json({ success: true, data: rows });
   })
@@ -457,7 +456,7 @@ premixAftermixRouter.post(
     // komentar checkStageApplicableGate di lib/stageGate.ts.) Baris BARU saja
     // (PUT/Edit tetap bebas).
     const stageKey = parsed.data.section === "PREMIX" ? "premix" : "aftermix";
-    const applicable = await stageGate.checkStageApplicableGate(stageKey, parsed.data.materialNumber);
+    const applicable = await stageGate.checkStageApplicableGate(stageKey, parsed.data.materialNumber, parsed.data.order);
     if (!applicable.ok) {
       res.status(400).json({ success: false, message: `Material ini tidak memakai proses ${applicable.stageLabel}.` });
       return;

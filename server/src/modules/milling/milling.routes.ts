@@ -195,7 +195,6 @@ millingRouter.get(
     const rows = await prisma.millingLog.findMany({
       orderBy: { timestamp: "desc" },
       include: { attachments: true },
-      take: 500,
     });
     res.json({ success: true, data: rows });
   })
@@ -336,7 +335,7 @@ millingRouter.post(
     // eksplisit user -- gerbang BARU, terpisah dari gerbang prasyarat di
     // bawah. Lihat komentar checkStageApplicableGate di lib/stageGate.ts.)
     // Baris BARU saja (PUT/Edit tetap bebas).
-    const applicable = await stageGate.checkStageApplicableGate("milling", parsed.data.materialNumber);
+    const applicable = await stageGate.checkStageApplicableGate("milling", parsed.data.materialNumber, parsed.data.order);
     if (!applicable.ok) {
       res.status(400).json({ success: false, message: `Material ini tidak memakai proses ${applicable.stageLabel}.` });
       return;

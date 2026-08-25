@@ -442,6 +442,11 @@ export default function ProduktivitasDashboardPage() {
               )}
             </div>
           )}
+          {dashboardTab === "tren" && (
+            <button type="button" className="btn btn-outline" onClick={() => setShowTrendTable((s) => !s)}>
+              {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
+            </button>
+          )}
           <div className="field" style={{ maxWidth: 180 }}>
             <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
           </div>
@@ -591,17 +596,7 @@ export default function ProduktivitasDashboardPage() {
           </p>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Grafik per Proses</h3>
-          <button
-            type="button"
-            className="btn btn-outline"
-            style={{ fontSize: "0.75rem", padding: "4px 10px" }}
-            onClick={() => setShowTrendTable((s) => !s)}
-          >
-            {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
-          </button>
-        </div>
+        <h3 style={{ marginTop: 8, marginBottom: 12 }}>Grafik per Proses</h3>
 
         <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>

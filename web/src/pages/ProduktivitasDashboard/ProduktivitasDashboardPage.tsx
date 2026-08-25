@@ -224,6 +224,11 @@ export default function ProduktivitasDashboardPage() {
   // & posisi SAMA dgn "☰ Grafik per Proses" di atas, gantikan 2 tombol
   // Hari Kerja Saja/Termasuk Sabtu-Minggu yg sebelumnya di baris sendiri.
   const [showDayScopePanel, setShowDayScopePanel] = useState(false);
+  // 1 tombol "Lihat sbg Tabel/Grafik" BARENG utk ke-4 grafik tren sekaligus
+  // (2026-08-25, instruksi eksplisit user: sebelumnya tiap grafik py tombol &
+  // state sendiri-sendiri) -- dioper ke tiap <TrendLineChart> lewat prop
+  // `showTable` terkontrol, lihat komentar di TrendLineChart.tsx.
+  const [showTrendTable, setShowTrendTable] = useState(false);
 
   // Pop-up "lihat IU Plant" (2026-08-25, instruksi eksplisit user) -- klik
   // titik pada grafik per-proses (Jumlah Formula/Output Produksi) -> tampilkan
@@ -586,7 +591,17 @@ export default function ProduktivitasDashboardPage() {
           </p>
         )}
 
-        <h3 style={{ marginTop: 8, marginBottom: 12 }}>Grafik per Proses</h3>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>Grafik per Proses</h3>
+          <button
+            type="button"
+            className="btn btn-outline"
+            style={{ fontSize: "0.75rem", padding: "4px 10px" }}
+            onClick={() => setShowTrendTable((s) => !s)}
+          >
+            {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
+          </button>
+        </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
@@ -603,6 +618,7 @@ export default function ProduktivitasDashboardPage() {
             granularity={granularity}
             showAverage
             onPointClick={handleTrendPointClick}
+            showTable={showTrendTable}
           />
         </div>
 
@@ -622,6 +638,7 @@ export default function ProduktivitasDashboardPage() {
             granularity={granularity}
             showAverage
             onPointClick={handleTrendPointClick}
+            showTable={showTrendTable}
           />
         </div>
 
@@ -630,7 +647,7 @@ export default function ProduktivitasDashboardPage() {
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Jumlah Order/Batch yang Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
           </p>
-          <TrendLineChart points={trendPointsCount} series={STAGE_SERIES} yAxisLabel="Jumlah Order" granularity={granularity} />
+          <TrendLineChart points={trendPointsCount} series={STAGE_SERIES} yAxisLabel="Jumlah Order" granularity={granularity} showTable={showTrendTable} />
         </div>
 
         <div className="panel" style={{ padding: 16, marginBottom: 8 }}>
@@ -638,7 +655,14 @@ export default function ProduktivitasDashboardPage() {
           <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
             Total Qty (KG/Ltr) Finish per tahap, per {GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase()}.
           </p>
-          <TrendLineChart points={trendPointsQty} series={STAGE_SERIES} yAxisLabel="KG/Ltr" valueFormatter={(n) => numberFmt.format(n)} granularity={granularity} />
+          <TrendLineChart
+            points={trendPointsQty}
+            series={STAGE_SERIES}
+            yAxisLabel="KG/Ltr"
+            valueFormatter={(n) => numberFmt.format(n)}
+            granularity={granularity}
+            showTable={showTrendTable}
+          />
         </div>
         </>
         )}

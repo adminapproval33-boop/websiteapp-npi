@@ -53,6 +53,7 @@ export default function TrendLineChart({
   granularity,
   showAverage = false,
   onPointClick,
+  showTable: controlledShowTable,
 }: {
   points: TrendChartPoint[];
   series: TrendSeries[];
@@ -73,9 +74,19 @@ export default function TrendLineChart({
    * tertentu). Opsional -- kalau diisi, kursor jadi "pointer" (bukan
    * "crosshair") sbg penanda titiknya bisa diklik. */
   onPointClick?: (bucketKey: string) => void;
+  /** Kontrol Tabel/Grafik dari LUAR (2026-08-25, instruksi eksplisit user: 1
+   * tombol toggle bareng utk beberapa grafik sekaligus di Dashboard
+   * Produktivitas, bukan 1 tombol terpisah per grafik) -- kalau diisi,
+   * tombol "Lihat sbg Tabel/Grafik" bawaan komponen ini DISEMBUNYIKAN (parent
+   * yg render tombol bareng-nya sendiri di luar, lihat
+   * ProduktivitasDashboardPage.tsx). undefined (default) = mode lama, tiap
+   * grafik py tombol & state sendiri-sendiri (dipakai QualityCheckReviewPage.tsx). */
+  showTable?: boolean;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [showTable, setShowTable] = useState(false);
+  const [internalShowTable, setInternalShowTable] = useState(false);
+  const isTableControlled = controlledShowTable !== undefined;
+  const showTable = isTableControlled ? controlledShowTable : internalShowTable;
   const svgRef = useRef<SVGSVGElement>(null);
 
   const plotW = CHART_W - PAD.left - PAD.right;
@@ -153,11 +164,18 @@ export default function TrendLineChart({
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
-        <button type="button" className="btn btn-outline" style={{ fontSize: "0.75rem", padding: "4px 10px" }} onClick={() => setShowTable((s) => !s)}>
-          {showTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
-        </button>
-      </div>
+      {!isTableControlled && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+          <button
+            type="button"
+            className="btn btn-outline"
+            style={{ fontSize: "0.75rem", padding: "4px 10px" }}
+            onClick={() => setInternalShowTable((s) => !s)}
+          >
+            {showTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
+          </button>
+        </div>
+      )}
 
       {showTable ? (
         <div style={{ overflowX: "auto" }}>

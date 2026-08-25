@@ -35,27 +35,12 @@ try {
         throw "git merge --ff-only gagal - kemungkinan branch 'production' punya commit sendiri yang tidak ada di 'main'. Cek manual di $liveRoot."
     }
 
-    Log "npm install (menyesuaikan dependency kalau ada yang baru)..."
-    npm install --no-audit --no-fund | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) { throw "npm install gagal." }
-
-    Log "Prisma generate..."
-    npm run prisma:generate --workspace=server | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) { throw "prisma generate gagal." }
-
-    Log "Terapkan migration yang belum jalan..."
-    npm exec -w server -- prisma migrate deploy | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) { throw "prisma migrate deploy gagal." }
-
-    Log "Build backend..."
-    npm run build:server | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) { throw "Build backend gagal - deploy dibatalkan, server live LAMA tetap jalan." }
-
-    Log "Build frontend..."
-    npm run build:web | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) { throw "Build frontend gagal - deploy dibatalkan, server live LAMA tetap jalan." }
-
-    Log "Menghentikan proses live lama (kalau ada, port $livePort)..."
+    # Matikan proses live LAMA di sini (SEBELUM build, bukan sesudah) -- kalau
+    # masih hidup, dia mengunci file query_engine-windows.dll.node milik Prisma
+    # (EPERM saat "prisma generate" coba menimpanya) dan mungkin juga file
+    # dist/*.js lain. Konsekuensinya: rekan kerja OFFLINE selama proses build di
+    # bawah (biasanya ~15-20 detik), bukan cuma saat restart singkat di akhir.
+    Log "Menghentikan proses live lama (kalau ada, port $livePort) sebelum build..."
     $conn = Get-NetTCPConnection -LocalPort $livePort -State Listen -ErrorAction SilentlyContinue
     if ($conn) {
         $conn | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
@@ -64,6 +49,26 @@ try {
         }
         Start-Sleep -Seconds 2
     }
+
+    Log "npm install (menyesuaikan dependency kalau ada yang baru)..."
+    npm install --no-audit --no-fund | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) { throw "npm install gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
+
+    Log "Prisma generate..."
+    npm run prisma:generate --workspace=server | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) { throw "prisma generate gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
+
+    Log "Terapkan migration yang belum jalan..."
+    npm exec -w server -- prisma migrate deploy | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) { throw "prisma migrate deploy gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
+
+    Log "Build backend..."
+    npm run build:server | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) { throw "Build backend gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
+
+    Log "Build frontend..."
+    npm run build:web | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) { throw "Build frontend gagal. Live SEDANG OFFLINE - perbaiki lalu jalankan ulang deploy-live.ps1 secepatnya." }
 
     Log "Menyalakan server live yang baru (production build)..."
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-NoExit', '-Command', "`$env:NODE_ENV='production'; node dist/index.js" -WorkingDirectory "$liveRoot\server" -WindowStyle Minimized

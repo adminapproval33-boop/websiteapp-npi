@@ -88,6 +88,27 @@ productionLabelRouter.get(
   })
 );
 
+/// Material Type/Drum Colour TERAKHIR utk Material Number ini, LINTAS Order
+/// manapun di History Label Entry SFG (2026-08-25, instruksi eksplisit user:
+/// mempercepat input admin -- kalau Material Number yg sama PERNAH dicetak
+/// sebelumnya di Order lain, Material Type/Drum Colour-nya biasanya SAMA krn
+/// itu properti Material itu sendiri, bukan Order-nya). Dipakai SEBAGAI
+/// FALLBACK di ProductionLabelEntryPage.tsx -- KALAH prioritas dari autofill
+/// Order-spesifik (/latest-by-order/:order di atas) yg sudah ada, cuma
+/// dipakai kalau Order yg lagi dicari BELUM PERNAH masuk History sendiri.
+/// Hasilnya tetap bisa diedit manual spt biasa (bukan read-only) -- murni
+/// saran awal, bukan penguncian nilai.
+productionLabelRouter.get(
+  "/latest-by-material/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const materialNumber = String(req.params.materialNumber).trim();
+    const latest = materialNumber
+      ? await prisma.productionLabel.findFirst({ where: { materialNumber }, orderBy: { timestamp: "desc" } })
+      : null;
+    res.json({ success: true, data: latest });
+  })
+);
+
 productionLabelRouter.get(
   "/history",
   asyncRoute(async (_req, res) => {

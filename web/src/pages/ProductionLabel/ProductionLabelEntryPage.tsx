@@ -331,6 +331,27 @@ export default function ProductionLabelEntryPage({
       /* Order ini belum pernah masuk History Production Label -- lanjut ke saran cross-module di bawah */
     }
 
+    // Material Type/Drum Colour dari Material Number yg SAMA di Order LAIN
+    // (2026-08-25, instruksi eksplisit user: mempercepat input admin) --
+    // KALAH prioritas dari saran Order-spesifik di atas (skip kalau `own`
+    // sudah mengisi salah satunya), krn Material Type/Drum Colour itu
+    // properti Material, bukan Order, jadi wajar disamakan lintas Order.
+    // Tetap bisa diedit manual spt biasa (state biasa, bukan read-only).
+    // KHUSUS SFG -- FG menyembunyikan kedua field ini sama sekali.
+    if (found.materialNumber && (!hidden.has("materialType") || !hidden.has("drumColour"))) {
+      try {
+        const matRes = await api.get<{ success: boolean; data: ProductionLabelHistoryRow | null }>(
+          `${apiBase}/latest-by-material/${encodeURIComponent(found.materialNumber)}`
+        );
+        if (matRes.data) {
+          if (!hidden.has("materialType")) setPasteType((v) => v || matRes.data!.pasteType || "");
+          if (!hidden.has("drumColour")) setDrumColour((v) => v || matRes.data!.drumColour || "");
+        }
+      } catch {
+        /* Material ini belum pernah masuk History Production Label SFG -- biarkan kosong, operator isi manual */
+      }
+    }
+
     try {
       const res = await api.get<{ success: boolean; data: CrossModuleData }>(
         `${apiBase}/latest-cross-module/${encodeURIComponent(found.order)}`

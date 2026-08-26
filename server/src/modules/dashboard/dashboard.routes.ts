@@ -591,10 +591,10 @@ dashboardRouter.get(
      */
     function computeStages(order: string, materialNumber: string | null): { name: string; done: boolean }[] {
       const doneSets: Record<string, Set<string>> = {
-        Premix: premixOrders,
-        Milling: millingOrders,
-        Aftermix: aftermixOrders,
-        "Colour Matching": colourMatchingOrders,
+        Premix: premixDoneOrders,
+        Milling: millingDoneOrders,
+        Aftermix: aftermixDoneOrders,
+        "Colour Matching": colourMatchingDoneOrders,
         QC: checkResultOrders,
         Approval: approvalOrders,
         Packing: packingOrders,
@@ -1028,9 +1028,60 @@ dashboardRouter.get(
     const uniqueOrders = Array.from(latestByOrder.keys());
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: uniqueOrders } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true, orderType: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true, orderType: true, orderQty: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
+
+    /**
+     * Status "Selesai" per tahap produksi utk kolom "Status Order Ini" (Info
+     * Proses popup) -- HARUS konsisten dgn lib/stageGate.ts (gerbang yg
+     * sebenarnya mengunci Save ke tahap berikutnya), BUKAN pakai
+     * premixOrders/aftermixOrders/millingOrders/colourMatchingOrders di atas
+     * (itu cuma berarti "pernah ada baris apapun utk Order ini", dipakai utk
+     * antrian/hasAnyHistory). BUG ditemukan 2026-08-26 lewat laporan user:
+     * Order 1020049459 tampil "Milling: Selesai" di popup padahal
+     * isMillingDone (stageGate.ts) masih bilang belum (Qty Act belum genap
+     * Order Qty) -- Save ke Aftermix tetap diblokir gerbang walau dashboard
+     * bilang sudah boleh lanjut. Definisi di bawah SENGAJA disamakan persis:
+     * Premix/Aftermix/Colour Matching = baris PALING TERAKHIR per Order sudah
+     * -DN (formReceived+start+finish terisi); Milling = SUM Qty Act baris yg
+     * sudah -DN >= Order Qty (dukung "tanki turunan").
+     */
+    function latestRowByOrder<T extends { order: string }>(rowsDescByTimestamp: T[]): Map<string, T> {
+      const map = new Map<string, T>();
+      for (const r of rowsDescByTimestamp) if (!map.has(r.order)) map.set(r.order, r);
+      return map;
+    }
+    const isDnRow = (r: { formReceived: Date | null; start: Date | null; finish: Date | null }): boolean =>
+      Boolean(r.formReceived && r.start && r.finish);
+    function doneOrderSet<T extends { order: string; formReceived: Date | null; start: Date | null; finish: Date | null }>(
+      rowsDescByTimestamp: T[]
+    ): Set<string> {
+      const latest = latestRowByOrder(rowsDescByTimestamp);
+      return new Set(Array.from(latest.values()).filter(isDnRow).map((r) => r.order));
+    }
+    const premixDoneOrders = doneOrderSet(premixAftermix.filter((r) => r.section === "PREMIX"));
+    const aftermixDoneOrders = doneOrderSet(premixAftermix.filter((r) => r.section === "AFTERMIX"));
+    const colourMatchingDoneOrders = doneOrderSet(colourMatching);
+
+    const millingRowsByOrder = new Map<string, typeof milling>();
+    for (const r of milling) {
+      const list = millingRowsByOrder.get(r.order);
+      if (list) list.push(r);
+      else millingRowsByOrder.set(r.order, [r]);
+    }
+    const millingDoneOrders = new Set<string>();
+    for (const [order, orderRows] of millingRowsByOrder) {
+      const finishedRows = orderRows.filter(isDnRow);
+      if (finishedRows.length === 0) continue;
+      const targetQty = parseQtyNumber(masterByOrder.get(order)?.orderQty ?? finishedRows[0].orderQty);
+      if (targetQty <= 0) {
+        millingDoneOrders.add(order); // fallback: qty tidak diketahui -- any 1 baris Finish sudah cukup (sama dgn isMillingDone)
+        continue;
+      }
+      const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);
+      if (sumQtyAct >= targetQty) millingDoneOrders.add(order);
+    }
 
     // Rute proses resmi per Material Number (menu Master Data > Material
     // Flow Proses, file "ALL FLOW PROSES.xlsx" -- 2026-07-31, instruksi

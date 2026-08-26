@@ -801,15 +801,42 @@ export default function ProductionOrderDashboardPage() {
               <OrderLookup
                 value={newOrderValue}
                 onChange={setNewOrderValue}
-                onFound={(data) =>
+                onFound={async (data) => {
                   setInfoTarget({
                     order: data.order,
                     materialNumber: data.materialNumber,
                     stages: [],
                     orderType: data.orderType ?? null,
                     viaSearch: true,
-                  })
-                }
+                  });
+                  // Order ini BISA JADI sudah py histori proses lengkap (bukan cuma
+                  // baru muncul di Master Data) -- `stages: []` di atas cuma
+                  // placeholder awal spy modal langsung kebuka, TAPI kalau dibiarkan
+                  // begitu terus kolom "Status Order Ini" salah tampil "—" utk
+                  // SEMUA tahap wajib walau sebenarnya sudah Selesai (BUG ditemukan
+                  // 2026-08-24 lewat laporan user: Order 1020054507 sudah Premix/
+                  // Milling/Aftermix - DN tapi popup ini terus2an bilang "—" krn
+                  // dicari lewat kotak "Cari Order" DALAM popup ini, bukan klik baris
+                  // tabel -- beda dari r.stages yg diisi rowsQuery, jalur ini TIDAK
+                  // PERNAH mengisi stages sama sekali). Fix: susul dgn fetch data
+                  // dashboard sungguhan (SAMA endpoint/pola dgn closeAndRefresh di
+                  // bawah), lalu timpa stages begitu ketemu.
+                  try {
+                    const res = await api.get<{ success: boolean; data: ProductionOrderRow[] }>(
+                      `/dashboard/production-orders?search=${encodeURIComponent(data.order)}`
+                    );
+                    const freshRow = res.data.find((r) => r.order === data.order);
+                    if (freshRow) {
+                      setInfoTarget((prev) =>
+                        prev && prev.order === data.order
+                          ? { ...prev, stages: freshRow.stages, materialNumber: freshRow.materialNumber, orderType: freshRow.orderType }
+                          : prev
+                      );
+                    }
+                  } catch {
+                    /* Order ini memang belum py histori proses apa pun -- biarkan stages kosong ("—" utk semua tahap memang benar utk kasus ini). */
+                  }
+                }}
               />
             </div>
           )}

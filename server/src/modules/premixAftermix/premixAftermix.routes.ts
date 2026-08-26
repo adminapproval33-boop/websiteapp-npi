@@ -240,12 +240,18 @@ function isMillingRowComplete(r: {
  * boleh dipecah ke beberapa baris MillingLog/tanki, diinput satu per satu di
  * sesi terpisah, lihat komentar sama & lebih lengkap di
  * stageGate.isMillingDone). SAMA definisinya dgn stageGate.isMillingDone
- * (SUM Qty Act dari semua baris tanki yg "selesai" >= Order Qty), TAPI
+ * (SUM Qty Act dari semua baris tanki yg "selesai" >= Order Qty ACUAN), TAPI
  * fungsi ini SENGAJA terpisah (bukan reuse stageGate.isMillingDone) krn
  * syarat "baris selesai"-nya lebih ketat di sini (isMillingRowComplete --
  * ikut mensyaratkan Leader/Code Tanki 1/Code Mesin/Member/Fineness/Visco/Suhu,
  * bukan cuma formReceived+start+finish) sesuai kebutuhan gerbang antrian
  * Aftermix yg lebih strict drpd gerbang Milling->Aftermix biasa.
+ *
+ * Order Qty ACUAN (DIREVISI 2026-08-26, instruksi eksplisit user -- lihat
+ * komentar lebih lengkap di stageGate.isMillingDone): Order Qty baris
+ * PALING BARU (rowsForOrder[0], pemanggil sudah orderBy timestamp desc) jadi
+ * acuan kalau admin mengedit-nya di form Input Milling, fallback ke Master
+ * Data cuma kalau baris itu kosong.
  */
 function isMillingDoneForOrder(
   rowsForOrder: (Parameters<typeof isMillingRowComplete>[0] & { orderQty: string | null })[],
@@ -253,7 +259,7 @@ function isMillingDoneForOrder(
 ): boolean {
   const finishedRows = rowsForOrder.filter(isMillingRowComplete);
   if (finishedRows.length === 0) return false;
-  const targetQty = parseQtyNumber(masterOrderQty ?? finishedRows[0].orderQty);
+  const targetQty = parseQtyNumber(rowsForOrder[0].orderQty ?? masterOrderQty);
   if (targetQty <= 0) return true;
   const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);
   return sumQtyAct >= targetQty;

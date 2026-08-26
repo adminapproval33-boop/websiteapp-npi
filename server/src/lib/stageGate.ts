@@ -83,29 +83,38 @@ export async function isPremixDone(order: string): Promise<boolean> {
  * diinput (baris baru, belum Finish), status "Milling - DN" akan MUNDUR lagi
  * jadi belum-selesai walau tanki-tanki sebelumnya sudah tuntas.
  *
- * Definisi baru (instruksi eksplisit user, 2026-08-11 mid-pause & dikonfirmasi
- * lagi 2026-08-23): "Karena setiap tanki nantinya mempunyai Qty yang
- * berbeda-beda, jadi saya anggap finish kalau Qty-nya sudah finish semua" --
- * bukan lagi "semua baris tanki sudah Finish", tapi SUM(Qty Act) dari semua
- * baris tanki yg SUDAH Finish (formReceived+start+finish terisi) >= Order Qty
- * (dari Master Data, fallback ke Order Qty yg tersimpan di baris MillingLog
- * itu sendiri kalau Master Data belum/tidak ada). Order Qty berupa
- * free-text -- diparse via parseQtyNumber (sama dgn dashboard.routes.ts).
+ * Definisi (instruksi eksplisit user, 2026-08-11 mid-pause & dikonfirmasi lagi
+ * 2026-08-23): "Karena setiap tanki nantinya mempunyai Qty yang berbeda-beda,
+ * jadi saya anggap finish kalau Qty-nya sudah finish semua" -- bukan lagi
+ * "semua baris tanki sudah Finish", tapi SUM(Qty Act) dari semua baris tanki
+ * yg SUDAH Finish (formReceived+start+finish terisi) >= Order Qty acuan.
  *
- * Kalau Order Qty tidak bisa diparse jadi angka (>0) sama sekali -- fallback
- * ke definisi lama (any 1 baris sudah Finish) supaya tidak memblokir Order yg
- * Master Data-nya belum lengkap/qty-nya memang bukan format angka.
+ * Order Qty ACUAN (DIREVISI 2026-08-26, instruksi eksplisit user, dipicu
+ * kasus nyata Order 1020049459 -- Order Qty Master Data/SAP 1000 tapi Qty Act
+ * riil cuma 981 krn loss produksi normal): field "Order Qty" di form Input
+ * Milling BOLEH diedit admin per baris tanki -- kalau admin mengubahnya,
+ * ANGKA HASIL EDIT ITU yg jadi acuan target (bukan lagi Master Data), supaya
+ * admin bisa menandai Milling selesai sesuai qty aktual di lapangan tanpa
+ * perlu (atau tidak bisa, krn ketimpa re-import SAP) mengubah Master Data.
+ * Diambil dari Order Qty baris PALING BARU (rows sudah orderBy timestamp
+ * desc) -- fallback ke Master Data cuma kalau baris itu kosong/tidak
+ * numerik (Order belum pernah py Order Qty diketik sama sekali).
+ *
+ * Kalau tetap tidak bisa diparse jadi angka (>0) sama sekali dari keduanya --
+ * fallback ke definisi lama (any 1 baris sudah Finish) supaya tidak
+ * memblokir Order yg qty-nya memang bukan format angka.
  */
 export async function isMillingDone(order: string): Promise<boolean> {
   const rows = await prisma.millingLog.findMany({
     where: { order },
+    orderBy: { timestamp: "desc" },
     select: { formReceived: true, start: true, finish: true, qtyAct: true, orderQty: true },
   });
   const finishedRows = rows.filter(isDn);
   if (finishedRows.length === 0) return false;
 
   const master = await prisma.masterOrder.findUnique({ where: { order }, select: { orderQty: true } });
-  const targetQty = parseQtyNumber(master?.orderQty ?? finishedRows[0].orderQty);
+  const targetQty = parseQtyNumber(rows[0].orderQty ?? master?.orderQty);
   if (targetQty <= 0) return true; // fallback: qty tidak diketahui/tidak numerik -- any 1 baris Finish sudah cukup
 
   const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);

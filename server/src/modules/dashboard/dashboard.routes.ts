@@ -1074,7 +1074,11 @@ dashboardRouter.get(
     for (const [order, orderRows] of millingRowsByOrder) {
       const finishedRows = orderRows.filter(isDnRow);
       if (finishedRows.length === 0) continue;
-      const targetQty = parseQtyNumber(masterByOrder.get(order)?.orderQty ?? finishedRows[0].orderQty);
+      // Order Qty ACUAN = baris PALING BARU (orderRows[0], `milling` sudah
+      // orderBy timestamp desc) -- konsisten dgn isMillingDone di stageGate.ts
+      // (2026-08-26, instruksi eksplisit user: Order Qty hasil edit admin di
+      // form Input Milling jadi acuan, bukan lagi Master Data/SAP).
+      const targetQty = parseQtyNumber(orderRows[0].orderQty ?? masterByOrder.get(order)?.orderQty);
       if (targetQty <= 0) {
         millingDoneOrders.add(order); // fallback: qty tidak diketahui -- any 1 baris Finish sudah cukup (sama dgn isMillingDone)
         continue;

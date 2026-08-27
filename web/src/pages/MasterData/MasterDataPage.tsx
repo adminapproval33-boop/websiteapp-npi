@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import { formatDateTime } from "../../lib/datetime";
+import { useAuth } from "../../auth/AuthContext";
 
 interface MasterOrderRow {
   order: string;
@@ -134,6 +135,34 @@ function FlowBadge({ on }: { on: boolean }) {
   );
 }
 
+/** Checkbox kolom proses di tabel "Material Flow Saat Ini" (2026-08-27,
+ * instruksi eksplisit user) -- HANYA administrator (FULL_ACCESS) yg boleh
+ * mengedit langsung dari tabel Master Data ini; user lain tetap lihat
+ * FlowBadge read-only spt sebelumnya. Baris QC & Packing SENGAJA tidak
+ * pernah bisa dilepas centangnya (wajib mutlak utk semua Material, sama
+ * spt gerbang di MaterialFlowPanel.tsx / lib/stageGate.ts). */
+function FlowCheckbox({
+  checked,
+  disabled,
+  pending,
+  onToggle,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  pending?: boolean;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      checked={checked}
+      disabled={disabled || pending}
+      onChange={(e) => onToggle(e.target.checked)}
+      style={{ cursor: disabled ? "not-allowed" : "pointer" }}
+    />
+  );
+}
+
 type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow";
 
 function ImportCard({
@@ -193,6 +222,14 @@ function ImportCard({
 
 export default function MasterDataPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  /** Hanya administrator (FULL_ACCESS) yg boleh edit ceklis proses langsung
+   * dari tabel Master Data ini (2026-08-27, instruksi eksplisit user) --
+   * BEDA dari panel "Info Proses Material" (MaterialFlowPanel.tsx) yg
+   * sengaja juga membolehkan akses INPUT, lihat requireWrite di
+   * masterdata.routes.ts. Endpoint PUT yg dipakai di sini sama persis,
+   * cuma UI di halaman ini yg dikunci lebih ketat. */
+  const canEditFlow = user?.access === "FULL_ACCESS";
   const [tab, setTab] = useState<Tab>("cooispi");
 
   const [orderResult, setOrderResult] = useState("");
@@ -351,6 +388,45 @@ export default function MasterDataPage() {
       setFlowResult("");
     },
   });
+
+  const [flowFieldError, setFlowFieldError] = useState("");
+  const [pendingFlowCell, setPendingFlowCell] = useState<string | null>(null);
+
+  const updateFlowField = useMutation({
+    mutationFn: ({ materialNumber, field, value }: { materialNumber: string; field: keyof MaterialFlowRow; value: boolean }) =>
+      api
+        .put<{ success: boolean; data: MaterialFlowRow }>(`/master-data/material-flow/${encodeURIComponent(materialNumber)}`, {
+          [field]: value,
+        })
+        .then((r) => r.data),
+    onMutate: ({ materialNumber, field }) => {
+      setFlowFieldError("");
+      setPendingFlowCell(`${materialNumber}:${field}`);
+    },
+    onSuccess: (updatedRow, { materialNumber }) => {
+      queryClient.setQueryData<MaterialFlowRow[]>(["master-material-flow", flowSearch], (old) =>
+        old?.map((r) => (r.materialNumber === materialNumber ? updatedRow : r))
+      );
+    },
+    onError: (err) => setFlowFieldError(err instanceof ApiError ? err.message : "Gagal menyimpan perubahan Material Flow."),
+    onSettled: () => setPendingFlowCell(null),
+  });
+
+  /** QC & Packing (`mandatory`) SENGAJA tidak bisa dilepas centangnya, sama
+   * spt gerbang MaterialFlowPanel.tsx -- wajib mutlak utk semua Material.
+   * Non-admin tetap lihat FlowBadge read-only spt sebelumnya. */
+  function renderFlowCell(row: MaterialFlowRow, field: keyof MaterialFlowRow, mandatory = false) {
+    const value = Boolean(row[field]);
+    if (!canEditFlow) return <FlowBadge on={value} />;
+    return (
+      <FlowCheckbox
+        checked={value}
+        disabled={mandatory}
+        pending={pendingFlowCell === `${row.materialNumber}:${field}`}
+        onToggle={(next) => updateFlowField.mutate({ materialNumber: row.materialNumber, field, value: next })}
+      />
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -540,6 +616,17 @@ export default function MasterDataPage() {
             <div className="panel-header">Material Flow Saat Ini ({flowQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
               <LastUpdatedNote value={lastUpdatedQuery.data?.flow} />
+              {canEditFlow ? (
+                <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  Anda login sebagai administrator (Full Access) -- ceklis kolom proses di bawah bisa langsung diedit.
+                  QC &amp; Packing selalu wajib, tidak bisa dilepas centangnya.
+                </p>
+              ) : (
+                <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  Ceklis kolom proses di bawah hanya bisa diedit oleh administrator (Full Access).
+                </p>
+              )}
+              {flowFieldError && <p className="error-text">{flowFieldError}</p>}
               <input
                 placeholder="Cari Material Number / Description..."
                 value={flowSearch}
@@ -555,18 +642,48 @@ export default function MasterDataPage() {
                 columns={[
                   { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
                   { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription ?? "-" },
-                  { key: "premixRequired", label: "Premix", render: (r) => <FlowBadge on={r.premixRequired} />, csvValue: (r) => (r.premixRequired ? "1" : "0") },
-                  { key: "millingRequired", label: "Milling", render: (r) => <FlowBadge on={r.millingRequired} />, csvValue: (r) => (r.millingRequired ? "1" : "0") },
-                  { key: "aftermixRequired", label: "Aftermix", render: (r) => <FlowBadge on={r.aftermixRequired} />, csvValue: (r) => (r.aftermixRequired ? "1" : "0") },
+                  {
+                    key: "premixRequired",
+                    label: "Premix",
+                    render: (r) => renderFlowCell(r, "premixRequired"),
+                    csvValue: (r) => (r.premixRequired ? "1" : "0"),
+                  },
+                  {
+                    key: "millingRequired",
+                    label: "Milling",
+                    render: (r) => renderFlowCell(r, "millingRequired"),
+                    csvValue: (r) => (r.millingRequired ? "1" : "0"),
+                  },
+                  {
+                    key: "aftermixRequired",
+                    label: "Aftermix",
+                    render: (r) => renderFlowCell(r, "aftermixRequired"),
+                    csvValue: (r) => (r.aftermixRequired ? "1" : "0"),
+                  },
                   {
                     key: "colourMatchingRequired",
                     label: "Colour Matching",
-                    render: (r) => <FlowBadge on={r.colourMatchingRequired} />,
+                    render: (r) => renderFlowCell(r, "colourMatchingRequired"),
                     csvValue: (r) => (r.colourMatchingRequired ? "1" : "0"),
                   },
-                  { key: "qcRequired", label: "QC", render: (r) => <FlowBadge on={r.qcRequired} />, csvValue: (r) => (r.qcRequired ? "1" : "0") },
-                  { key: "approvalRequired", label: "Approval", render: (r) => <FlowBadge on={r.approvalRequired} />, csvValue: (r) => (r.approvalRequired ? "1" : "0") },
-                  { key: "packingRequired", label: "Packing", render: (r) => <FlowBadge on={r.packingRequired} />, csvValue: (r) => (r.packingRequired ? "1" : "0") },
+                  {
+                    key: "qcRequired",
+                    label: "QC",
+                    render: (r) => renderFlowCell(r, "qcRequired", true),
+                    csvValue: (r) => (r.qcRequired ? "1" : "0"),
+                  },
+                  {
+                    key: "approvalRequired",
+                    label: "Approval",
+                    render: (r) => renderFlowCell(r, "approvalRequired"),
+                    csvValue: (r) => (r.approvalRequired ? "1" : "0"),
+                  },
+                  {
+                    key: "packingRequired",
+                    label: "Packing",
+                    render: (r) => renderFlowCell(r, "packingRequired", true),
+                    csvValue: (r) => (r.packingRequired ? "1" : "0"),
+                  },
                 ]}
               />
             </div>

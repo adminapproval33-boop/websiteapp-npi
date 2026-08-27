@@ -81,7 +81,6 @@ adminQcRouter.get(
     const rows = await prisma.adminQc.findMany({
       orderBy: { timestamp: "desc" },
       include: { attachments: true },
-      take: 500,
     });
     res.json({ success: true, data: rows });
   })

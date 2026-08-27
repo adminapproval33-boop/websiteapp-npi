@@ -62,6 +62,24 @@ productionLabelFgRouter.get(
   })
 );
 
+/// Autofill "Shelf Life (bulan)" dari Material Number yg SAMA di Order LAIN
+/// (2026-08-27, instruksi eksplisit user) -- Shelf Life properti Material,
+/// bukan Order, jadi wajar disamakan lintas Order kalau Material ini pernah
+/// diinput sebelumnya. Sama pola persis dgn
+/// productionLabel.routes.ts (SFG) -- endpoint ini KHUSUS ada di FG krn
+/// SFG belum pernah diminta fitur ini utk Shelf Life (SFG pakai endpoint
+/// serupa cuma utk Material Type/Drum Colour).
+productionLabelFgRouter.get(
+  "/latest-by-material/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const materialNumber = String(req.params.materialNumber).trim();
+    const latest = materialNumber
+      ? await prisma.productionLabelFg.findFirst({ where: { materialNumber }, orderBy: { timestamp: "desc" } })
+      : null;
+    res.json({ success: true, data: latest });
+  })
+);
+
 productionLabelFgRouter.get(
   "/history",
   asyncRoute(async (_req, res) => {

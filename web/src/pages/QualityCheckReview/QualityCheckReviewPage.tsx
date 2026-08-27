@@ -153,9 +153,57 @@ const numberFmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
  * ditambahkan: label judul kartu (mis. "OK (QC Passed)") sejajar 1 baris
  * dgn "Qty (Ltr): X" (kecil, kanan) supaya tidak nambah tinggi kartu, lalu
  * label "Qty Formula" (kecil) DI ATAS angka besarnya (bukan di bawah). */
-function KpiCard({ label, count, qty, color }: { label: string; count: number; qty: number; color: string }) {
+/** Kartu KPI bisa diklik utk filter tabel di bawahnya (2026-08-27, instruksi
+ * eksplisit user) -- `onClick` opsional supaya kartu di tempat lain (kalau
+ * ada) yg tidak dikasih handler tetap tampil apa adanya, tidak clickable.
+ * `active` = kartu ini SEDANG jadi bagian filter yg aktif (ring warna sesuai
+ * kartu). `dimmed` = ADA filter aktif di grup kartu ini tapi BUKAN kartu ini
+ * (diredupkan supaya kartu yg aktif lebih menonjol) -- dua prop ini sengaja
+ * independen (bukan turunan satu sama lain) supaya pemanggil bebas atur
+ * logika grupnya sendiri (Status vs Lama Proses, masing2 grup terpisah). */
+function KpiCard({
+  label,
+  count,
+  qty,
+  color,
+  onClick,
+  active,
+  dimmed,
+}: {
+  label: string;
+  count: number;
+  qty: number;
+  color: string;
+  onClick?: () => void;
+  active?: boolean;
+  dimmed?: boolean;
+}) {
   return (
-    <div className="panel" style={{ flex: "1 1 160px", padding: 16, borderTop: `4px solid ${color}` }}>
+    <div
+      className="panel"
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      style={{
+        flex: "1 1 160px",
+        padding: 16,
+        borderTop: `4px solid ${color}`,
+        cursor: onClick ? "pointer" : undefined,
+        boxShadow: active ? `0 0 0 2px ${color}` : undefined,
+        opacity: dimmed ? 0.55 : 1,
+        transition: "opacity 0.15s ease, box-shadow 0.15s ease",
+      }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
         <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
         <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
@@ -476,20 +524,88 @@ export default function QualityCheckReviewPage() {
         <div className="panel">
           <div className="panel-header">Quality Check Review</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Klik kartu KPI Status utk filter tabel di bawah (2026-08-27,
+                instruksi eksplisit user) -- toggle langsung ke `statusFilter`,
+                state YANG SAMA dipakai tombol "☰ Status" & tabel `filteredRows`
+                di bawah, jadi otomatis sinkron 2 arah (klik kartu = ikut
+                tercentang di panel Status, & sebaliknya). "Total" me-reset
+                filter (tampilkan semua), kartu lain toggle statusnya sendiri
+                masuk/keluar dari `statusFilter` (bisa pilih lebih dari 1). */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <KpiCard label="Total" count={total.count} qty={total.qty} color="var(--navy-light)" />
-          <KpiCard label="OK (QC Passed)" count={summary.ok.count} qty={summary.ok.qty} color={STATUS_COLOR.OK} />
-          <KpiCard label="On Check" count={summary.onCheck.count} qty={summary.onCheck.qty} color={STATUS_COLOR["On Check"]} />
-          <KpiCard label="Improve" count={summary.improve.count} qty={summary.improve.qty} color={STATUS_COLOR.Improve} />
-          <KpiCard label="Approval" count={summary.approval.count} qty={summary.approval.qty} color={STATUS_COLOR.Approval} />
+          <KpiCard
+            label="Total"
+            count={total.count}
+            qty={total.qty}
+            color="var(--navy-light)"
+            onClick={() => setStatusFilter(new Set())}
+            active={statusFilter.size === 0}
+            dimmed={statusFilter.size > 0}
+          />
+          <KpiCard
+            label="OK (QC Passed)"
+            count={summary.ok.count}
+            qty={summary.ok.qty}
+            color={STATUS_COLOR.OK}
+            onClick={() => setStatusFilter((s) => toggleInSet(s, "OK"))}
+            active={statusFilter.has("OK")}
+            dimmed={statusFilter.size > 0 && !statusFilter.has("OK")}
+          />
+          <KpiCard
+            label="On Check"
+            count={summary.onCheck.count}
+            qty={summary.onCheck.qty}
+            color={STATUS_COLOR["On Check"]}
+            onClick={() => setStatusFilter((s) => toggleInSet(s, "On Check"))}
+            active={statusFilter.has("On Check")}
+            dimmed={statusFilter.size > 0 && !statusFilter.has("On Check")}
+          />
+          <KpiCard
+            label="Improve"
+            count={summary.improve.count}
+            qty={summary.improve.qty}
+            color={STATUS_COLOR.Improve}
+            onClick={() => setStatusFilter((s) => toggleInSet(s, "Improve"))}
+            active={statusFilter.has("Improve")}
+            dimmed={statusFilter.size > 0 && !statusFilter.has("Improve")}
+          />
+          <KpiCard
+            label="Approval"
+            count={summary.approval.count}
+            qty={summary.approval.qty}
+            color={STATUS_COLOR.Approval}
+            onClick={() => setStatusFilter((s) => toggleInSet(s, "Approval"))}
+            active={statusFilter.has("Approval")}
+            dimmed={statusFilter.size > 0 && !statusFilter.has("Approval")}
+          />
         </div>
 
         <div>
           <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Proses</div>
+          {/* Sama pola dgn kartu Status di atas, tapi toggle ke `ageFilter`
+              (state yg sama dgn tombol "☰ Lama Proses") -- 2 grup kartu ini
+              SENGAJA independen (AND, bukan saling reset), sama spt 2 panel
+              filternya yg juga independen. */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <KpiCard label="Total" count={ageTotal.count} qty={ageTotal.qty} color="var(--navy-light)" />
+            <KpiCard
+              label="Total"
+              count={ageTotal.count}
+              qty={ageTotal.qty}
+              color="var(--navy-light)"
+              onClick={() => setAgeFilter(new Set())}
+              active={ageFilter.size === 0}
+              dimmed={ageFilter.size > 0}
+            />
             {AGE_BUCKETS.map((b) => (
-              <KpiCard key={b.key} label={b.label} count={ageBuckets[b.key].count} qty={ageBuckets[b.key].qty} color={b.color} />
+              <KpiCard
+                key={b.key}
+                label={b.label}
+                count={ageBuckets[b.key].count}
+                qty={ageBuckets[b.key].qty}
+                color={b.color}
+                onClick={() => setAgeFilter((s) => toggleInSet(s, b.key))}
+                active={ageFilter.has(b.key)}
+                dimmed={ageFilter.size > 0 && !ageFilter.has(b.key)}
+              />
             ))}
           </div>
         </div>

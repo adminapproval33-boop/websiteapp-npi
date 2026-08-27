@@ -244,6 +244,33 @@ export default function ApprovalPage({
    * ini murni saran. Dipakai baik saat Order baru di-lookup MAUPUN saat
    * kolom Material Number diedit manual belakangan (lihat onBlur di JSX-nya).
    */
+  /** Saran Customer/Cust Segmen dari baris Check Results TERAKHIR dgn
+   * Material Number yg SAMA (2026-08-27, instruksi eksplisit user: sambungkan
+   * kolom Customer/Cust Segmen di Approval supaya ikut apa yg diinput di
+   * menu Check Results) -- dipanggil SEBELUM suggestFromMaterialHistory di
+   * bawah supaya Check Results jadi sumber utama, histori Approval sendiri
+   * cuma jadi cadangan kalau Material ini belum pernah ada di Check Results.
+   * HANYA mengisi field yg masih kosong, tetap bisa diganti manual krn ini
+   * murni saran. Reuse endpoint yg sama dgn suggestCustomerFromMaterialHistory
+   * di CheckResultsPage.tsx (`/check-results/latest-by-material`). */
+  async function suggestCustomerFromCheckResults(materialNumber: string) {
+    try {
+      const res = await api.get<{ success: boolean; data: { customer: string | null; custSegmen: string | null } | null }>(
+        `/check-results/latest-by-material/${encodeURIComponent(materialNumber)}`
+      );
+      const latest = res.data;
+      if (!latest) return;
+      setForm((f) => ({
+        ...f,
+        customer: f.customer || latest.customer || "",
+        custSegmen: f.custSegmen || latest.custSegmen || "",
+      }));
+    } catch {
+      /* saran dari Check Results bersifat opsional -- kalau gagal (mis. tidak
+       * ada akses menu Check Results), biarkan fallback ke histori Approval sendiri. */
+    }
+  }
+
   async function suggestFromMaterialHistory(materialNumber: string) {
     try {
       const res = await api.get<{ success: boolean; data: ApprovalRow | null }>(
@@ -415,6 +442,7 @@ export default function ApprovalPage({
       /* tidak ada histori Approval sebelumnya untuk Order ini -- biarkan kosong */
     }
     if ((data.materialNumber ?? "").trim()) {
+      await suggestCustomerFromCheckResults(data.materialNumber!.trim());
       await suggestFromMaterialHistory(data.materialNumber!.trim());
     }
     try {
@@ -644,9 +672,13 @@ export default function ApprovalPage({
                       // Number ini juga harus tetap muncul begitu kolomnya DIKOREKSI
                       // MANUAL belakangan, bukan cuma saat Order baru di-lookup (2026-08-20,
                       // instruksi eksplisit user). onBlur (bukan tiap ketikan) supaya tidak
-                      // fetch berkali-kali selagi masih mengetik.
+                      // fetch berkali-kali selagi masih mengetik. Customer/Cust Segmen
+                      // dicoba dulu dari Check Results (2026-08-27, instruksi eksplisit user),
+                      // baru fallback ke histori Approval sendiri.
                       const materialNumber = form.materialNumber.trim();
-                      if (materialNumber) suggestFromMaterialHistory(materialNumber);
+                      if (materialNumber) {
+                        suggestCustomerFromCheckResults(materialNumber).then(() => suggestFromMaterialHistory(materialNumber));
+                      }
                     }}
                     required
                   />

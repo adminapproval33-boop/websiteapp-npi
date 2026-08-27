@@ -3,6 +3,12 @@
 # Rekan kerja TIDAK pakai port ini lagi (2026-08-25) - mereka akses server "live" di
 # :5173 (lihat scripts\deploy-live.ps1 / websiteapp-npi-live), yang isinya baru berubah
 # saat di-deploy, bukan langsung ikut tiap kali Anda save di sini.
+#
+# Sejak 2026-08-26 script ini JUGA menyalakan ulang proses live (:5173) kalau mati -
+# misalnya setelah laptop shutdown/restart semalam - pakai build production yang SUDAH
+# ADA di websiteapp-npi-live (TIDAK build ulang / TIDAK git merge; itu tetap tugas
+# deploy-live.ps1). Ini murni "hidupkan lagi proses yang mati", bukan deploy.
+#
 # Safe to run repeatedly (e.g. from $PROFILE on every new PowerShell window) - it skips
 # anything already up.
 
@@ -38,6 +44,11 @@ $frontendUp = Test-PortListening 8080
 $keepAwakeUp = Test-KeepAwakeRunning
 $mouseJiggleUp = Test-MouseJiggleRunning
 
+$liveRoot = 'C:\Users\abdad\websiteapp-npi-live'
+$livePort = 5173
+$liveUp = Test-PortListening $livePort
+$liveDistExists = Test-Path "$liveRoot\server\dist\index.js"
+
 $pg = Get-Service postgresql-x64-18 -ErrorAction SilentlyContinue
 if ($pg -and $pg.Status -ne 'Running') {
     Write-Host "[NPI] PostgreSQL service is $($pg.Status), not Running - start it manually if the backend fails." -ForegroundColor Yellow
@@ -59,6 +70,14 @@ if (-not $mouseJiggleUp) {
     Write-Host "[NPI] Starting mouse-jiggle..." -ForegroundColor Cyan
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$repoRoot\scripts\mouse-jiggle.ps1" -WindowStyle Minimized
 }
+if (-not $liveUp) {
+    if ($liveDistExists) {
+        Write-Host "[NPI] Server live (:$livePort) mati - menyalakan ulang pakai build yang sudah ada..." -ForegroundColor Cyan
+        Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', "`$env:NODE_ENV='production'; node dist/index.js" -WorkingDirectory "$liveRoot\server" -WindowStyle Minimized
+    } else {
+        Write-Host "[NPI] Server live (:$livePort) mati DAN belum pernah di-build (dist/index.js tidak ada) - jalankan scripts\deploy-live.ps1 dulu." -ForegroundColor Yellow
+    }
+}
 
 if (-not $backendUp -or -not $frontendUp) {
     $elapsed = 0
@@ -73,6 +92,21 @@ if (-not $backendUp -or -not $frontendUp) {
         } catch {}
     }
 }
+if (-not $liveUp -and $liveDistExists) {
+    $elapsed = 0
+    $liveReady = $false
+    while ($elapsed -lt 30 -and -not $liveReady) {
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:$livePort/api/health" -UseBasicParsing -TimeoutSec 2
+            if ($r.StatusCode -eq 200) { $liveReady = $true }
+        } catch {}
+    }
+    if (-not $liveReady) {
+        Write-Host "[NPI] Server live sudah dicoba dinyalakan tapi belum merespons /api/health setelah 30 detik - cek manual." -ForegroundColor Red
+    }
+}
 
 $lanIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual' -and $_.IPAddress -notmatch '^169\.254\.' } |
@@ -85,7 +119,10 @@ if ($lanIp) {
     Write-Host "[NPI] Tidak menemukan LAN IP aktif - cek koneksi jaringan." -ForegroundColor Red
 }
 Write-Host "[NPI] Backend + Frontend + Keep-awake siap. (Ngrok tidak dinyalakan - mode lokal saja.)" -ForegroundColor Green
-Write-Host "[NPI] Rekan kerja tetap pakai server live di :5173 - jalankan scripts\deploy-live.ps1 untuk merilis perubahan ke sana." -ForegroundColor DarkGray
+if ($lanIp -and (Test-PortListening $livePort)) {
+    Write-Host "[NPI] Server live juga aktif: http://${lanIp}:${livePort}" -ForegroundColor Green
+}
+Write-Host "[NPI] Jalankan scripts\deploy-live.ps1 untuk merilis perubahan kode baru ke rekan kerja di :5173." -ForegroundColor DarkGray
 Write-Host ""
 
 } finally {

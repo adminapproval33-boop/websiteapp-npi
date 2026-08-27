@@ -73,7 +73,6 @@ productSpecRouter.get(
       },
       include: { parameters: { orderBy: { no: "asc" } } },
       orderBy: { timestamp: "desc" },
-      take: 500,
     });
 
     res.json({ success: true, data: specs });

@@ -5,7 +5,7 @@ import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import BarcodeSvg from "../../components/BarcodeSvg";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import { formatDateDDMMYYYY, validateNotFutureDate } from "../../lib/datetime";
+import { formatDateDDMMYYYY, toDateTimeLocalValue, validateNotFutureDate } from "../../lib/datetime";
 import LabelHistoryPage from "./LabelHistoryPage";
 import "../../styles/printLabel.css";
 
@@ -27,6 +27,13 @@ interface CrossModuleData {
   codeTanki: string | null;
   iuPlant: string | null;
   remark: string | null;
+}
+
+/** Baris Admin QC TERAKHIR utk 1 Order (dari GET /admin-qc/latest-by-order/:order)
+ * -- dipakai KHUSUS utk autofill "Lot No"/"Lot Passed" (lihat prop
+ * `autofillLotFromAdminQc`), cuma ambil field yg dipakai. */
+interface AdminQcLatestRow {
+  lotPassed: string | null;
 }
 
 /** 1 tanki (baris MillingLog) milik Order yg lagi dicari -- dipakai dropdown
@@ -141,6 +148,10 @@ export default function ProductionLabelEntryPage({
   showPreview = true,
   hiddenFields = [],
   extraFields = [],
+  lotNoLabel = "Lot No",
+  autofillLotFromAdminQc = false,
+  autofillShelfLifeFromMaterial = false,
+  autofillShelfLifeFromMaterialAndType = true,
 }: {
   /** Mode ringkas dipakai pop-up "Info Proses Material" -> baris "Production
    * Label" setelah Packing (2026-08-11, instruksi eksplisit user: admin tidak
@@ -183,6 +194,46 @@ export default function ProductionLabelEntryPage({
    * berubah, field2 ini sudah kelihatan di panel Preview Label), FG isi
    * lewat ProductionLabelEntryFgPage.tsx. */
   extraFields?: ProductionLabelExtraField[];
+  /** Label kolom "Lot No" (2026-08-27, instruksi eksplisit user, KHUSUS Label
+   * Entry FG) -- default "Lot No" (SFG tidak berubah), FG override ke
+   * "Lot Passed" krn nilainya sekarang disambungkan ke Admin QC (lihat prop
+   * `autofillLotFromAdminQc`). Field DB/state di baliknya (`lotNo`) TIDAK
+   * berubah nama -- ini murni label yg ditampilkan ke user. */
+  lotNoLabel?: string;
+  /** Autofill kolom "Lot No"/"Lot Passed" dari Admin QC kolom "Lot Passed"
+   * Order yg sama (2026-08-27, instruksi eksplisit user, KHUSUS Label Entry
+   * FG lewat ProductionLabelEntryFgPage.tsx -- default false, SFG tidak
+   * berubah krn Lot No di sana murni manual, tidak ada sumber otomatisnya).
+   * HANYA mengisi kalau field masih kosong SETELAH saran dari History
+   * Production Label Order ini sendiri (lihat handleOrderFound) -- own
+   * history tetap didahulukan krn lebih spesifik (persis apa yg pernah
+   * dipakai utk label Order ini), Admin QC cuma fallback utk Order yg belum
+   * pernah masuk History label FG. Tetap bisa diedit manual krn ini murni
+   * saran, bukan dikunci read-only. */
+  autofillLotFromAdminQc?: boolean;
+  /** Autofill kolom "Shelf Life (bulan)" dari Material Number yg SAMA di
+   * Order LAIN (2026-08-27, instruksi eksplisit user, KHUSUS Label Entry FG
+   * lewat ProductionLabelEntryFgPage.tsx -- default false, SFG tidak
+   * berubah). Dipakai bareng blok saran Material Type/Drum Colour yg sudah
+   * ada (sama sumber `${apiBase}/latest-by-material/:materialNumber`) --
+   * KALAH prioritas dari saran History Order ini sendiri di atas (HANYA
+   * mengisi kalau shelfLife masih kosong), krn Order-spesifik lebih akurat
+   * drpd disamakan lintas Order. Tetap bisa diedit manual, murni saran. */
+  autofillShelfLifeFromMaterial?: boolean;
+  /** Autofill "Shelf Life (bulan)" dari kombinasi Material Number + Material
+   * Type yg SAMA di Order LAIN (2026-08-27, instruksi eksplisit user, KHUSUS
+   * Label Entry SFG -- default true krn ini varian default komponen ini,
+   * FG explicitly set false lewat ProductionLabelEntryFgPage.tsx krn field
+   * Material Type disembunyikan total di FG, tidak relevan di sana; FG
+   * pakai `autofillShelfLifeFromMaterial` di atas yg materialNumber SAJA).
+   * BEDA dari saran Material Type/Drum Colour yg sudah ada (materialNumber
+   * SAJA) -- Material Number yg SAMA bisa punya beberapa Material Type
+   * dgn Shelf Life BEDA-BEDA, jadi lookup-nya WAJIB ikut menyaring Material
+   * Type juga (lihat useEffect reaktif thd `pasteType` di bawah, BUKAN cuma
+   * dipanggil sekali di handleOrderFound spt saran lain -- supaya tetap
+   * ikut nyesuaikan begitu Material Type berubah/dipilih manual belakangan).
+   * HANYA mengisi kalau Shelf Life masih kosong, tetap bisa diedit manual. */
+  autofillShelfLifeFromMaterialAndType?: boolean;
 } = {}) {
   const hidden = new Set(hiddenFields);
   const extra = new Set(extraFields);
@@ -275,6 +326,39 @@ export default function ProductionLabelEntryPage({
     setExp(`${expDate.getFullYear()}-${pad(expDate.getMonth() + 1)}-${pad(expDate.getDate())}`);
   }, [lotNo, shelfLife]);
 
+  // Autofill "Shelf Life (bulan)" dari kombinasi Material Number + Material
+  // Type (2026-08-27, instruksi eksplisit user, KHUSUS `autofillShelfLifeFromMaterialAndType`
+  // -- Label Entry SFG) -- REAKTIF thd `pasteType` (bukan cuma sekali saat
+  // Order ditemukan spt saran lain di handleOrderFound) supaya tetap ikut
+  // menyesuaikan begitu Material Type-nya diketahui belakangan (dari saran
+  // materialNumber-only di handleOrderFound) ATAU dipilih manual oleh user --
+  // Material Number yg SAMA bisa punya beberapa Material Type dgn Shelf Life
+  // BEDA-BEDA, jadi TIDAK cukup materialNumber saja. HANYA mengisi kalau
+  // Shelf Life masih kosong (tidak menimpa isian manual/hasil autofill lain),
+  // tetap bisa diedit manual.
+  useEffect(() => {
+    if (!autofillShelfLifeFromMaterialAndType) return;
+    const materialNumber = data?.materialNumber;
+    const type = pasteType.trim();
+    if (!materialNumber || !type) return;
+    let cancelled = false;
+    api
+      .get<{ success: boolean; data: ProductionLabelHistoryRow | null }>(
+        `${apiBase}/latest-by-material-and-type/${encodeURIComponent(materialNumber)}/${encodeURIComponent(type)}`
+      )
+      .then((res) => {
+        if (cancelled) return;
+        if (res.data?.shelfLife) setShelfLife((v) => v || res.data!.shelfLife || "");
+      })
+      .catch(() => {
+        /* saran dari kombinasi Material Number + Material Type bersifat opsional -- kalau gagal, biarkan user isi manual */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.materialNumber, pasteType, autofillShelfLifeFromMaterialAndType, apiBase]);
+
   async function handleOrderFound(found: OrderRefData) {
     setData(found);
     setError("");
@@ -331,14 +415,37 @@ export default function ProductionLabelEntryPage({
       /* Order ini belum pernah masuk History Production Label -- lanjut ke saran cross-module di bawah */
     }
 
-    // Material Type/Drum Colour dari Material Number yg SAMA di Order LAIN
-    // (2026-08-25, instruksi eksplisit user: mempercepat input admin) --
-    // KALAH prioritas dari saran Order-spesifik di atas (skip kalau `own`
-    // sudah mengisi salah satunya), krn Material Type/Drum Colour itu
-    // properti Material, bukan Order, jadi wajar disamakan lintas Order.
-    // Tetap bisa diedit manual spt biasa (state biasa, bukan read-only).
-    // KHUSUS SFG -- FG menyembunyikan kedua field ini sama sekali.
-    if (found.materialNumber && (!hidden.has("materialType") || !hidden.has("drumColour"))) {
+    // Autofill "Lot No"/"Lot Passed" dari Admin QC kolom "Lot Passed" Order yg
+    // SAMA (2026-08-27, instruksi eksplisit user, KHUSUS `autofillLotFromAdminQc`
+    // -- Label Entry FG) -- HANYA kalau masih kosong SETELAH saran own-history
+    // di atas (own-history lebih spesifik, didahulukan). Lot Passed di Admin QC
+    // adalah datetime-local, dipotong ke "yyyy-mm-dd" krn field ini `<input
+    // type="date">`. Tetap bisa diedit manual, ini murni saran.
+    if (autofillLotFromAdminQc) {
+      try {
+        const adminQc = await api.get<{ success: boolean; data: AdminQcLatestRow | null }>(
+          `/admin-qc/latest-by-order/${encodeURIComponent(found.order)}`
+        );
+        if (adminQc.data?.lotPassed) {
+          const lotPassedDate = toDateTimeLocalValue(adminQc.data.lotPassed).slice(0, 10);
+          if (lotPassedDate) setLotNo((v) => v || lotPassedDate);
+        }
+      } catch {
+        /* Order ini belum py Lot Passed di Admin QC -- biarkan kosong, operator isi manual */
+      }
+    }
+
+    // Material Type/Drum Colour (SFG) & Shelf Life (FG, lewat
+    // `autofillShelfLifeFromMaterial`) dari Material Number yg SAMA di Order
+    // LAIN (2026-08-25 & 2026-08-27, instruksi eksplisit user: mempercepat
+    // input admin) -- KALAH prioritas dari saran Order-spesifik di atas (skip
+    // kalau `own` sudah mengisi salah satunya), krn ketiganya properti
+    // Material, bukan Order, jadi wajar disamakan lintas Order. Tetap bisa
+    // diedit manual spt biasa (state biasa, bukan read-only).
+    if (
+      found.materialNumber &&
+      (!hidden.has("materialType") || !hidden.has("drumColour") || autofillShelfLifeFromMaterial)
+    ) {
       try {
         const matRes = await api.get<{ success: boolean; data: ProductionLabelHistoryRow | null }>(
           `${apiBase}/latest-by-material/${encodeURIComponent(found.materialNumber)}`
@@ -346,9 +453,10 @@ export default function ProductionLabelEntryPage({
         if (matRes.data) {
           if (!hidden.has("materialType")) setPasteType((v) => v || matRes.data!.pasteType || "");
           if (!hidden.has("drumColour")) setDrumColour((v) => v || matRes.data!.drumColour || "");
+          if (autofillShelfLifeFromMaterial) setShelfLife((v) => v || matRes.data!.shelfLife || "");
         }
       } catch {
-        /* Material ini belum pernah masuk History Production Label SFG -- biarkan kosong, operator isi manual */
+        /* Material ini belum pernah masuk History Production Label -- biarkan kosong, operator isi manual */
       }
     }
 
@@ -535,10 +643,13 @@ export default function ProductionLabelEntryPage({
                 bisa diedit manual & ikut tersimpan ke History (kolom DB
                 `volume`/`jumlahPer`, cuma ada di ProductionLabelFg). */}
             {/* Pilih Tanki (2026-08-25, instruksi eksplisit user) -- urutan
-                kolom: Order, Pilih Tanki, Shelf Life (bulan), Lot No, Exp,
-                Code Tanki, IU Plant, Material Type, Drum Colour. Ditaruh
-                PALING ATAS field-grid (tepat setelah Order) supaya operator
-                pilih tanki dulu sebelum isi field lain. */}
+                kolom (DIREVISI 2026-08-27, instruksi eksplisit user): Order,
+                Pilih Tanki, Material Type, Shelf Life (bulan), Lot No, Exp,
+                Code Tanki, IU Plant, Drum Colour, Remark. Pilih Tanki
+                ditaruh PALING ATAS field-grid (tepat setelah Order) supaya
+                operator pilih tanki dulu sebelum isi field lain -- TIDAK ikut
+                disebut user di urutan barunya, jadi posisinya dipertahankan
+                di depan. */}
             {!hidden.has("codeTanki") && tankOptions.length > 0 && (
               <div className="field">
                 <label>Pilih Tanki</label>
@@ -558,6 +669,19 @@ export default function ProductionLabelEntryPage({
                 <input value={jumlahPer} onChange={(e) => setJumlahPer(e.target.value)} placeholder="mis. 1/200" />
               </div>
             )}
+            {!hidden.has("materialType") && (
+              <div className="field">
+                <label>Material Type</label>
+                <select value={pasteType} onChange={(e) => setPasteType(e.target.value)}>
+                  <option value="">-- Pilih --</option>
+                  {PASTE_TYPE_OPTIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="field">
               <label>Shelf Life (bulan)</label>
               <input
@@ -569,7 +693,7 @@ export default function ProductionLabelEntryPage({
               />
             </div>
             <div className="field">
-              <label>Lot No</label>
+              <label>{lotNoLabel}</label>
               <input type="date" value={lotNo} onChange={(e) => setLotNo(e.target.value)} />
             </div>
             <div className="field">
@@ -624,19 +748,6 @@ export default function ProductionLabelEntryPage({
             )}
             {!hidden.has("iuPlant") && (
               <IuPlantSelect id="production-label-iu-plant" value={iuPlant} onChange={setIuPlant} plant={data?.plant ?? ""} required={false} />
-            )}
-            {!hidden.has("materialType") && (
-              <div className="field">
-                <label>Material Type</label>
-                <select value={pasteType} onChange={(e) => setPasteType(e.target.value)}>
-                  <option value="">-- Pilih --</option>
-                  {PASTE_TYPE_OPTIONS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </div>
             )}
             {!hidden.has("drumColour") && (
               <div className="field">

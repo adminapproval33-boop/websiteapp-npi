@@ -88,7 +88,6 @@ maintenanceRouter.get(
     const rows = await prisma.maintenanceLog.findMany({
       orderBy: { timestamp: "desc" },
       include: { attachments: true },
-      take: 500,
     });
     res.json({ success: true, data: rows.map((r) => ({ ...r, status: computeStatus(r) })) });
   })

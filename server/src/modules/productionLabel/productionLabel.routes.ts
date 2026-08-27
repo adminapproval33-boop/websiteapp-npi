@@ -109,6 +109,33 @@ productionLabelRouter.get(
   })
 );
 
+/// Autofill "Shelf Life (bulan)" dari kombinasi Material Number + Material
+/// Type yg SAMA di Order LAIN (2026-08-27, instruksi eksplisit user) -- BEDA
+/// dari `/latest-by-material/:materialNumber` di atas (materialNumber SAJA,
+/// dipakai utk saran Material Type/Drum Colour): Material Number yg SAMA
+/// bisa punya beberapa Material Type berbeda dgn Shelf Life yg BEDA-BEDA
+/// juga per Type-nya, jadi lookup Shelf Life WAJIB ikut menyaring Material
+/// Type, tidak cukup Material Number saja (kalau cuma Material Number,
+/// risiko dapat Shelf Life dari Material Type yg salah). Dipakai di
+/// ProductionLabelEntryPage.tsx lewat useEffect reaktif thd `pasteType`
+/// (bukan cuma sekali saat Order ditemukan) -- begitu Material Type
+/// diketahui/berubah (baik dari saran materialNumber-only di atas, MAUPUN
+/// dipilih manual user), Shelf Life ikut disarankan ulang sesuai kombinasi
+/// yg BENAR. HANYA mengisi kalau Shelf Life masih kosong, tetap bisa diedit
+/// manual, murni saran.
+productionLabelRouter.get(
+  "/latest-by-material-and-type/:materialNumber/:pasteType",
+  asyncRoute(async (req, res) => {
+    const materialNumber = String(req.params.materialNumber).trim();
+    const pasteType = String(req.params.pasteType).trim();
+    const latest =
+      materialNumber && pasteType
+        ? await prisma.productionLabel.findFirst({ where: { materialNumber, pasteType }, orderBy: { timestamp: "desc" } })
+        : null;
+    res.json({ success: true, data: latest });
+  })
+);
+
 productionLabelRouter.get(
   "/history",
   asyncRoute(async (_req, res) => {

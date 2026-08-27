@@ -235,7 +235,11 @@ approvalRouter.get(
  * lebih dulu drpd tim Approval (padahal urutan real-world tidak selalu
  * berurutan) -- kolom "Proses" & "Production Actions" SENGAJA dibuat
  * independen, supaya tetap ketahuan kalau ada Order yg sudah di-Packing
- * tapi administrasi Approval-nya belum selesai. */
+ * tapi administrasi Approval-nya belum selesai.
+ * Order JUGA otomatis hilang dari daftar ini kalau kolom "QC Passed"-nya di
+ * Admin QC (Stage terbaru yg SAMA di atas) sudah terisi (2026-08-27, instruksi
+ * eksplisit user) -- QC Passed terisi berarti Order ini sudah dianggap
+ * selesai dari sisi QC, jadi tidak perlu lagi nongol di antrian. */
 approvalRouter.get(
   "/queue",
   asyncRoute(async (_req, res) => {
@@ -254,7 +258,7 @@ approvalRouter.get(
     }
 
     const queueRows = Array.from(latestByOrder.values()).filter(
-      (r) => (r.typeLot === "Approval" || r.typeLot === "Joint Lot") && !approvalOrderSet.has(r.order)
+      (r) => (r.typeLot === "Approval" || r.typeLot === "Joint Lot") && !approvalOrderSet.has(r.order) && !r.qcPassed
     );
     queueRows.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
@@ -308,7 +312,6 @@ approvalRouter.get(
         ],
       },
       orderBy: { timestamp: "desc" },
-      take: 500,
     });
 
     // Order Type tidak disimpan di ApprovalSchedule (kolom ini baru ada di
@@ -356,7 +359,6 @@ async function fetchLotHistory(filterCol: string, filterValue: string, statusFil
     where,
     include: { attachments: { select: { id: true } } },
     orderBy: { timestamp: "desc" },
-    take: 1000,
   });
 
   const enriched = rows.map((row) => ({

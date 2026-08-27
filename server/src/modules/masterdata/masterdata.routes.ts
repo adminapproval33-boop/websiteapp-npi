@@ -671,7 +671,6 @@ masterDataRouter.get(
           }
         : undefined,
       orderBy: { materialNumber: "asc" },
-      take: 5000,
     });
     res.json({ success: true, data: rows });
   })
@@ -839,7 +838,6 @@ masterDataRouter.get(
           }
         : undefined,
       orderBy: { fullName: "asc" },
-      take: 500,
     });
     res.json({ success: true, data: employees });
   })

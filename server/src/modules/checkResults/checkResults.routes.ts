@@ -109,7 +109,6 @@ checkResultsRouter.get(
       },
       include: { parameters: { orderBy: { no: "asc" } }, appearanceFiles: true },
       orderBy: { timestamp: "desc" },
-      take: 500,
     });
 
     res.json({ success: true, data: results });

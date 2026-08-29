@@ -405,7 +405,7 @@ function TankBranchPanel({
                 padding: "6px 8px",
                 border: isEditing ? "1px solid var(--navy)" : GRID_BORDER,
                 borderRadius: 4,
-                background: isEditing ? "#eef2ff" : "transparent",
+                background: isEditing ? "#fff1f2" : "transparent",
                 fontSize: "0.85rem",
                 flexWrap: "wrap",
                 cursor: "pointer",

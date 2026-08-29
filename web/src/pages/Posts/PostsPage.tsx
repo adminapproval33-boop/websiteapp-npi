@@ -195,9 +195,9 @@ export default function PostsPage() {
                     padding: "2px 10px",
                     fontSize: 12,
                     borderRadius: 999,
-                    color: search === `#${t.tag}` ? "#fff" : "#4f46e5",
-                    background: search === `#${t.tag}` ? "#4f46e5" : "transparent",
-                    borderColor: "#4f46e5",
+                    color: search === `#${t.tag}` ? "#fff" : "#e11d48",
+                    background: search === `#${t.tag}` ? "#e11d48" : "transparent",
+                    borderColor: "#e11d48",
                   }}
                 >
                   #{t.tag} <span style={{ opacity: 0.7 }}>({t.count})</span>
@@ -216,8 +216,8 @@ export default function PostsPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background: "#eef2ff",
-            border: "1px solid #c7d2fe",
+            background: "#fff1f2",
+            border: "1px solid #fecdd3",
           }}
         >
           <span style={{ fontSize: 13 }}>

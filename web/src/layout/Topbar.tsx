@@ -33,16 +33,19 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           type="button"
           onClick={onMenuClick}
           aria-label="Buka menu"
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-slate-600 hover:bg-slate-100 lg:hidden"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-white hover:bg-white/10 lg:hidden"
         >
           ☰
         </button>
-        <span className="topbar-title truncate">Websiteapp NPI</span>
+        <span className="topbar-title truncate">
+          <span className="brand-blue">Website</span>
+          <span className="brand-red">app</span> <span className="brand-blue">Npi</span>
+        </span>
       </div>
       <div className="topbar-right">
-        <span className="hidden text-slate-400 sm:inline">{now.toLocaleString("id-ID")}</span>
+        <span className="hidden sm:inline">{now.toLocaleString("id-ID")}</span>
 
-        <div className="flex items-center gap-2.5">
+        <div className="topbar-user-card">
           {user?.avatarPath ? (
             <img
               src={fileUrl(user.avatarPath)}
@@ -50,7 +53,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
               className="h-9 w-9 shrink-0 rounded-full object-cover"
             />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-rose-100 text-sm font-bold text-rose-700">
               {initials}
             </div>
           )}
@@ -62,7 +65,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         </div>
 
-        <button className="btn btn-outline" onClick={() => navigate("/settings")} title="Pengaturan">
+        <button className="btn topbar-settings-btn" onClick={() => navigate("/settings")} title="Pengaturan">
           ⚙️ Pengaturan
         </button>
       </div>

@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:validate": "prisma validate",
-    "seed": "tsx src/scripts/seed.ts"
+    "seed": "tsx src/scripts/seed.ts",
+    "force-logout-all": "tsx src/scripts/forceLogoutAll.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

@@ -387,7 +387,7 @@ export default function DataTable<T>({
                       width: 6,
                       cursor: "col-resize",
                       touchAction: "none",
-                      background: header.column.getIsResizing() ? "#4f46e5" : "transparent",
+                      background: header.column.getIsResizing() ? "#e11d48" : "transparent",
                     }}
                   />
                 </th>

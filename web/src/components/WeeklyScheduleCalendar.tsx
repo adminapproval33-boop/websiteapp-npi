@@ -283,7 +283,7 @@ function DayColumn({
         flex: 1,
         minHeight: 160,
         padding: 8,
-        background: isOver ? "#eef2ff" : isToday ? "#fafaff" : undefined,
+        background: isOver ? "#fff1f2" : isToday ? "#fffafa" : undefined,
         transition: "background 0.1s",
       }}
     >

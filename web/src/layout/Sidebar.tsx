@@ -12,6 +12,18 @@ import { MenuNode, menuTree, filterHiddenMenus } from "./menu";
  * user lagi buka menu lain, bukan cuma pas di Beranda. */
 const POSTS_POLL_MS = 15000;
 
+/** Ikon per grup menu top-level (2026-08-29, senada mockup redesign sidebar
+ * merah -- sebelumnya cuma "Beranda" yg py ikon 🏠, grup lain polos teks). */
+const GROUP_ICONS: Record<string, string> = {
+  Dashboard: "📊",
+  "Production & MRP Schedule": "🗓️",
+  "Portal Quality Control": "✅",
+  "Production Label": "🏷️",
+  Maintenance: "🔧",
+  "Purchase Requisition": "🛒",
+  "Developer Tools": "💻",
+};
+
 function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => void }) {
   if (node.type === "leaf") {
     return (
@@ -22,7 +34,10 @@ function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => v
   }
   return (
     <details className="sidebar-group">
-      <summary>{node.label}</summary>
+      <summary>
+        {GROUP_ICONS[node.label] ? `${GROUP_ICONS[node.label]} ` : ""}
+        {node.label}
+      </summary>
       {node.children.map((child) => (
         <SidebarNode key={child.label} node={child} onNavigate={onNavigate} />
       ))}

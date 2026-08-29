@@ -17,7 +17,7 @@ export function ExcelRow({ children }: { children: ReactNode }) {
 
 /** Header sub-bagian berwarna DI DALAM 1 ExcelBlock: "QC Input Column" /
  * "Production Input Column" / "Technical Input Column" di form Approval --
- * beda dari judul ExcelBlock sendiri (indigo). Warnanya SENGAJA disamakan
+ * beda dari judul ExcelBlock sendiri (rose/brand). Warnanya SENGAJA disamakan
  * persis dgn warna tahap terkait di "Proses Bar" (Dashboard Production Order
  * Monitoring) supaya bahasa warna di seluruh app konsisten: qc = kuning QC,
  * production = hijau Packing, technical = biru Aftermix. */

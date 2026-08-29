@@ -268,7 +268,7 @@ export default function OpenApprovalWorklist() {
                 resetPlantScopedFilters();
               }}
               className={`rounded-lg px-3 py-1.5 font-mono text-xs font-semibold transition ${
-                plant === p ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-100"
+                plant === p ? "bg-rose-600 text-white" : "text-slate-500 hover:bg-slate-100"
               }`}
             >
               {p === "ALL" ? "Semua" : p}
@@ -335,7 +335,7 @@ export default function OpenApprovalWorklist() {
                 setExpanded(null);
               }}
               className={`rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition ${
-                view === v ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                view === v ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
               }`}
             >
               By {VIEW_LABEL[v]}
@@ -470,7 +470,7 @@ export default function OpenApprovalWorklist() {
               </thead>
               <tbody>
                 {explorerRows.map((d) => (
-                  <tr key={d.approvalId} className="border-b border-slate-100 last:border-b-0 hover:bg-indigo-50/40">
+                  <tr key={d.approvalId} className="border-b border-slate-100 last:border-b-0 hover:bg-rose-50/40">
                     <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.plant}</td>
                     <td className="px-3 py-2">
                       <button
@@ -536,7 +536,7 @@ export default function OpenApprovalWorklist() {
 }
 
 function Kpi({ label, value, sub, tone }: { label: string; value: string | number; sub: string; tone?: "amber" | "teal" | "red" }) {
-  const border = tone === "amber" ? "border-t-amber-500" : tone === "teal" ? "border-t-emerald-500" : tone === "red" ? "border-t-red-500" : "border-t-indigo-500";
+  const border = tone === "amber" ? "border-t-amber-500" : tone === "teal" ? "border-t-emerald-500" : tone === "red" ? "border-t-red-500" : "border-t-rose-500";
   const color = tone === "amber" ? "text-amber-600" : tone === "teal" ? "text-emerald-600" : tone === "red" ? "text-red-600" : "text-slate-800";
   return (
     <div className={`rounded-xl border border-slate-200 border-t-4 bg-white p-3.5 shadow-sm ${border}`}>

@@ -100,7 +100,7 @@ export default function ChatWindow({ contact, onClose }: { contact: ChatContact;
               <div
                 style={{
                   maxWidth: "78%",
-                  background: mine ? "#4f46e5" : "#f1f5f9",
+                  background: mine ? "#e11d48" : "#f1f5f9",
                   color: mine ? "#fff" : "#0f172a",
                   borderRadius: 12,
                   padding: "6px 10px",

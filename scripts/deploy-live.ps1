@@ -29,6 +29,19 @@ try {
     Log "=== Mulai deploy ke live ==="
 
     Set-Location $liveRoot
+    Log "Fetch branch 'main' terbaru dari origin (GitHub)..."
+    # SEBELUMNYA branch 'main' lokal di liveRoot cuma di-merge apa adanya,
+    # tanpa fetch dulu -- jadi kalau commit baru cuma di-push ke GitHub dari
+    # devRoot (belum sempat ada proses lain yg fetch di liveRoot), local
+    # 'main' di sini bisa ketinggalan & ff-only merge di bawah cuma
+    # mengulang commit lama (2026-08-29, ditemukan saat rilis redesign
+    # login/tema). Fetch langsung ke ref 'main' lokal (bukan checkout) aman
+    # dilakukan sekalipun branch yg sedang aktif itu 'production'.
+    git fetch origin main:main | Tee-Object -FilePath $logFile -Append
+    if ($LASTEXITCODE -ne 0) {
+        throw "git fetch origin main:main gagal. Cek koneksi/kredensial GitHub di $liveRoot."
+    }
+
     Log "Fast-forward branch 'production' ke commit terbaru di 'main'..."
     git merge main --ff-only | Tee-Object -FilePath $logFile -Append
     if ($LASTEXITCODE -ne 0) {

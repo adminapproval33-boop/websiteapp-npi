@@ -187,7 +187,7 @@ function DayColumn({ date, rows, onReorder }: { date: Date; rows: MaintenanceRow
         <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--text-muted)", letterSpacing: 0.5 }}>{DAY_LABELS[date.getDay() === 0 ? 6 : date.getDay() - 1]}</div>
         <div style={{ fontSize: "1rem", fontWeight: 700, color: isToday ? "var(--navy)" : "var(--text-main)" }}>{date.getDate()}</div>
       </div>
-      <div ref={setNodeRef} style={{ flex: 1, minHeight: 160, padding: 8, background: isOver ? "#eef2ff" : isToday ? "#fafaff" : undefined, transition: "background 0.1s" }}>
+      <div ref={setNodeRef} style={{ flex: 1, minHeight: 160, padding: 8, background: isOver ? "#fff1f2" : isToday ? "#fffafa" : undefined, transition: "background 0.1s" }}>
         {sorted.map((row, idx) => (
           <ScheduledCard
             key={row.id}

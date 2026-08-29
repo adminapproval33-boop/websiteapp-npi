@@ -237,7 +237,7 @@ export default function MentionTextarea({
                     textAlign: "left",
                     padding: "6px 10px",
                     border: 0,
-                    background: i === highlight ? "#eef2ff" : "transparent",
+                    background: i === highlight ? "#fff1f2" : "transparent",
                     cursor: "pointer",
                   }}
                 >
@@ -267,11 +267,11 @@ export default function MentionTextarea({
                     textAlign: "left",
                     padding: "6px 10px",
                     border: 0,
-                    background: i === highlight ? "#eef2ff" : "transparent",
+                    background: i === highlight ? "#fff1f2" : "transparent",
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#4f46e5" }}>#{h.tag}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#e11d48" }}>#{h.tag}</span>
                   <span style={{ fontSize: 11, color: "var(--muted)" }}>{h.count} postingan</span>
                 </button>
               ))}

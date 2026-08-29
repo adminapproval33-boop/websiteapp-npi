@@ -124,7 +124,7 @@ function ProfileSection() {
           <div>
             <div className="font-semibold text-slate-800">{user?.name}</div>
             <div className="text-sm text-slate-400">{user?.department}</div>
-            {uploading && <div className="text-xs text-indigo-500">Mengunggah foto...</div>}
+            {uploading && <div className="text-xs text-rose-500">Mengunggah foto...</div>}
             {error && <p className="error-text mt-1">{error}</p>}
           </div>
         </div>

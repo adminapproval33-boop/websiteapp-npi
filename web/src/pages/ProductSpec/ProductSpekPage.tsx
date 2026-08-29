@@ -417,13 +417,13 @@ export default function ProductSpekPage() {
                   {params.map((p, idx) => {
                     const isDragging = draggedParamIdx === idx;
                     const isDragOver = dragOverParamIdx === idx && draggedParamIdx !== idx;
-                    /* Highlight cukup tebal (border indigo + bg) SUPAYA tetap kelihatan
+                    /* Highlight cukup tebal (border rose + bg) SUPAYA tetap kelihatan
                        walau sebagian besar sel diisi <input> berlatar putih (2026-08-19,
                        laporan bug: highlight lama nyaris tidak terlihat -- background di
                        <tr> "tertutup" input putih di dalamnya, jadi border ditaruh di tiap
                        <td> supaya kelihatan di seluruh baris, bukan cuma celah padding). */
                     const dragOverTdStyle: React.CSSProperties = isDragOver
-                      ? { background: "#eef2ff", borderTop: "2px solid #6366f1" }
+                      ? { background: "#fff1f2", borderTop: "2px solid #f43f5e" }
                       : {};
                     return (
                       <tr

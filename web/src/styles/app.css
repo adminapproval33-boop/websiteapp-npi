@@ -1,4 +1,4 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -14,16 +14,17 @@
 /* ==========================================================================
    Design tokens. Nama variabel dipertahankan sama seperti sebelumnya
    (dipakai lewat inline style `var(--xxx)` di banyak halaman) -- hanya
-   NILAINYA yang diganti ke palet modern (indigo/slate), supaya seluruh
+   NILAINYA yang diganti ke palet modern (rose/slate, senada logo merah di
+   halaman login -- 2026-08-29), supaya seluruh
    halaman ikut ter-update otomatis tanpa perlu diubah satu per satu.
    ========================================================================== */
 :root {
-  --navy-dark: #3730a3; /* indigo-800 */
-  --navy: #4f46e5; /* indigo-600 */
-  --navy-light: #6366f1; /* indigo-500 */
+  --navy-dark: #9f1239; /* rose-800 */
+  --navy: #e11d48; /* rose-600 */
+  --navy-light: #f43f5e; /* rose-500 */
   --toolbar-bg: #f8fafc; /* slate-50 */
   --app-bg: #f1f5f9; /* slate-100 */
-  --panel-header: #eef2ff; /* indigo-50 */
+  --panel-header: #fff1f2; /* rose-50 */
   --border: #e2e8f0; /* slate-200 */
   --sidebar-bg: #ffffff;
   --text-main: #1e293b; /* slate-800 */
@@ -53,7 +54,7 @@
   select,
   textarea {
     @apply rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-800
-      shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40;
+      shadow-sm transition focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/40;
   }
 
   input:read-only,
@@ -69,9 +70,9 @@
    ========================================================================== */
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border-0 bg-indigo-600 px-4 py-2
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border-0 bg-rose-600 px-4 py-2
       text-sm font-semibold text-white shadow-sm transition-all duration-150
-      hover:bg-indigo-700 hover:shadow-md active:scale-[0.98]
+      hover:bg-rose-700 hover:shadow-md active:scale-[0.98]
       disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
   }
 
@@ -88,7 +89,7 @@
   }
 
   .btn-outline {
-    @apply bg-white text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50 hover:text-indigo-700;
+    @apply bg-white text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50 hover:text-rose-700;
   }
 
   .panel {
@@ -96,7 +97,7 @@
   }
 
   .panel-header {
-    @apply border-b border-slate-200 bg-indigo-50/70 px-5 py-3 text-[0.95rem] font-bold text-indigo-900;
+    @apply border-b border-slate-200 bg-rose-50/70 px-5 py-3 text-[0.95rem] font-bold text-rose-900;
   }
 
   .panel-body {
@@ -124,7 +125,7 @@
   .field select,
   .field textarea {
     @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800
-      shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40;
+      shadow-sm transition focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/40;
   }
 
   .field input:read-only,
@@ -163,7 +164,7 @@
   }
 
   table.data-table tbody tr {
-    @apply bg-white transition-colors hover:bg-indigo-50/40;
+    @apply bg-white transition-colors hover:bg-rose-50/40;
   }
 
   /* Varian tabel lebih rapat (2026-08-11, instruksi eksplisit user) -- KHUSUS
@@ -181,7 +182,7 @@
 
   .col-resize-handle:hover,
   .col-resize-handle:active {
-    @apply bg-indigo-500/70;
+    @apply bg-rose-500/70;
   }
 
   /* Sembunyikan scrollbar galeri gambar Papan Info (ImageCarousel.tsx) --
@@ -214,7 +215,7 @@
   }
 
   .tag-input {
-    @apply bg-indigo-100 text-indigo-700;
+    @apply bg-amber-100 text-amber-700;
   }
 
   .tag-view {
@@ -231,24 +232,56 @@
     @apply flex h-screen flex-col overflow-hidden bg-slate-100;
   }
 
+  /* Topbar biru solid + sidebar/footer merah marun solid (2026-08-29,
+     redesign kedua atas permintaan eksplisit user -- versi pertama cuma
+     aksen tipis dianggap "kurang terlihat", user kasih contoh mockup
+     konkret: topbar biru tegas, sidebar merah gelap, watermark lebih
+     jelas). Warna dipilih dari sampling mockup yg dikirim user. */
   .topbar {
-    @apply flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2 shadow-sm sm:px-5 sm:py-3;
+    @apply relative flex items-center justify-between gap-2 bg-blue-800 px-3 py-2 shadow-md sm:px-5 sm:py-3;
   }
 
+  /* Logo topbar disamakan PERSIS (teks + warna) dgn logo di kartu login
+     (2026-08-29, instruksi eksplisit user: "samakan logonya, hapus lagi
+     bingkainya" -- versi bingkai + putih/merah sebelumnya SALAH paham,
+     yg diminta cuma teks+warna Website/app/Npi biru-merah-biru itu sendiri,
+     apa adanya, walau latar topbar biru). Warna .brand-blue/.brand-red
+     didefinisikan sekali (lihat dekat .login-logo) & dipakai bersama.
+     Glow/shadow putih ditambahkan (2026-08-29, keluhan eksplisit user:
+     "Website"/"Npi" yg biru nyaris nyatu dgn latar topbar yg juga biru,
+     susah kebaca) -- text-shadow putih tipis di semua sisi (bukan cuma satu
+     arah) supaya tiap huruf "diberi outline cahaya" & tetap kontras walau
+     warnanya sendiri dekat dgn latar. */
   .topbar-title {
-    @apply bg-gradient-to-r from-indigo-600 to-indigo-800 bg-clip-text text-base font-extrabold tracking-tight text-transparent sm:text-lg;
+    @apply text-xl font-bold tracking-tight text-white sm:text-2xl;
+    font-family: "Britannic Bold", "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    text-shadow:
+      0 0 6px rgba(255, 255, 255, 0.85),
+      0 0 2px rgba(255, 255, 255, 0.95),
+      0 1px 1px rgba(255, 255, 255, 0.6);
   }
 
   .topbar-right {
-    @apply flex items-center gap-2 text-sm text-slate-600 sm:gap-4;
+    @apply flex items-center gap-2 text-sm text-blue-100 sm:gap-4;
+  }
+
+  /* Kartu putih yg "mengambang" di atas topbar biru, membungkus avatar+nama+NIK
+     -- persis spt di mockup, supaya tetap kontras & gampang dibaca di atas
+     biru (teks putih polos di sana kurang menonjol). */
+  .topbar-user-card {
+    @apply flex items-center gap-2.5 rounded-xl bg-white py-1 pl-1 pr-3 shadow-md;
   }
 
   .topbar-user {
-    @apply hidden flex-col items-end leading-tight sm:flex;
+    @apply hidden flex-col items-start leading-tight sm:flex;
   }
 
   .topbar-user .access-badge {
     @apply text-xs text-slate-400;
+  }
+
+  .topbar-settings-btn {
+    @apply bg-rose-600 text-white hover:bg-rose-700;
   }
 
   .app-body {
@@ -260,8 +293,8 @@
      state React (lihat AppLayout.tsx). Mulai `lg:` kembali ke rail statis
      yang selalu tampil seperti sebelumnya -- perilaku desktop TIDAK berubah. */
   .sidebar {
-    @apply absolute inset-y-0 left-0 z-40 w-[280px] shrink-0 -translate-x-full overflow-y-auto border-r
-      border-slate-200 bg-white py-3 shadow-xl transition-transform duration-200 ease-in-out
+    @apply absolute inset-y-0 left-0 z-40 w-[280px] shrink-0 -translate-x-full overflow-y-auto
+      bg-red-900 py-3 shadow-xl transition-transform duration-200 ease-in-out
       lg:static lg:z-auto lg:translate-x-0 lg:shadow-none;
   }
 
@@ -274,7 +307,7 @@
   }
 
   .sidebar-group summary {
-    @apply mx-2 cursor-pointer select-none rounded-lg px-3 py-2 text-[0.83rem] font-bold text-slate-500 transition hover:bg-slate-100;
+    @apply mx-2 cursor-pointer select-none rounded-lg px-3 py-2 text-[0.83rem] font-bold text-rose-100 transition hover:bg-white/10;
     list-style: none;
   }
 
@@ -284,7 +317,7 @@
 
   .sidebar-group summary::before {
     content: "\25B8";
-    @apply mr-2 inline-block text-slate-400 transition-transform duration-150;
+    @apply mr-2 inline-block text-rose-300/70 transition-transform duration-150;
   }
 
   .sidebar-group[open] > summary::before {
@@ -292,43 +325,191 @@
   }
 
   .sidebar-link {
-    @apply ml-5 mr-2 my-0.5 block rounded-lg px-3 py-2 text-[0.83rem] font-medium text-slate-600 no-underline transition-colors hover:bg-slate-100;
+    @apply ml-5 mr-2 my-0.5 block rounded-lg px-3 py-2 text-[0.83rem] font-medium text-rose-50/90 no-underline transition-colors hover:bg-white/10;
   }
 
   .sidebar-link.active {
-    @apply bg-indigo-600 text-white shadow-sm hover:bg-indigo-600;
+    @apply bg-rose-600 text-white shadow-sm hover:bg-rose-600;
   }
 
+  /* Watermark molekul "kimia" + siluet palet lukis besar di latar area kerja
+     -- versi pertama (cuma di pojok topbar/sidebar, opacity ~5%) dianggap
+     user "kurang terlihat"; sekarang ditaruh di WORKSPACE itu sendiri (area
+     yg sebelumnya polos), opacity dinaikkan supaya benar-benar kelihatan,
+     tapi tetap di BAWAH panel/tabel putih (yg opaque) jadi tidak mengganggu
+     baca data -- cuma nongol di celah/whitespace di sekitar konten. */
   .workspace {
-    @apply flex-1 overflow-auto bg-slate-100 p-3 sm:p-5;
+    @apply flex-1 overflow-auto p-3 sm:p-5;
+    /* 2026-08-29: dinaikkan dari #eef1f6 (nyaris putih, susah dibedakan dari
+       panel/kartu putih di atasnya -- keluhan eksplisit user) ke abu-abu yg
+       jelas kontras, senada slate-200/300 dipakai di tempat lain. */
+    background-color: #d9dee6;
+    background-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='104' viewBox='0 0 120 104'%3E%3Cpolygon points='30,0 90,0 120,52 90,104 30,104 0,52' fill='none' stroke='%237f1d1d' stroke-opacity='0.1' stroke-width='1.5'/%3E%3C/svg%3E"),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='360' viewBox='0 0 420 360'%3E%3Cpath d='M210 20C110 20 30 80 30 165c0 55 40 90 88 90 20 0 27-14 27-27s-7-20-7-33c0-20 17-33 40-33h67c47 0 80-37 80-80C325 45 270 20 210 20z' fill='%237f1d1d' fill-opacity='0.05'/%3E%3Ccircle cx='120' cy='95' r='20' fill='%237f1d1d' fill-opacity='0.06'/%3E%3Ccircle cx='180' cy='60' r='20' fill='%237f1d1d' fill-opacity='0.06'/%3E%3Ccircle cx='250' cy='80' r='20' fill='%237f1d1d' fill-opacity='0.06'/%3E%3Ccircle cx='95' cy='150' r='20' fill='%237f1d1d' fill-opacity='0.06'/%3E%3C/svg%3E");
+    background-repeat: repeat, no-repeat;
+    background-position: 0 0, right -40px bottom -20px;
+    background-size: 120px 104px, 460px auto;
   }
 
   .statusbar {
-    @apply flex shrink-0 justify-between border-t border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-400 sm:px-4;
+    @apply flex shrink-0 justify-between bg-red-900 px-3 py-1.5 text-xs text-rose-200/80 sm:px-4;
   }
 
   .login-page {
-    @apply flex h-screen items-center justify-center bg-gradient-to-br from-indigo-600 via-indigo-700 to-indigo-900;
+    @apply relative flex h-screen flex-col items-center justify-center overflow-hidden;
+    background-color: #7f1d1d;
+    background-image:
+      linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.08) 50%, transparent 60%),
+      radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.16), transparent 38%),
+      radial-gradient(circle at 88% 78%, rgba(255, 255, 255, 0.14), transparent 36%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='104' viewBox='0 0 120 104'%3E%3Cpolygon points='30,0 90,0 120,52 90,104 30,104 0,52' fill='none' stroke='white' stroke-opacity='0.09' stroke-width='1.5'/%3E%3C/svg%3E"),
+      linear-gradient(to bottom right, #dc2626, #b91c1c, #7f1d1d);
+    background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat;
   }
 
+  .login-decor {
+    @apply pointer-events-none absolute inset-0 z-0 overflow-hidden;
+  }
+
+  .decor-splash,
+  .decor-splatter,
+  .decor-molecule,
+  .decor-spray,
+  .decor-atom,
+  .decor-city,
+  .decor-network,
+  .decor-star,
+  .decor-smoke {
+    @apply absolute;
+  }
+
+  .decor-splash svg,
+  .decor-splatter svg,
+  .decor-molecule svg,
+  .decor-spray svg,
+  .decor-atom svg,
+  .decor-city svg,
+  .decor-network svg,
+  .decor-star svg,
+  .decor-smoke svg {
+    @apply block w-full;
+  }
+
+  .login-card-wrap {
+    @apply relative z-10;
+  }
+
+  .login-card-palette {
+    @apply pointer-events-none absolute z-0 w-[100px] drop-shadow-lg;
+  }
+
+  .login-card-palette svg {
+    @apply block w-full;
+  }
+
+  .login-card-palette-top {
+    @apply -right-7 -top-9 z-20 w-[92px] rotate-[8deg];
+  }
+
+  .login-card-palette-bottom {
+    @apply -bottom-12 -left-16 w-[150px] rotate-[-8deg];
+  }
+
+  /* Kotak login dibelah 2 warna (2026-08-29, instruksi eksplisit user):
+     header biru (senada topbar) + isi/body merah (senada tombol & tema
+     brand). overflow-hidden di wrapper supaya kedua blok warna ikut
+     kebentuk sudut rounded-nya, bukan cuma wrapper-nya doang. */
   .login-card {
-    @apply w-[360px] rounded-2xl bg-white p-8 shadow-2xl;
+    @apply relative z-10 w-[380px] overflow-hidden rounded-2xl shadow-2xl;
   }
 
-  .login-card h1 {
-    @apply m-0 mb-1 bg-gradient-to-r from-indigo-600 to-indigo-800 bg-clip-text text-xl font-extrabold text-transparent;
+  .login-card-header {
+    @apply bg-blue-800 px-8 pb-6 pt-8;
   }
 
-  .login-card p.subtitle {
-    @apply m-0 mb-5 text-sm text-slate-500;
+  .login-card-body {
+    @apply bg-red-800 px-8 pb-8 pt-6;
   }
 
-  .login-card .field {
+  /* Logo resmi (2026-08-29) -- disamakan persis dgn file "Websiteapp Npi
+     Logo.docx" yg dikirim user: font Britannic Bold (terpasang lokal di
+     Windows si user, dipakai via font-family biasa -- browser lain otomatis
+     jatuh ke fallback bold sans kalau font itu tidak ada), warna biru
+     #0070C0 utk "Website"/"Npi" dan merah #DC2626 (= red-600) utk "app".
+     TANPA bingkai (sempat ditambah lalu diminta dihapus lagi, 2026-08-29).
+     .brand-blue/.brand-red TIDAK di-scope ke .login-logo saja -- dipakai
+     bersama di topbar-title juga supaya kedua logo persis sama warnanya. */
+  .login-logo {
+    @apply m-0 mb-1 text-center text-4xl font-bold tracking-tight;
+    font-family: "Britannic Bold", "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  }
+
+  /* Header sekarang biru (bukan putih lagi) -- bagian logo yg birunya
+     ("Website"/"Npi") butuh glow putih spy tetap kontras dgn latar biru,
+     sama spt logo topbar. */
+  .login-card-header .login-logo {
+    text-shadow:
+      0 0 6px rgba(255, 255, 255, 0.85),
+      0 0 2px rgba(255, 255, 255, 0.95);
+  }
+
+  .brand-blue {
+    color: #0070c0;
+  }
+
+  .brand-red {
+    color: #dc2626;
+  }
+
+  .login-card-header .welcome {
+    @apply m-0 text-center text-base font-bold text-white;
+  }
+
+  .login-card-header p.subtitle {
+    @apply m-0 text-center text-sm font-medium text-blue-100;
+  }
+
+  .login-card-body .field {
     @apply mb-3.5;
   }
 
-  .login-card .btn {
-    @apply mt-1.5 w-full py-2.5;
+  .login-field {
+    @apply flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2.5 text-slate-400 transition-colors focus-within:border-red-400 focus-within:text-red-500;
+  }
+
+  .login-field svg {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .login-field input {
+    @apply w-full border-0 bg-transparent p-0 text-sm text-slate-700 outline-none placeholder:font-medium placeholder:text-slate-400;
+  }
+
+  .login-forgot {
+    @apply mb-3.5 block text-right text-xs font-medium text-rose-100 no-underline hover:text-white hover:underline;
+  }
+
+  /* Warna tombol MASUK disamakan dgn warna item sidebar aktif (bg-rose-600,
+     lihat .sidebar-link.active) -- instruksi eksplisit user 2026-08-29. */
+  .login-card-body .btn {
+    @apply mt-1.5 w-full rounded-full bg-rose-600 py-3 font-bold tracking-wide text-white shadow-md hover:bg-rose-700;
+  }
+
+  .login-card-body .status-text {
+    @apply text-emerald-300;
+  }
+
+  .login-card-body .error-text {
+    @apply text-amber-300;
+  }
+
+  .login-contact {
+    @apply mt-4 text-center text-xs text-rose-100/80;
+  }
+
+  .login-contact a {
+    @apply font-medium text-white no-underline hover:underline;
   }
 
   .coming-soon {
@@ -354,11 +535,11 @@
   }
 
   .settings-nav-item.active {
-    @apply bg-indigo-50 text-indigo-700;
+    @apply bg-rose-50 text-rose-700;
   }
 
   .settings-nav-item.active .settings-nav-icon {
-    @apply bg-indigo-600 text-white;
+    @apply bg-rose-600 text-white;
   }
 
   .settings-nav-divider {
@@ -402,7 +583,7 @@
   }
 
   .settings-avatar-circle {
-    @apply flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-lg font-bold text-indigo-700;
+    @apply flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-rose-100 text-lg font-bold text-rose-700;
   }
 
   .settings-avatar-img {
@@ -415,7 +596,7 @@
 
   .settings-avatar-edit-btn {
     @apply absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white
-      bg-indigo-600 text-[0.7rem] text-white shadow-sm transition hover:bg-indigo-700
+      bg-rose-600 text-[0.7rem] text-white shadow-sm transition hover:bg-rose-700
       disabled:cursor-not-allowed disabled:opacity-60;
   }
 
@@ -432,7 +613,7 @@
    ========================================================================== */
 @layer components {
   .excel-block {
-    @apply relative mb-4 overflow-hidden rounded-lg border border-indigo-900/60 last:mb-0;
+    @apply relative mb-4 overflow-hidden rounded-lg border border-rose-900/60 last:mb-0;
   }
 
   /* Garis bantu "magnet" saat drag-resize kolom (lihat lib/useResizableColWidths) --
@@ -443,12 +624,12 @@
   }
 
   .excel-section-title {
-    @apply bg-indigo-500 px-3 py-1.5 text-[0.78rem] font-bold uppercase tracking-wide text-white;
+    @apply bg-rose-500 px-3 py-1.5 text-[0.78rem] font-bold uppercase tracking-wide text-white;
   }
 
   /* Header sub-bagian di dalam 1 excel-block: "QC Input Column" /
      "Production Input Column" / "Technical Input Column" di Approval --
-     beda dari excel-section-title (judul block-nya sendiri, indigo).
+     beda dari excel-section-title (judul block-nya sendiri, rose).
      Background & tipografi SENGAJA disamakan dgn .excel-cell-label (label
      field "Order", dst) -- bg-sky-100 seragam. `mt-3` + border atas dipakai
      sbg Gap pemisah visual antar bagian yang diisi 3 departemen berbeda
@@ -456,7 +637,7 @@
      warna tahap terkait di "Proses Bar" (STAGE_COLORS di
      ProductionOrderDashboardPage) supaya tetap kebedaan tapi tidak norak. */
   .excel-subsection-title {
-    @apply mt-3 border-b border-t-2 border-indigo-900/25 bg-sky-100 px-2 py-1 text-[0.7rem] font-bold uppercase leading-tight tracking-wide;
+    @apply mt-3 border-b border-t-2 border-rose-900/25 bg-sky-100 px-2 py-1 text-[0.7rem] font-bold uppercase leading-tight tracking-wide;
   }
 
   .excel-subsection-title.excel-subsection-qc {
@@ -476,11 +657,11 @@
   }
 
   .excel-cell {
-    @apply flex min-w-[140px] flex-1 flex-col border border-indigo-900/25 bg-white;
+    @apply flex min-w-[140px] flex-1 flex-col border border-rose-900/25 bg-white;
   }
 
   .excel-cell-label {
-    @apply border-b border-indigo-900/25 bg-sky-100 px-2 py-1 text-[0.66rem] font-bold uppercase leading-tight tracking-wide text-indigo-900;
+    @apply border-b border-rose-900/25 bg-sky-100 px-2 py-1 text-[0.66rem] font-bold uppercase leading-tight tracking-wide text-rose-900;
   }
 
   .excel-cell-body {
@@ -491,7 +672,7 @@
   .excel-cell-body select,
   .excel-cell-body textarea {
     @apply w-full flex-1 rounded-none border-0 bg-transparent px-2 py-1.5 text-sm text-slate-800 shadow-none
-      focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/50;
+      focus:outline-none focus:ring-2 focus:ring-inset focus:ring-rose-500/50;
   }
 
   .excel-cell-body input:read-only,
@@ -516,11 +697,11 @@
   }
 
   .excel-member-cell {
-    @apply flex min-w-[220px] flex-1 flex-col border border-indigo-900/25 bg-white;
+    @apply flex min-w-[220px] flex-1 flex-col border border-rose-900/25 bg-white;
   }
 
   .excel-member-add-row {
-    @apply flex gap-1 border-b border-indigo-900/10 p-1.5;
+    @apply flex gap-1 border-b border-rose-900/10 p-1.5;
   }
 
   .excel-member-list {
@@ -529,6 +710,6 @@
   }
 
   .excel-member-chip {
-    @apply flex items-center justify-between gap-2 rounded bg-indigo-50 px-2 py-1 text-xs text-indigo-900;
+    @apply flex items-center justify-between gap-2 rounded bg-rose-50 px-2 py-1 text-xs text-rose-900;
   }
 }

@@ -27,7 +27,7 @@ export default function PostContent({
         const mentionMatch = MENTION_RE.exec(part);
         if (mentionMatch) {
           return (
-            <span key={i} style={{ color: "#4f46e5", fontWeight: 700 }} title={`NIK ${mentionMatch[2]}`}>
+            <span key={i} style={{ color: "#e11d48", fontWeight: 700 }} title={`NIK ${mentionMatch[2]}`}>
               @{mentionMatch[1]}
             </span>
           );
@@ -39,7 +39,7 @@ export default function PostContent({
               type="button"
               onClick={() => onTagClick(part.slice(1).toLowerCase())}
               style={{
-                color: "#4f46e5",
+                color: "#e11d48",
                 fontWeight: 700,
                 background: "transparent",
                 border: 0,

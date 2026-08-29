@@ -442,6 +442,36 @@
     animation: pageFadeIn 0.25s ease-out;
   }
 
+  /* Toolbar Print CS/Print LIP & KS/Save di Input Check Results (2026-08-29,
+     instruksi eksplisit user) -- nempel di atas .workspace pas discroll,
+     supaya tetap kepencet walau admin sudah scroll jauh ke bawah (Spec
+     Parameters, Appearance Check Results, Information). z-index di atas
+     header tabel yg sudah sticky duluan (z-index:2) supaya toolbar ini
+     yg menang kalau kebetulan sejajar pas scroll. */
+  .qc-actions-bar {
+    @apply sticky z-10 -mx-5 border-b border-slate-200 bg-white px-5 py-2 shadow-sm;
+    top: 0;
+  }
+
+  /* `.panel` di app.css punya `overflow-hidden` (buat kliping sudut rounded)
+     -- itu SECARA TIDAK SENGAJA juga bikin browser anggap .panel ini
+     "scrolling ancestor" acuan .qc-actions-bar, jadi position:sticky-nya
+     nempel ke kotak .panel (yg auto-height, tidak pernah discroll sendiri)
+     BUKAN ke .workspace yg sebenarnya discroll -- efeknya sticky-nya diam
+     total, toolbar tetap ikut kescroll keluar layar (ditemukan & diuji
+     langsung di browser, 2026-08-29). Override cuma di panel form Input
+     Check Results ini (BUKAN ubah .panel scr global, supaya panel lain di
+     app tidak ikut berubah) -- ganti overflow-hidden dgn overflow-visible,
+     lalu panel-header dibulatkan sendiri (rounded-t-xl) spy sudut atasnya
+     tetap rapi tanpa bantuan clipping dari .panel. */
+  .qc-input-panel {
+    overflow: visible;
+  }
+
+  .qc-input-panel > .panel-header {
+    @apply rounded-t-xl;
+  }
+
   .statusbar {
     @apply flex shrink-0 justify-between bg-red-900 px-3 py-1.5 text-xs text-rose-200/80 sm:px-4;
   }

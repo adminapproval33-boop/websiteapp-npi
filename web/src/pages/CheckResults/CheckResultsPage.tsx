@@ -315,10 +315,13 @@ const HEADER_TABLE_COL_ROWS: string[][] = [
   ["remark"],
 ];
 
-/** Header tabel Spec Parameters dengan drag-handle di kanan utk mengubah lebar kolom bebas. */
+/** Header tabel Spec Parameters dengan drag-handle di kanan utk mengubah lebar kolom bebas.
+ * `position: sticky` (freeze header, 2026-08-29 instruksi eksplisit user: memudahkan admin
+ * saat scroll input banyak baris) -- z-index di atas isi tabel supaya header tidak
+ * "ketiban" baris data pas discroll ke bawah. */
 function ResizableHeader({ width, onResizeStart, children }: { width: number; onResizeStart: (e: ReactMouseEvent) => void; children: ReactNode }) {
   return (
-    <th style={{ width, position: "relative", textAlign: "center" }}>
+    <th style={{ width, position: "sticky", top: 0, zIndex: 2, textAlign: "center" }}>
       {children}
       <div
         onMouseDown={onResizeStart}
@@ -754,7 +757,7 @@ export default function CheckResultsPage({
       )}
 
       {(embedded || tab === "input") && (
-        <form className="panel" onSubmit={handleSubmit}>
+        <form className="panel qc-input-panel" onSubmit={handleSubmit}>
           <div className="panel-header">{editingCheckId ? `Edit Check Results — ${editingCheckId}` : "Input Check Results"}</div>
           <div className="panel-body">
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
@@ -845,7 +848,15 @@ export default function CheckResultsPage({
               garis di sisi kanan tiap kolom untuk mengubah lebarnya.
             </p>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18, flexWrap: "wrap", gap: 10 }}>
+            {/* Sticky (2026-08-29, instruksi eksplisit user): tombol Print CS/Print LIP
+                & KS/Save harus tetap kelihatan walau admin sudah scroll jauh ke bawah
+                (lewat tabel Spec Parameters, Appearance Check Results, Information) --
+                drpd cuma freeze header tabelnya doang, toolbar-nya sendiri yg dibuat
+                nempel di atas supaya tidak perlu scroll balik ke atas tiap mau Save. */}
+            <div
+              className="qc-actions-bar"
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18, flexWrap: "wrap", gap: 10 }}
+            >
               <h3 className="pp-section-title" style={{ margin: 0 }}>
                 Spec Parameters
               </h3>
@@ -889,7 +900,11 @@ export default function CheckResultsPage({
               </p>
             )}
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Tarik garis di sisi kanan header untuk mengubah lebar kolom.</p>
-            <div style={{ overflowX: "auto" }} data-nav-scope="">
+            {/* maxHeight+overflowY ditambahkan supaya wrapper ini jadi acuan scroll
+                vertikal utk header sticky di atas (tanpa batas tinggi, "sticky"
+                tidak akan pernah kelihatan ke-freeze krn tidak ada yg discroll
+                DI DALAM wrapper ini -- scroll-nya lari ke halaman/workspace). */}
+            <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "60vh" }} data-nav-scope="">
               <table className="data-table" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr>

@@ -11,6 +11,79 @@
   }
 }
 
+/* Dipakai .page-transition (lihat class-nya di dekat .workspace) -- transisi
+   pindah menu di seluruh app, 2026-08-29 instruksi eksplisit user. */
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Animasi ringan khusus halaman login (2026-08-29, instruksi eksplisit
+   user: kartu+dekorasinya kerasa "polos" kalau diam total) -- SENGAJA
+   kecil/lambat/subtle (bukan animasi mencolok), cukup buat kesan "hidup"
+   tanpa mengganggu fokus mengisi form. */
+@keyframes loginCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loginFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--float-rot, 0deg));
+  }
+  50% {
+    transform: translateY(-10px) rotate(var(--float-rot, 0deg));
+  }
+}
+
+@keyframes loginBlobPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes loginSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loginGlowPulse {
+  0%,
+  100% {
+    text-shadow:
+      0 0 6px rgba(255, 255, 255, 0.85),
+      0 0 2px rgba(255, 255, 255, 0.95);
+  }
+  50% {
+    text-shadow:
+      0 0 14px rgba(255, 255, 255, 0.55),
+      0 0 4px rgba(255, 255, 255, 0.85);
+  }
+}
+
 /* ==========================================================================
    Design tokens. Nama variabel dipertahankan sama seperti sebelumnya
    (dipakai lewat inline style `var(--xxx)` di banyak halaman) -- hanya
@@ -352,6 +425,23 @@
     background-size: 120px 104px, 460px auto;
   }
 
+  /* Transisi halus tiap pindah menu (2026-08-29, instruksi eksplisit user)
+     -- fade + geser naik tipis, cepat (0.25s) supaya app tetap terasa
+     responsif utk pindah-pindah halaman kerja berkali-kali, bukan efek
+     berat/lambat spt di halaman login. Wrapper-nya di-key={pathname} di
+     AppLayout.tsx supaya animasi ini re-trigger tiap ganti route.
+     SENGAJA TANPA fill-mode forwards/both: kalau transform dibiarkan
+     "nempel" (walau cuma translateY(0)) di elemen ini SETELAH animasi
+     selesai, dia jadi containing-block baru utk SEMUA descendant
+     position:fixed di dalamnya -- termasuk Modal.tsx (dialog/modal di
+     hampir semua halaman pakai `fixed inset-0`) -- yang bikin modal jadi
+     relatif ke area konten (bisa ikut ke-scroll / tidak nutup viewport
+     penuh) bukan ke viewport lagi. Tanpa fill-mode, begitu animasi kelar
+     transform kembali ke "tidak ada" (bukan cuma 0) jadi aman. */
+  .page-transition {
+    animation: pageFadeIn 0.25s ease-out;
+  }
+
   .statusbar {
     @apply flex shrink-0 justify-between bg-red-900 px-3 py-1.5 text-xs text-rose-200/80 sm:px-4;
   }
@@ -384,6 +474,20 @@
     @apply absolute;
   }
 
+  /* Cipratan cat "bernafas" pelan (opacity+scale) & atom sedikit berputar --
+     gerakan lambat & halus, cukup buat latar terasa hidup tanpa mengganggu
+     fokus ke kartu login di tengah. */
+  .decor-splash {
+    animation: loginBlobPulse 7s ease-in-out infinite;
+    animation-duration: var(--pulse-duration, 7s);
+    animation-delay: var(--pulse-delay, 0s);
+  }
+
+  .decor-atom svg {
+    animation: loginSpin 18s linear infinite;
+    transform-origin: center;
+  }
+
   .decor-splash svg,
   .decor-splatter svg,
   .decor-molecule svg,
@@ -398,6 +502,7 @@
 
   .login-card-wrap {
     @apply relative z-10;
+    animation: loginCardIn 0.6s ease-out both;
   }
 
   .login-card-palette {
@@ -409,11 +514,15 @@
   }
 
   .login-card-palette-top {
-    @apply -right-7 -top-9 z-20 w-[92px] rotate-[8deg];
+    @apply -right-7 -top-9 z-20 w-[92px];
+    --float-rot: 8deg;
+    animation: loginFloat 4.5s ease-in-out infinite;
   }
 
   .login-card-palette-bottom {
-    @apply -bottom-12 -left-16 w-[150px] rotate-[-8deg];
+    @apply -bottom-12 -left-16 w-[150px];
+    --float-rot: -8deg;
+    animation: loginFloat 5.5s ease-in-out infinite 0.4s;
   }
 
   /* Kotak login dibelah 2 warna (2026-08-29, instruksi eksplisit user):
@@ -449,9 +558,7 @@
      ("Website"/"Npi") butuh glow putih spy tetap kontras dgn latar biru,
      sama spt logo topbar. */
   .login-card-header .login-logo {
-    text-shadow:
-      0 0 6px rgba(255, 255, 255, 0.85),
-      0 0 2px rgba(255, 255, 255, 0.95);
+    animation: loginGlowPulse 3.5s ease-in-out infinite;
   }
 
   .brand-blue {

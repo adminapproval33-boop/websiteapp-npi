@@ -21,7 +21,15 @@ export default function AppLayout() {
         {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
         <Sidebar open={sidebarOpen} onNavigate={() => setSidebarOpen(false)} />
         <main className="workspace">
-          <Outlet />
+          {/* `key={pathname}` sengaja dipasang di sini (bukan di <Outlet>
+              langsung) supaya React remount div ini tiap pindah halaman --
+              tanpa key, animasi CSS di bawah cuma jalan sekali pas app
+              pertama load, karena elemen div-nya sendiri tidak pernah
+              dibuat ulang walau isi <Outlet> berganti (2026-08-29, instruksi
+              eksplisit user: transisi antar-menu terasa "patah"/instan). */}
+          <div key={location.pathname} className="page-transition">
+            <Outlet />
+          </div>
         </main>
       </div>
       <footer className="statusbar">

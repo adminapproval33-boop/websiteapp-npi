@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { api, ApiError } from "../../api/client";
@@ -307,10 +307,18 @@ function PaintSplatter() {
 function LoginDecor() {
   return (
     <div className="login-decor" aria-hidden="true">
-      <div className="decor-splash" style={{ left: "-4%", top: "-5%", width: 520 }}>
+      <div
+        className="decor-splash"
+        style={{ left: "-4%", top: "-5%", width: 520, "--pulse-duration": "7s" } as CSSProperties}
+      >
         <PaintSplash gradientId="splashTopLeft" />
       </div>
-      <div className="decor-splash" style={{ right: "-5%", bottom: "-5%", width: 560 }}>
+      <div
+        className="decor-splash"
+        style={
+          { right: "-5%", bottom: "-5%", width: 560, "--pulse-duration": "8.5s", "--pulse-delay": "1s" } as CSSProperties
+        }
+      >
         <PaintSplash flip gradientId="splashBottomRight" />
       </div>
 

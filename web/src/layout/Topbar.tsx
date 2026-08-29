@@ -37,10 +37,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         >
           ☰
         </button>
-        <span className="topbar-title truncate">
-          <span className="brand-blue">Website</span>
-          <span className="brand-red">app</span> <span className="brand-blue">Npi</span>
-        </span>
+        <img src="/brand-logo.png" alt="Websiteapp Npi" className="topbar-logo-img" />
       </div>
       <div className="topbar-right">
         <span className="hidden sm:inline">{now.toLocaleString("id-ID")}</span>

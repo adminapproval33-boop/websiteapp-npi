@@ -49,18 +49,6 @@
   }
 }
 
-@keyframes loginBlobPulse {
-  0%,
-  100% {
-    opacity: 0.85;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.04);
-  }
-}
-
 @keyframes loginSpin {
   from {
     transform: rotate(0deg);
@@ -70,17 +58,15 @@
   }
 }
 
+/* Dipakai .login-logo-img (gambar, bukan teks lagi -- 2026-08-29) makanya
+   drop-shadow bukan text-shadow. */
 @keyframes loginGlowPulse {
   0%,
   100% {
-    text-shadow:
-      0 0 6px rgba(255, 255, 255, 0.85),
-      0 0 2px rgba(255, 255, 255, 0.95);
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
   }
   50% {
-    text-shadow:
-      0 0 14px rgba(255, 255, 255, 0.55),
-      0 0 4px rgba(255, 255, 255, 0.85);
+    filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.85));
   }
 }
 
@@ -314,24 +300,15 @@
     @apply relative flex items-center justify-between gap-2 bg-blue-800 px-3 py-2 shadow-md sm:px-5 sm:py-3;
   }
 
-  /* Logo topbar disamakan PERSIS (teks + warna) dgn logo di kartu login
-     (2026-08-29, instruksi eksplisit user: "samakan logonya, hapus lagi
-     bingkainya" -- versi bingkai + putih/merah sebelumnya SALAH paham,
-     yg diminta cuma teks+warna Website/app/Npi biru-merah-biru itu sendiri,
-     apa adanya, walau latar topbar biru). Warna .brand-blue/.brand-red
-     didefinisikan sekali (lihat dekat .login-logo) & dipakai bersama.
-     Glow/shadow putih ditambahkan (2026-08-29, keluhan eksplisit user:
-     "Website"/"Npi" yg biru nyaris nyatu dgn latar topbar yg juga biru,
-     susah kebaca) -- text-shadow putih tipis di semua sisi (bukan cuma satu
-     arah) supaya tiap huruf "diberi outline cahaya" & tetap kontras walau
-     warnanya sendiri dekat dgn latar. */
-  .topbar-title {
-    @apply text-xl font-bold tracking-tight text-white sm:text-2xl;
-    font-family: "Britannic Bold", "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    text-shadow:
-      0 0 6px rgba(255, 255, 255, 0.85),
-      0 0 2px rgba(255, 255, 255, 0.95),
-      0 1px 1px rgba(255, 255, 255, 0.6);
+  /* Logo topbar (2026-08-29) -- diganti dari teks jadi gambar logo resmi
+     (ikon roll cat + "Websiteapp Npi", lihat web/public/brand-logo.png,
+     hasil crop+transparent dari file yg dikirim user) supaya identik di
+     login & topbar. Glow putih dipertahankan (drop-shadow, versi gambar
+     dari text-shadow sebelumnya) krn bagian biru logonya ("Website"/"Npi")
+     masih bisa nyaris nyatu dgn latar topbar yg juga biru. */
+  .topbar-logo-img {
+    @apply h-8 w-auto sm:h-10;
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
   }
 
   .topbar-right {
@@ -488,11 +465,30 @@
     background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat;
   }
 
+  /* Video animasi tetesan cat merah-biru (2026-08-29, file dikirim user) --
+     full-bleed di paling belakang (z-0, dirender SEBELUM .login-decor di
+     JSX jadi otomatis di bawahnya), gradasi CSS di .login-page tetap jadi
+     background-color fallback kalau video gagal load/lambat buffer. */
+  /* Video terasa "kurang tajam" (2026-08-29, keluhan eksplisit user) --
+     resolusi asli file cuma 1920x1080 (fixed, tidak ada tool edit video di
+     sini utk render ulang lebih tinggi), jadi kalau layar user lebih lebar
+     dari itu, object-cover MEMBESARKAN videonya (upscale) & pasti kelihatan
+     lebih lembut/blur -- itu batasan sumber videonya, CSS tidak bisa
+     nambah detail piksel yang memang tidak ada. Yang bisa dibantu murni
+     dari sisi tampilan: naikkan sedikit contrast+saturate (murah secara
+     performa, dipercepat GPU) supaya tepi & warnanya kerasa lebih
+     "nendang"/tajam scr persepsi, tanpa filter berat (mis. SVG convolution
+     sharpen) yang berisiko bikin animasi lain di halaman ini patah-patah
+     di laptop kantor yang speknya pas-pasan. */
+  .login-bg-video {
+    @apply pointer-events-none absolute inset-0 z-0 h-full w-full object-cover;
+    filter: contrast(1.12) saturate(1.2);
+  }
+
   .login-decor {
     @apply pointer-events-none absolute inset-0 z-0 overflow-hidden;
   }
 
-  .decor-splash,
   .decor-splatter,
   .decor-molecule,
   .decor-spray,
@@ -504,21 +500,13 @@
     @apply absolute;
   }
 
-  /* Cipratan cat "bernafas" pelan (opacity+scale) & atom sedikit berputar --
-     gerakan lambat & halus, cukup buat latar terasa hidup tanpa mengganggu
-     fokus ke kartu login di tengah. */
-  .decor-splash {
-    animation: loginBlobPulse 7s ease-in-out infinite;
-    animation-duration: var(--pulse-duration, 7s);
-    animation-delay: var(--pulse-delay, 0s);
-  }
-
+  /* Atom sedikit berputar -- gerakan lambat & halus, cukup buat latar
+     terasa hidup tanpa mengganggu fokus ke kartu login di tengah. */
   .decor-atom svg {
     animation: loginSpin 18s linear infinite;
     transform-origin: center;
   }
 
-  .decor-splash svg,
   .decor-splatter svg,
   .decor-molecule svg,
   .decor-spray svg,
@@ -571,32 +559,17 @@
     @apply bg-red-800 px-8 pb-8 pt-6;
   }
 
-  /* Logo resmi (2026-08-29) -- disamakan persis dgn file "Websiteapp Npi
-     Logo.docx" yg dikirim user: font Britannic Bold (terpasang lokal di
-     Windows si user, dipakai via font-family biasa -- browser lain otomatis
-     jatuh ke fallback bold sans kalau font itu tidak ada), warna biru
-     #0070C0 utk "Website"/"Npi" dan merah #DC2626 (= red-600) utk "app".
-     TANPA bingkai (sempat ditambah lalu diminta dihapus lagi, 2026-08-29).
-     .brand-blue/.brand-red TIDAK di-scope ke .login-logo saja -- dipakai
-     bersama di topbar-title juga supaya kedua logo persis sama warnanya. */
-  .login-logo {
-    @apply m-0 mb-1 text-center text-4xl font-bold tracking-tight;
-    font-family: "Britannic Bold", "Inter", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  }
-
-  /* Header sekarang biru (bukan putih lagi) -- bagian logo yg birunya
-     ("Website"/"Npi") butuh glow putih spy tetap kontras dgn latar biru,
-     sama spt logo topbar. */
-  .login-card-header .login-logo {
+  /* Logo resmi (2026-08-29) -- diganti dari teks jadi gambar PNG (ikon roll
+     cat + wordmark, lihat web/public/brand-logo.png -- di-crop rapat +
+     background putihnya dibikin transparan dari file asli yg dikirim user,
+     supaya bisa ditaruh di atas latar biru/merah manapun tanpa kotak putih
+     nongol). Header-nya biru, bagian logo yg birunya ("Website"/"Npi")
+     masih butuh glow putih spy kontras -- sama spt versi teks sebelumnya,
+     cuma sekarang lewat filter:drop-shadow (bukan text-shadow) krn ini
+     gambar. */
+  .login-logo-img {
+    @apply mx-auto mb-1 block h-auto w-[300px] max-w-full;
     animation: loginGlowPulse 3.5s ease-in-out infinite;
-  }
-
-  .brand-blue {
-    color: #0070c0;
-  }
-
-  .brand-red {
-    color: #dc2626;
   }
 
   .login-card-header .welcome {

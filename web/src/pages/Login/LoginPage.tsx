@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { api, ApiError } from "../../api/client";
@@ -237,54 +237,6 @@ function SprayCan() {
   );
 }
 
-/** Cipratan cat besar dengan gradasi glossy + juntaian tetesan (drip) di ujungnya
- * -- dipakai 2x (pojok kiri-atas & kanan-bawah, satu di-flip) supaya terasa
- * "mengalir" dari sudut ke sudut layar spt referensi, bukan cuma blob blur polos. */
-function PaintSplash({ flip, gradientId }: { flip?: boolean; gradientId: string }) {
-  return (
-    <svg
-      viewBox="0 0 560 480"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      style={flip ? { transform: "scaleX(-1) scaleY(-1)" } : undefined}
-    >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#fecdd3" stopOpacity="0.85" />
-          <stop offset="50%" stopColor="#f87171" stopOpacity="0.6" />
-          <stop offset="100%" stopColor="#991b1b" stopOpacity="0.25" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M30,190 C-15,300 40,420 150,460 C270,500 410,470 480,380 C555,285 530,140 430,80 C340,25 190,30 110,80 C60,112 55,150 30,190Z"
-        fill={`url(#${gradientId})`}
-      />
-      <path
-        d="M430,80 C470,50 490,20 505,-10 C512,-24 528,-26 533,-10 C538,4 525,20 508,32 C518,30 530,34 530,48 C530,62 512,66 500,58"
-        fill={`url(#${gradientId})`}
-      />
-      <circle cx="522" cy="-6" r="14" fill="#fecdd3" fillOpacity="0.6" />
-      <circle cx="500" cy="70" r="8" fill="#fecdd3" fillOpacity="0.55" />
-      <path
-        d="M90,140 C140,90 250,65 340,88"
-        stroke="white"
-        strokeOpacity="0.45"
-        strokeWidth="14"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M140,380 C190,410 280,420 350,395"
-        stroke="white"
-        strokeOpacity="0.2"
-        strokeWidth="20"
-        strokeLinecap="round"
-        fill="none"
-      />
-    </svg>
-  );
-}
-
 /** Titik-titik cipratan cat kecil (splatter), ukuran acak, buat mengisi area
  * kosong di sekitar splash besar spy lebih terasa "kena percik cat". */
 function PaintSplatter() {
@@ -307,21 +259,6 @@ function PaintSplatter() {
 function LoginDecor() {
   return (
     <div className="login-decor" aria-hidden="true">
-      <div
-        className="decor-splash"
-        style={{ left: "-4%", top: "-5%", width: 520, "--pulse-duration": "7s" } as CSSProperties}
-      >
-        <PaintSplash gradientId="splashTopLeft" />
-      </div>
-      <div
-        className="decor-splash"
-        style={
-          { right: "-5%", bottom: "-5%", width: 560, "--pulse-duration": "8.5s", "--pulse-delay": "1s" } as CSSProperties
-        }
-      >
-        <PaintSplash flip gradientId="splashBottomRight" />
-      </div>
-
       <div className="decor-splatter" style={{ left: "22%", top: "4%", width: 90, transform: "rotate(20deg)" }}>
         <PaintSplatter />
       </div>
@@ -470,8 +407,64 @@ export default function LoginPage() {
     }
   }
 
+  const bgVideoRef = useRef<HTMLVideoElement>(null);
+
+  /** Sambungan akhir->awal video loop kerasa "kesentak" (2026-08-29, keluhan
+   * eksplisit user) krn frame terakhir & frame pertama tidak match (bukan
+   * video loop-mulus dari sononya). Diakalin murni lewat CSS/JS di sini
+   * (bukan edit ulang videonya, tidak ada tool edit video tersedia) --
+   * video di-fade ke opacity 0 tepat sebelum durasinya habis, lalu fade
+   * balik begitu sudah restart dari awal, jadi lompatannya "disembunyikan"
+   * di balik sedikit dip transparan (nampak latar gradasi merah sekilas)
+   * drpd lompatan konten yang jelas kelihatan. Dipakai requestAnimationFrame
+   * (bukan cuma event `timeupdate`, yang cuma nembak ~4x/detik & bikin
+   * transisi kepatah-patah) supaya opacity-nya berubah mulus tiap frame. */
+  useEffect(() => {
+    const video = bgVideoRef.current;
+    if (!video) return;
+    const FADE_SECONDS = 0.35;
+    // Video aslinya kerasa cepat (2026-08-29, keluhan eksplisit user) --
+    // diperlambat murni lewat playbackRate (bukan render ulang videonya)
+    // jadi ~2.5x lebih lambat dari kecepatan asli. FADE_SECONDS di atas
+    // dihitung dari waktu ASLI video (currentTime/duration tidak berubah
+    // krn playbackRate), jadi otomatis ikut kerasa lebih lambat & mulus
+    // juga tanpa perlu disesuaikan lagi. Di-set ulang tiap "loadedmetadata"
+    // krn beberapa browser reset playbackRate ke 1 pas source baru dimuat.
+    const PLAYBACK_RATE = 0.4;
+    const applyPlaybackRate = () => {
+      video.playbackRate = PLAYBACK_RATE;
+    };
+    applyPlaybackRate();
+    video.addEventListener("loadedmetadata", applyPlaybackRate);
+    let rafId: number;
+
+    const tick = () => {
+      const { currentTime, duration } = video;
+      if (duration && Number.isFinite(duration)) {
+        let opacity = 1;
+        if (currentTime < FADE_SECONDS) {
+          opacity = currentTime / FADE_SECONDS;
+        } else if (currentTime > duration - FADE_SECONDS) {
+          opacity = (duration - currentTime) / FADE_SECONDS;
+        }
+        video.style.opacity = String(Math.max(0, Math.min(1, opacity)));
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      video.removeEventListener("loadedmetadata", applyPlaybackRate);
+    };
+  }, []);
+
   return (
     <div className="login-page">
+      {/* Video animasi tetesan cat merah-biru (2026-08-29, file dikirim user)
+          -- muted+autoPlay+loop+playsInline wajib supaya autoplay diizinkan
+          browser tanpa interaksi user dulu. */}
+      <video ref={bgVideoRef} className="login-bg-video" src="/login-bg.mp4" autoPlay muted loop playsInline />
+
       <LoginDecor />
 
       <div className="login-card-wrap">
@@ -484,10 +477,7 @@ export default function LoginPage() {
 
         <form className="login-card" onSubmit={handleSubmit}>
           <div className="login-card-header">
-            <h1 className="login-logo">
-              <span className="brand-blue">Website</span>
-              <span className="brand-red">app</span> <span className="brand-blue">Npi</span>
-            </h1>
+            <img src="/brand-logo.png" alt="Websiteapp Npi" className="login-logo-img" />
             <p className="welcome">Selamat Datang</p>
             <p className="subtitle">Silakan Masuk ke Akun Anda</p>
           </div>

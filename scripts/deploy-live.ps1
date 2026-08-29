@@ -29,19 +29,18 @@ try {
     Log "=== Mulai deploy ke live ==="
 
     Set-Location $liveRoot
-    Log "Fetch branch 'main' terbaru dari origin (GitHub)..."
-    # SEBELUMNYA branch 'main' lokal di liveRoot cuma di-merge apa adanya,
-    # tanpa fetch dulu -- jadi kalau commit baru cuma di-push ke GitHub dari
-    # devRoot (belum sempat ada proses lain yg fetch di liveRoot), local
-    # 'main' di sini bisa ketinggalan & ff-only merge di bawah cuma
-    # mengulang commit lama (2026-08-29, ditemukan saat rilis redesign
-    # login/tema). Fetch langsung ke ref 'main' lokal (bukan checkout) aman
-    # dilakukan sekalipun branch yg sedang aktif itu 'production'.
-    git fetch origin main:main | Tee-Object -FilePath $logFile -Append
-    if ($LASTEXITCODE -ne 0) {
-        throw "git fetch origin main:main gagal. Cek koneksi/kredensial GitHub di $liveRoot."
-    }
-
+    # CATATAN (2026-08-29): $devRoot dan $liveRoot adalah GIT WORKTREE yang
+    # SALING TERHUBUNG (satu .git yang sama, `git worktree list` menunjukkan
+    # keduanya), BUKAN dua clone terpisah -- jadi branch 'main' adalah ref
+    # yang SAMA PERSIS di kedua worktree (begitu di-commit+push dari devRoot,
+    # 'main' di liveRoot otomatis ikut ter-update, TANPA perlu fetch sama
+    # sekali). Sempat ditambahkan `git fetch origin main:main` di sini
+    # (dikira liveRoot perlu sinkron manual dari GitHub kayak clone biasa)
+    # -- itu SALAH & bikin deploy jam 12:00 gagal total dgn error git
+    # "refusing to fetch into branch 'main' checked out at ...devRoot" (git
+    # menolak fetch ke branch yang lagi di-checkout di worktree lain). Sudah
+    # dihapus lagi -- JANGAN ditambah fetch di sini kecuali dua folder ini
+    # diubah jadi clone independen beneran.
     Log "Fast-forward branch 'production' ke commit terbaru di 'main'..."
     git merge main --ff-only | Tee-Object -FilePath $logFile -Append
     if ($LASTEXITCODE -ne 0) {

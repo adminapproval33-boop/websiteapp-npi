@@ -409,61 +409,78 @@ export default function LoginPage() {
 
   const bgVideoRef = useRef<HTMLVideoElement>(null);
 
-  /** Sambungan akhir->awal video loop kerasa "kesentak" (2026-08-29, keluhan
-   * eksplisit user) krn frame terakhir & frame pertama tidak match (bukan
-   * video loop-mulus dari sononya). Diakalin murni lewat CSS/JS di sini
-   * (bukan edit ulang videonya, tidak ada tool edit video tersedia) --
-   * video di-fade ke opacity 0 tepat sebelum durasinya habis, lalu fade
-   * balik begitu sudah restart dari awal, jadi lompatannya "disembunyikan"
-   * di balik sedikit dip transparan (nampak latar gradasi merah sekilas)
-   * drpd lompatan konten yang jelas kelihatan. Dipakai requestAnimationFrame
-   * (bukan cuma event `timeupdate`, yang cuma nembak ~4x/detik & bikin
-   * transisi kepatah-patah) supaya opacity-nya berubah mulus tiap frame. */
+  /** Ganti `key` div logo tiap 15 menit (2026-08-29, permintaan eksplisit
+   * user) supaya React unmount+remount elemennya -- ini yang bikin animasi
+   * CSS logoIconReveal/logoTextReveal (yg didesain sekali-jalan pas mount,
+   * lihat app.css) terputar ulang secara berkala, bukan cuma sekali pas
+   * halaman login pertama dibuka. */
+  const [logoAnimKey, setLogoAnimKey] = useState(0);
+  useEffect(() => {
+    const REPLAY_INTERVAL_MS = 15 * 60 * 1000;
+    const id = setInterval(() => setLogoAnimKey((k) => k + 1), REPLAY_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  /** Video sengaja TIDAK loop terus-menerus (2026-08-29, permintaan
+   * eksplisit user: disamakan spt animasi logo di atas -- main sekali lalu
+   * diam, baru diulang tiap 15 menit, drpd looping non-stop tiap 5 detik
+   * yg dirasa "berlebihan" kalau halaman login dibiarkan terbuka lama).
+   * Video main sekali di awal (attribute `loop` DICABUT dari <video>).
+   * Beda dari versi awal (yg cuma diam di frame terakhir sampai replay
+   * berikutnya): user minta videonya "pelan-pelan terhapus" balik ke
+   * background merah polos begitu selesai, BUKAN nyangkut nampilin frame
+   * terakhir terus -- jadi begitu event `ended` nembak, opacity di-fade ke
+   * 0 (pelan, FADE_MS lumayan lama) sampai background merah `.login-page`
+   * di bawahnya kelihatan lagi. Pas REPLAY_INTERVAL_MS nembak, currentTime
+   * direset ke 0 + play() lagi SAMBIL opacity di-fade balik ke 1 (video
+   * "pelan-pelan muncul kembali" berbarengan sama animasinya mulai jalan
+   * lagi dari awal). */
   useEffect(() => {
     const video = bgVideoRef.current;
     if (!video) return;
-    const FADE_SECONDS = 0.35;
     // Video aslinya kerasa cepat (2026-08-29, keluhan eksplisit user) --
-    // diperlambat murni lewat playbackRate (bukan render ulang videonya)
-    // jadi ~2.5x lebih lambat dari kecepatan asli. FADE_SECONDS di atas
-    // dihitung dari waktu ASLI video (currentTime/duration tidak berubah
-    // krn playbackRate), jadi otomatis ikut kerasa lebih lambat & mulus
-    // juga tanpa perlu disesuaikan lagi. Di-set ulang tiap "loadedmetadata"
-    // krn beberapa browser reset playbackRate ke 1 pas source baru dimuat.
+    // diperlambat murni lewat playbackRate (bukan render ulang videonya).
+    // Di-set ulang tiap "loadedmetadata" krn beberapa browser reset
+    // playbackRate ke 1 pas source baru dimuat.
     const PLAYBACK_RATE = 0.4;
+    const REPLAY_INTERVAL_MS = 15 * 60 * 1000;
+    const FADE_MS = 2000;
+
     const applyPlaybackRate = () => {
       video.playbackRate = PLAYBACK_RATE;
     };
     applyPlaybackRate();
     video.addEventListener("loadedmetadata", applyPlaybackRate);
-    let rafId: number;
 
-    const tick = () => {
-      const { currentTime, duration } = video;
-      if (duration && Number.isFinite(duration)) {
-        let opacity = 1;
-        if (currentTime < FADE_SECONDS) {
-          opacity = currentTime / FADE_SECONDS;
-        } else if (currentTime > duration - FADE_SECONDS) {
-          opacity = (duration - currentTime) / FADE_SECONDS;
-        }
-        video.style.opacity = String(Math.max(0, Math.min(1, opacity)));
-      }
-      rafId = requestAnimationFrame(tick);
+    video.style.transition = `opacity ${FADE_MS}ms ease`;
+
+    const handleEnded = () => {
+      video.style.opacity = "0";
     };
-    rafId = requestAnimationFrame(tick);
+    video.addEventListener("ended", handleEnded);
+
+    const replay = () => {
+      video.currentTime = 0;
+      void video.play();
+      video.style.opacity = "1";
+    };
+
+    const id = setInterval(replay, REPLAY_INTERVAL_MS);
     return () => {
-      cancelAnimationFrame(rafId);
+      clearInterval(id);
       video.removeEventListener("loadedmetadata", applyPlaybackRate);
+      video.removeEventListener("ended", handleEnded);
     };
   }, []);
 
   return (
     <div className="login-page">
       {/* Video animasi tetesan cat merah-biru (2026-08-29, file dikirim user)
-          -- muted+autoPlay+loop+playsInline wajib supaya autoplay diizinkan
-          browser tanpa interaksi user dulu. */}
-      <video ref={bgVideoRef} className="login-bg-video" src="/login-bg.mp4" autoPlay muted loop playsInline />
+          -- muted+autoPlay+playsInline wajib supaya autoplay diizinkan
+          browser tanpa interaksi user dulu. TANPA attribute `loop` (lihat
+          useEffect di atas) -- main sekali lalu diam, diulang tiap 15 menit
+          lewat JS, bukan looping non-stop. */}
+      <video ref={bgVideoRef} className="login-bg-video" src="/login-bg.mp4" autoPlay muted playsInline />
 
       <LoginDecor />
 
@@ -477,7 +494,10 @@ export default function LoginPage() {
 
         <form className="login-card" onSubmit={handleSubmit}>
           <div className="login-card-header">
-            <img src="/brand-logo.png" alt="Websiteapp Npi" className="login-logo-img" />
+            <div className="login-logo" key={logoAnimKey}>
+              <img src="/brand-logo-icon.png" alt="" aria-hidden="true" className="login-logo-icon" />
+              <img src="/brand-logo-text.png" alt="Websiteapp Npi" className="login-logo-text" />
+            </div>
             <p className="welcome">Selamat Datang</p>
             <p className="subtitle">Silakan Masuk ke Akun Anda</p>
           </div>

@@ -58,15 +58,34 @@
   }
 }
 
-/* Dipakai .login-logo-img (gambar, bukan teks lagi -- 2026-08-29) makanya
-   drop-shadow bukan text-shadow. */
-@keyframes loginGlowPulse {
-  0%,
-  100% {
-    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
+/* Animasi "muncul bertahap" logo (2026-08-29, ditiru dari video
+   "Websiteapp Npi Logo.mp4" yg dikirim user: ikon roll cat "menggulung"
+   muncul duluan, baru wordmark teksnya "menyapu" masuk dari kiri ke
+   kanan, lalu keduanya diam) -- dipakai sekali pas halaman/komponennya
+   mount, BUKAN loop (spt masalah loop video/animasi sebelumnya yg
+   dikeluhkan "kesentak"/"berlebihan"). logoIconReveal pakai clip-path
+   vertical (nyerupai ikon "terbuka" dari garis tipis di tengah), lalu
+   logoTextReveal pakai clip-path horizontal (wipe kiri->kanan) dgn delay
+   dikit supaya nyusul setelah ikonnya selesai -- animation-fill-mode
+   `both` supaya teksnya kepotong penuh (tersembunyi) selama delay,
+   bukan kelihatan utuh dulu sebelum reveal-nya mulai. */
+@keyframes logoIconReveal {
+  0% {
+    clip-path: inset(42% 0 42% 0);
+    opacity: 0;
   }
-  50% {
-    filter: drop-shadow(0 0 14px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 4px rgba(255, 255, 255, 0.85));
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+@keyframes logoTextReveal {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
   }
 }
 
@@ -305,10 +324,30 @@
      hasil crop+transparent dari file yg dikirim user) supaya identik di
      login & topbar. Glow putih dipertahankan (drop-shadow, versi gambar
      dari text-shadow sebelumnya) krn bagian biru logonya ("Website"/"Npi")
-     masih bisa nyaris nyatu dgn latar topbar yg juga biru. */
-  .topbar-logo-img {
-    @apply h-8 w-auto sm:h-10;
+     masih bisa nyaris nyatu dgn latar topbar yg juga biru.
+     Dipecah jadi 2 gambar terpisah (icon + text, lihat brand-logo-icon.png
+     & brand-logo-text.png) supaya animasi "muncul bertahap" (2026-08-29,
+     ditiru dari video "Websiteapp Npi Logo.mp4" yg dikirim user: ikon
+     muncul dulu, baru teksnya "menyapu" masuk dari kiri) bisa dianimasikan
+     terpisah lewat logoIconReveal/logoTextReveal -- filter drop-shadow
+     dipasang di container (.topbar-logo), bukan per-gambar, spy glow-nya
+     nyatu jadi satu lapisan drpd dobel persis di sambungan icon/text. */
+  .topbar-logo {
+    @apply flex h-8 items-center sm:h-10;
     filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
+  }
+
+  .topbar-logo-icon,
+  .topbar-logo-text {
+    @apply block h-full w-auto;
+  }
+
+  .topbar-logo-icon {
+    animation: logoIconReveal 0.25s ease-out both;
+  }
+
+  .topbar-logo-text {
+    animation: logoTextReveal 0.3s ease-out 0.2s both;
   }
 
   .topbar-right {
@@ -566,10 +605,29 @@
      nongol). Header-nya biru, bagian logo yg birunya ("Website"/"Npi")
      masih butuh glow putih spy kontras -- sama spt versi teks sebelumnya,
      cuma sekarang lewat filter:drop-shadow (bukan text-shadow) krn ini
-     gambar. */
-  .login-logo-img {
-    @apply mx-auto mb-1 block h-auto w-[300px] max-w-full;
-    animation: loginGlowPulse 3.5s ease-in-out infinite;
+     gambar. Dipecah jadi 2 gambar terpisah (icon + text) -- lihat catatan
+     di .topbar-logo utk alasan lengkapnya (animasi "muncul bertahap" ala
+     video logo yg dikirim user). Lebar total container 300px sama spt
+     w-[300px] versi img tunggal sebelumnya; tinggi 48.7px dihitung dari
+     rasio asli icon+text (228+1312=1540 x 250) spy proporsinya identik. */
+  .login-logo {
+    @apply mx-auto mb-1 flex max-w-full items-center;
+    width: 300px;
+    height: 48.7px;
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.95));
+  }
+
+  .login-logo-icon,
+  .login-logo-text {
+    @apply block h-full w-auto;
+  }
+
+  .login-logo-icon {
+    animation: logoIconReveal 0.25s ease-out both;
+  }
+
+  .login-logo-text {
+    animation: logoTextReveal 0.3s ease-out 0.2s both;
   }
 
   .login-card-header .welcome {

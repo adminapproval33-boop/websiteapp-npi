@@ -19,6 +19,18 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
     return () => clearInterval(id);
   }, []);
 
+  /** Ganti `key` div logo tiap 15 menit (2026-08-29, permintaan eksplisit
+   * user) supaya React unmount+remount elemennya -- ini yang bikin animasi
+   * CSS logoIconReveal/logoTextReveal (yg didesain sekali-jalan pas mount,
+   * lihat app.css) terputar ulang secara berkala, bukan cuma sekali pas
+   * topbar pertama muncul. */
+  const [logoAnimKey, setLogoAnimKey] = useState(0);
+  useEffect(() => {
+    const REPLAY_INTERVAL_MS = 15 * 60 * 1000;
+    const id = setInterval(() => setLogoAnimKey((k) => k + 1), REPLAY_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, []);
+
   const initials = (user?.name ?? "?")
     .split(" ")
     .map((s) => s[0])
@@ -37,7 +49,10 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         >
           ☰
         </button>
-        <img src="/brand-logo.png" alt="Websiteapp Npi" className="topbar-logo-img" />
+        <div className="topbar-logo" key={logoAnimKey}>
+          <img src="/brand-logo-icon.png" alt="" aria-hidden="true" className="topbar-logo-icon" />
+          <img src="/brand-logo-text.png" alt="Websiteapp Npi" className="topbar-logo-text" />
+        </div>
       </div>
       <div className="topbar-right">
         <span className="hidden sm:inline">{now.toLocaleString("id-ID")}</span>

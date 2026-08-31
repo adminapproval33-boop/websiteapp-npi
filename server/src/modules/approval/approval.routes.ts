@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { createUploader, uploadToBlob } from "../../lib/uploadStorage";
 import { sanitizeNik } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
@@ -361,8 +361,18 @@ async function fetchLotHistory(filterCol: string, filterValue: string, statusFil
     orderBy: { timestamp: "desc" },
   });
 
+  // % GR tidak disimpan di ApprovalSchedule -- diambil live dari MasterOrder
+  // (sama pola dgn orderType di GET / di atas), supaya kolom ini otomatis
+  // ikut ter-update kalau data "Referensi Order / PO (SAP-COOISPI)" di-refresh.
+  const masterOrders = await prisma.masterOrder.findMany({
+    where: { order: { in: rows.map((r) => r.order) } },
+    select: { order: true, pctGR: true },
+  });
+  const pctGrByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
+
   const enriched = rows.map((row) => ({
     ...row,
+    pctGR: pctGrByOrder.get(row.order) ?? null,
     status: computeStatus(row.techName, row.finishApp),
     processingTime: formatProcessingTime(row.timestamp, row.finishApp),
     hasAttachment: row.attachments.length > 0,
@@ -524,9 +534,15 @@ approvalRouter.post(
   })
 );
 
+// Dulu requireFullAccess -- direvisi 2026-08-31 (instruksi eksplisit user)
+// jadi requireMenuInput, konsisten dgn DELETE di bawah yg sudah lebih dulu
+// dilonggarkan dari Full-Access-only ke Input: user level Input menu Approval
+// (mis. Eva Juita/Rudi Muhammad Santoso/Nia Septiani) sebelumnya bisa Tambah &
+// Hapus tapi tombol Edit ✏️ -> "Simpan Perubahan" selalu ditolak 403 krn PUT
+// ini masih Full-Access-only.
 approvalRouter.put(
   "/:approvalId",
-  requireFullAccess,
+  requireMenuInput("approval"),
   asyncRoute(async (req, res) => {
     const parsed = await saveSchema.safeParseAsync(req.body);
     if (!parsed.success) {

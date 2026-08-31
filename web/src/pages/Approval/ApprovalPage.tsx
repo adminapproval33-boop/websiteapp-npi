@@ -53,6 +53,10 @@ interface ApprovalRow {
 }
 
 interface LotHistoryRow extends ApprovalRow {
+  /** Diambil live dari MasterOrder ("Referensi Order / PO (SAP-COOISPI)")
+   * lewat GET /approvals/lot-history di backend, bukan snapshot -- jadi
+   * otomatis ikut berubah kalau Master Data Cooispi di-update ulang. */
+  pctGR: string | null;
   status: "Pending Approval" | "Approval" | "Oke Approval";
   processingTime: string;
   hasAttachment: boolean;
@@ -976,6 +980,7 @@ export default function ApprovalPage({
                 { key: "status", label: "Status", render: (r) => r.status },
                 { key: "processingTime", label: "Processing Time", render: (r) => r.processingTime },
                 { key: "hasAttachment", label: "Lampiran", render: (r) => (r.hasAttachment ? "Filled" : "No File"), csvValue: (r) => (r.hasAttachment ? "Filled" : "No File") },
+                { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
                 {
                   key: "actions",
                   label: "Aksi",

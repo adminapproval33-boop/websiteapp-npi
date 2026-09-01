@@ -181,6 +181,15 @@ export default function AdminQcPage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"input" | "history">(() => (isViewOnly ? "history" : "input"));
   const [form, setForm] = useState(emptyForm);
+  /** Admin QC Stage "Assorted (NG)" (2026-09-01, instruksi eksplisit user):
+   * Lot Passed/QC to App jadi tidak relevan (barang langsung di-assort,
+   * bukan lewat Lot Passed/Approval) -- kolomnya dikunci nonaktif & dipaksa
+   * kosong ("-"), sementara QC Passed JADI WAJIB (kebalikan dari stage lain
+   * yg cuma Lot Packing yg mewajibkan QC Passed). Dipakai bareng oleh JSX
+   * (kunci input) & saveMutation (paksa Lot Passed/QC to App kosong walau
+   * form state-nya somehow masih kesisa nilai lama, mis. dari Edit baris yg
+   * stage-nya baru diganti ke Assorted (NG)). */
+  const isAssortedNg = form.typeLot === "Assorted (NG)";
   const [params, setParams] = useState<ParamRow[]>([]);
   const [checkPassthrough, setCheckPassthrough] = useState<CheckPassthrough>(emptyCheckPassthrough);
   /** Nilai "Appearance Check Results" (form.remark) PERSIS seperti saat
@@ -369,9 +378,15 @@ export default function AdminQcPage() {
       // Kegagalan sync ini SENGAJA tidak menggagalkan save Admin QC-nya
       // sendiri (data header Admin QC sudah kepalang tersimpan) -- cuma
       // ditambahkan ke pesan sukses sbg peringatan.
+      // Assorted (NG) (2026-09-01, instruksi eksplisit user): Lot Passed/QC to
+      // App dipaksa kosong di payload yg dikirim, TIDAK PEDULI apa isi form
+      // state-nya (defense-in-depth -- field-nya sendiri sudah dikunci/di-clear
+      // di JSX & saat ganti Admin QC Stage, ini jaga2 kalau somehow masih ada
+      // nilai lama nyangkut, mis. dari baris Edit yg stage-nya baru diganti).
+      const payload = isAssortedNg ? { ...form, lotPassed: "", qcToApproval: "" } : form;
       const res = editingAdminQcId
-        ? await api.put<{ success: boolean; data: AdminQcRow }>(`/admin-qc/${editingAdminQcId}`, form)
-        : await api.post<{ success: boolean; data: AdminQcRow }>("/admin-qc", form);
+        ? await api.put<{ success: boolean; data: AdminQcRow }>(`/admin-qc/${editingAdminQcId}`, payload)
+        : await api.post<{ success: boolean; data: AdminQcRow }>("/admin-qc", payload);
       let syncWarning = "";
       const trimmedRemark = form.remark.trim();
       if (checkPassthrough.checkId && trimmedRemark && trimmedRemark !== remarkBaseline.trim()) {
@@ -509,11 +524,15 @@ export default function AdminQcPage() {
    * semua". Appearance Check Results (remark) & aturan "Joint Lot" utk QC
    * Passed/QC to App adalah kolom yg DIUBAH 2026-08-11 (instruksi eksplisit
    * user): Joint Lot jadi TIDAK mewajibkan QC Passed/QC to App/remark;
-   * stage lain (termasuk Improve) tetap wajib isi remark. */
+   * stage lain (termasuk Improve) tetap wajib isi remark. "Assorted (NG)"
+   * ditambahkan 2026-09-01 (instruksi eksplisit user): Lot Passed/QC to App
+   * TIDAK PERNAH wajib (kolomnya dikunci nonaktif, lihat `isAssortedNg` &
+   * JSX-nya), sebaliknya QC Passed JADI WAJIB -- pola requirement-nya persis
+   * kebalikan dari stage lain. */
   const jointLot = form.typeLot === "Joint Lot";
   const lotPassedRequired = form.typeLot === "Lot Packing" || jointLot;
   const qcToApprovalRequired = form.typeLot === "Approval";
-  const qcPassedRequired = form.typeLot === "Lot Packing";
+  const qcPassedRequired = form.typeLot === "Lot Packing" || isAssortedNg;
   const remarkRequired = !jointLot;
 
   return (
@@ -567,19 +586,45 @@ export default function AdminQcPage() {
                   <TankSelect bare id="admin-qc-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
                 </ExcelField>
                 <ExcelField label="Admin QC Stage" widthPx={headerColWidths.typeLot} onResizeStart={beginHeaderResize("typeLot")} {...gridNav("typeLot")}>
-                  <select value={form.typeLot} onChange={(e) => setForm({ ...form, typeLot: e.target.value })} required>
+                  <select
+                    value={form.typeLot}
+                    onChange={(e) => {
+                      const typeLot = e.target.value;
+                      // Assorted (NG) (2026-09-01, instruksi eksplisit user):
+                      // begitu stage ini dipilih, Lot Passed/QC to App langsung
+                      // dikosongkan (field-nya jadi terkunci "-" di bawah, lihat
+                      // isAssortedNg) -- supaya tidak ada nilai lama nyangkut
+                      // begitu balik pindah stage lalu pindah lagi ke sini.
+                      setForm((f) => ({
+                        ...f,
+                        typeLot,
+                        lotPassed: typeLot === "Assorted (NG)" ? "" : f.lotPassed,
+                        qcToApproval: typeLot === "Assorted (NG)" ? "" : f.qcToApproval,
+                      }));
+                    }}
+                    required
+                  >
                     <option value="">-- Pilih --</option>
-                    <option value="Improve">Improve</option>
                     <option value="Joint Lot">Joint Lot</option>
                     <option value="Lot Packing">Lot Packing</option>
                     <option value="Approval">Approval</option>
+                    <option value="Improve">Improve</option>
+                    <option value="Assorted (NG)">Assorted (NG)</option>
                   </select>
                 </ExcelField>
                 <ExcelField label="Lot Passed" widthPx={headerColWidths.lotPassed} onResizeStart={beginHeaderResize("lotPassed")} {...gridNav("lotPassed")}>
-                  <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} required={lotPassedRequired} />
+                  {isAssortedNg ? (
+                    <input value="-" readOnly disabled title="Tidak berlaku utk Admin QC Stage 'Assorted (NG)'." />
+                  ) : (
+                    <input type="datetime-local" value={toDateTimeLocalValue(form.lotPassed)} onChange={(e) => setForm({ ...form, lotPassed: e.target.value })} required={lotPassedRequired} />
+                  )}
                 </ExcelField>
                 <ExcelField label="QC to App" widthPx={headerColWidths.qcToApproval} onResizeStart={beginHeaderResize("qcToApproval")} {...gridNav("qcToApproval")}>
-                  <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} required={qcToApprovalRequired} />
+                  {isAssortedNg ? (
+                    <input value="-" readOnly disabled title="Tidak berlaku utk Admin QC Stage 'Assorted (NG)'." />
+                  ) : (
+                    <input type="datetime-local" value={toDateTimeLocalValue(form.qcToApproval)} onChange={(e) => setForm({ ...form, qcToApproval: e.target.value })} required={qcToApprovalRequired} />
+                  )}
                 </ExcelField>
                 <ExcelField label="QC Passed" widthPx={headerColWidths.qcPassed} onResizeStart={beginHeaderResize("qcPassed")} {...gridNav("qcPassed")}>
                   <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} required={qcPassedRequired} />

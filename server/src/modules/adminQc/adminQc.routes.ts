@@ -41,6 +41,12 @@ const saveSchema = z
     // (sudah wajib dari Zod di atas). Direvisi lagi 2026-08-11 (instruksi
     // eksplisit user): utk "Joint Lot", QC to App/QC Passed JADI TIDAK wajib
     // (kebalikan dari sebelumnya) -- Lot Packing/Approval TIDAK berubah.
+    // "Assorted (NG)" ditambahkan 2026-09-01 (instruksi eksplisit user): QC
+    // Passed WAJIB (sama pola dgn Lot Packing), Lot Passed/QC to App TIDAK
+    // PERNAH wajib -- frontend sudah mengunci & mengosongkan kedua field itu
+    // di stage ini (AdminQcPage.tsx), jadi TIDAK ditambahkan syarat "wajib
+    // kosong" di sini (kalau ada baris lama yg somehow masih py nilai, biarkan
+    // lolos apa adanya, tidak perlu ditolak).
     const hasLotPassed = data.lotPassed != null;
     const hasQcToApproval = data.qcToApproval != null;
     const hasQcPassed = data.qcPassed != null;
@@ -53,6 +59,8 @@ const saveSchema = z
       if (!hasLotPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lotPassed"], message: "Lot Passed wajib diisi kalau Admin QC Stage sudah diisi." });
     } else if (data.typeLot === "Approval") {
       if (!hasQcToApproval) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcToApproval"], message: "QC to App wajib diisi kalau Admin QC Stage sudah diisi." });
+    } else if (data.typeLot === "Assorted (NG)") {
+      if (!hasQcPassed) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qcPassed"], message: "QC Passed wajib diisi kalau Admin QC Stage sudah diisi." });
     }
 
     // Appearance Check Results wajib diisi kecuali "Joint Lot" (2026-08-11,

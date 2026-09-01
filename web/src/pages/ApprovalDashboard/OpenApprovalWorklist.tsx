@@ -80,7 +80,12 @@ function fmt(n: number) {
 }
 
 type ViewMode = "tech" | "sales" | "customer" | "segment";
-type ReadyFilter = "ALL" | "ready" | "wip" | "noown";
+// "noown" DIGANTI jadi "notech" (2026-09-01, instruksi eksplisit user) --
+// filter Sales PIC kosong TIDAK terpakai (di data real sekarang ini SELALU
+// 0, lihat komentar di kartu "No Tech PIC"/"No Sales PIC" di atas), Tech PIC
+// kosong yg justru sering kejadian (144 item) makanya filter ini diarahkan
+// ke situ.
+type ReadyFilter = "ALL" | "ready" | "wip" | "notech";
 type OwnerFilter = { role: "tech" | "sales"; name: string } | null;
 type SortKey = "plant" | "customer" | "order" | "batch" | "orderType" | "sku" | "qty" | "tech" | "sales" | "days" | "ready";
 
@@ -167,7 +172,7 @@ export default function OpenApprovalWorklist() {
     if (bucket) rows = rows.filter((i) => i.bucket === bucket);
     if (readyFilter === "ready") rows = rows.filter((i) => i.ready);
     if (readyFilter === "wip") rows = rows.filter((i) => !i.ready);
-    if (readyFilter === "noown") rows = rows.filter((i) => i.sales === UNASSIGNED);
+    if (readyFilter === "notech") rows = rows.filter((i) => i.tech === UNASSIGNED);
     if (owner) rows = rows.filter((i) => i[owner.role] === owner.name);
     if (customerFilter) rows = rows.filter((i) => i.customer === customerFilter);
     if (segmentFilter) rows = rows.filter((i) => (i.segment || "UNKNOWN") === segmentFilter);
@@ -248,7 +253,7 @@ export default function OpenApprovalWorklist() {
   if (customerFilter) activeFilterBits.push(`Customer = ${customerFilter}`);
   if (segmentFilter) activeFilterBits.push(`Cust Segmen = ${segmentFilter}`);
   if (bucket) activeFilterBits.push(`${bucket} days`);
-  if (readyFilter !== "ALL") activeFilterBits.push({ ready: "Ready for sign-off", wip: "Not ready", noown: "No sales owner" }[readyFilter]);
+  if (readyFilter !== "ALL") activeFilterBits.push({ ready: "Ready for sign-off", wip: "Not ready", notech: "No Tech PIC" }[readyFilter]);
 
   if (isLoading) return <div className="panel-body text-sm text-slate-500">Memuat worklist...</div>;
 
@@ -267,7 +272,7 @@ export default function OpenApprovalWorklist() {
                 setPlant(p);
                 resetPlantScopedFilters();
               }}
-              className={`rounded-lg px-3 py-1.5 font-mono text-xs font-semibold transition ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                 plant === p ? "bg-rose-600 text-white" : "text-slate-500 hover:bg-slate-100"
               }`}
             >
@@ -309,11 +314,11 @@ export default function OpenApprovalWorklist() {
                 }`}
               >
                 <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: BUCKET_COLOR[bk] }} />
-                <div className="font-mono text-[0.68rem] text-slate-500">{bk} hari</div>
-                <div className="mt-1 font-mono text-lg font-bold" style={{ color: BUCKET_COLOR[bk] }}>
+                <div className="text-[0.68rem] text-slate-500">{bk} hari</div>
+                <div className="mt-1 text-lg font-bold" style={{ color: BUCKET_COLOR[bk] }}>
                   {rows.length}
                 </div>
-                <div className="mt-0.5 font-mono text-[0.62rem] text-slate-400">{fmt(rows.reduce((s, d) => s + d.qty, 0))} L</div>
+                <div className="mt-0.5 text-[0.62rem] text-slate-400">{fmt(rows.reduce((s, d) => s + d.qty, 0))} L</div>
               </button>
             );
           })}
@@ -334,7 +339,7 @@ export default function OpenApprovalWorklist() {
                 setView(v);
                 setExpanded(null);
               }}
-              className={`rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition ${
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
                 view === v ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
               }`}
             >
@@ -344,6 +349,18 @@ export default function OpenApprovalWorklist() {
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(255px,1fr))] gap-3">
           {groups.map((g) => {
+            // `alert` cuma bisa "true" di view "tech"/"sales" (customer/segment
+            // pakai fallback "UNKNOWN", bukan UNASSIGNED -- lihat `groups`).
+            // Label kartu-nya DIPERBAIKI 2026-09-01 (ditemukan lewat laporan
+            // user: kartu "⚠ No sales owner" tetap muncul walau lagi di view
+            // "By Tech PIC", bikin bingung, PADAHAL kartunya lagi nunjukkin
+            // Tech PIC yg kosong bukan Sales PIC) -- SEBELUMNYA teks "No sales
+            // owner" di-hardcode apa pun view-nya, sekarang ikut
+            // `VIEW_LABEL[view]` supaya sesuai role yg lagi ditampilkan.
+            // Dropdown "☰"/Item Explorer di bawah JUGA ikut diganti jadi "No
+            // Tech PIC" (filter `readyFilter === "notech"`, bukan lagi cek
+            // Sales PIC) krn di data real Sales PIC SELALU terisi (0 kosong),
+            // Tech PIC yg justru sering kosong (144 item saat laporan ini).
             const alert = g.name === UNASSIGNED;
             const color = alert ? "#dc2626" : avatarColor(g.name);
             const isOpen = expanded === g.name;
@@ -351,14 +368,14 @@ export default function OpenApprovalWorklist() {
               <div key={g.name} className={`overflow-hidden rounded-xl border bg-white transition ${alert ? "border-red-200 bg-red-50/40" : "border-slate-200"}`}>
                 <button onClick={() => onOwnerHeadClick(g.name)} className="flex w-full items-center gap-2.5 px-3.5 py-3 text-left">
                   <div
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg font-mono text-sm font-bold text-white"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-sm font-bold text-white"
                     style={{ background: color }}
                   >
                     {LIST_VIEWS.includes(view) ? (g.name === "UNKNOWN" ? "?" : g.name.slice(0, 2).toUpperCase()) : initials(g.name)}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className={`truncate text-sm font-bold ${alert ? "text-red-600" : "text-slate-800"}`}>
-                      {alert ? "⚠ No sales owner" : g.name}
+                      {alert ? `⚠ No ${VIEW_LABEL[view]}` : g.name}
                     </div>
                     <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
                       {VIEW_LABEL[view]}
@@ -366,23 +383,23 @@ export default function OpenApprovalWorklist() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono text-lg font-bold text-slate-800">{g.n}</div>
+                    <div className="text-lg font-bold text-slate-800">{g.n}</div>
                     <div className="text-[0.6rem] uppercase text-slate-400">items</div>
                   </div>
                 </button>
                 <div className="grid grid-cols-3 border-t border-slate-100 text-center">
                   <div className="border-r border-slate-100 py-2">
-                    <div className="font-mono text-sm font-bold text-slate-700">{fmt(g.qty)}</div>
+                    <div className="text-sm font-bold text-slate-700">{fmt(g.qty)}</div>
                     <div className="text-[0.58rem] uppercase text-slate-400">liter</div>
                   </div>
                   <div className="border-r border-slate-100 py-2">
-                    <div className="font-mono text-sm font-bold" style={{ color: g.oldest > 60 ? "#dc2626" : g.oldest > 30 ? "#d97706" : "#059669" }}>
+                    <div className="text-sm font-bold" style={{ color: g.oldest > 60 ? "#dc2626" : g.oldest > 30 ? "#d97706" : "#059669" }}>
                       {g.oldest}d
                     </div>
                     <div className="text-[0.58rem] uppercase text-slate-400">oldest</div>
                   </div>
                   <div className="py-2">
-                    <div className="font-mono text-sm font-bold text-emerald-600">{g.ready}</div>
+                    <div className="text-sm font-bold text-emerald-600">{g.ready}</div>
                     <div className="text-[0.58rem] uppercase text-slate-400">ready</div>
                   </div>
                 </div>
@@ -390,17 +407,17 @@ export default function OpenApprovalWorklist() {
                   <div className="max-h-[280px] overflow-auto border-t border-slate-100 bg-slate-50/60">
                     {g.items.map((d) => (
                       <div key={d.approvalId} className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-[0.72rem] last:border-b-0">
-                        <span className="min-w-[34px] font-mono font-bold" style={{ color: BUCKET_COLOR[d.bucket] }}>
+                        <span className="min-w-[34px] font-bold" style={{ color: BUCKET_COLOR[d.bucket] }}>
                           {d.days}d
                         </span>
                         <span className="min-w-0 flex-1">
                           <b className="block truncate font-semibold text-slate-700">{d.sku}</b>
-                          <small className="font-mono text-[0.62rem] text-slate-400">
+                          <small className="text-[0.62rem] text-slate-400">
                             {d.customer} · PO {d.order}
                             {view !== "sales" ? ` · ${d.sales === UNASSIGNED ? "no sales owner" : d.sales}` : ""}
                           </small>
                         </span>
-                        <span className="whitespace-nowrap text-right font-mono text-[0.68rem] text-slate-500">
+                        <span className="whitespace-nowrap text-right text-[0.68rem] text-slate-500">
                           {fmt(d.qty)}L
                           <br />
                           <StatusPill ready={d.ready} />
@@ -437,22 +454,22 @@ export default function OpenApprovalWorklist() {
           <select
             value={readyFilter}
             onChange={(e) => setReadyFilter(e.target.value as ReadyFilter)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
           >
             <option value="ALL">Semua item</option>
             <option value="ready">Ready sign-off saja</option>
             <option value="wip">Belum ready</option>
-            <option value="noown">Tanpa sales owner</option>
+            <option value="notech">No Tech PIC</option>
           </select>
-          <button onClick={clearFilters} className="rounded-lg border border-red-200 px-3 py-2 font-mono text-xs font-semibold text-red-600 hover:bg-red-50">
+          <button onClick={clearFilters} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50">
             clear filters
           </button>
         </div>
-        {activeFilterBits.length > 0 && <div className="mb-2 font-mono text-xs text-amber-600">▸ filtering: {activeFilterBits.join(" · ")}</div>}
+        {activeFilterBits.length > 0 && <div className="mb-2 text-xs text-amber-600">▸ filtering: {activeFilterBits.join(" · ")}</div>}
 
         <div className="overflow-auto rounded-xl border border-slate-200 bg-white">
           {explorerRows.length === 0 ? (
-            <div className="p-8 text-center font-mono text-sm text-slate-400">Tidak ada item yang cocok dengan filter ini.</div>
+            <div className="p-8 text-center text-sm text-slate-400">Tidak ada item yang cocok dengan filter ini.</div>
           ) : (
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -461,7 +478,7 @@ export default function OpenApprovalWorklist() {
                     <th
                       key={c.key}
                       onClick={() => setSortKey(c.key)}
-                      className="cursor-pointer whitespace-nowrap border-b border-slate-200 px-3 py-2 text-left font-mono text-[0.68rem] uppercase tracking-wide text-slate-500 hover:text-slate-700"
+                      className="cursor-pointer whitespace-nowrap border-b border-slate-200 px-3 py-2 text-left text-[0.68rem] uppercase tracking-wide text-slate-500 hover:text-slate-700"
                     >
                       {c.label} <span className="opacity-40">{sort.key === c.key ? (sort.dir > 0 ? "▲" : "▼") : ""}</span>
                     </th>
@@ -471,7 +488,7 @@ export default function OpenApprovalWorklist() {
               <tbody>
                 {explorerRows.map((d) => (
                   <tr key={d.approvalId} className="border-b border-slate-100 last:border-b-0 hover:bg-rose-50/40">
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.plant}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{d.plant}</td>
                     <td className="px-3 py-2">
                       <button
                         onClick={() => {
@@ -479,19 +496,19 @@ export default function OpenApprovalWorklist() {
                           setOwner(null);
                           setSegmentFilter(null);
                         }}
-                        className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 hover:bg-slate-200"
+                        className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-200"
                       >
                         {d.customer}
                       </button>
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.order}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.batch}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500">{d.orderType}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{d.order}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{d.batch}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{d.orderType}</td>
                     <td className="max-w-[280px] px-3 py-2">
                       <div className="truncate font-semibold text-slate-700">{d.sku}</div>
-                      {d.segment && <small className="font-mono text-[0.65rem] text-slate-400">{d.segment}</small>}
+                      {d.segment && <small className="text-[0.65rem] text-slate-400">{d.segment}</small>}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-slate-500">{fmt(d.qty)}</td>
+                    <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(d.qty)}</td>
                     <td className="px-3 py-2">
                       <button
                         onClick={() => {
@@ -499,7 +516,7 @@ export default function OpenApprovalWorklist() {
                           setCustomerFilter(null);
                           setSegmentFilter(null);
                         }}
-                        className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700 hover:bg-slate-200"
+                        className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-200"
                       >
                         {d.tech}
                       </button>
@@ -511,14 +528,14 @@ export default function OpenApprovalWorklist() {
                           setCustomerFilter(null);
                           setSegmentFilter(null);
                         }}
-                        className={`rounded px-2 py-0.5 font-mono text-xs ${
+                        className={`rounded px-2 py-0.5 text-xs ${
                           d.sales === UNASSIGNED ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                         }`}
                       >
                         {d.sales === UNASSIGNED ? "none" : d.sales}
                       </button>
                     </td>
-                    <td className="px-3 py-2 font-mono text-sm font-bold" style={{ color: BUCKET_COLOR[d.bucket] }}>
+                    <td className="px-3 py-2 text-sm font-bold" style={{ color: BUCKET_COLOR[d.bucket] }}>
                       {d.days}
                     </td>
                     <td className="px-3 py-2">
@@ -535,14 +552,21 @@ export default function OpenApprovalWorklist() {
   );
 }
 
+/** Kartu KPI -- pola SAMA PERSIS dgn KpiCard di dashboard lain (Tank/Mesin/
+ * Produktivitas Monitoring, lihat komentar sama di sana): `.panel` + border
+ * atas 4px warna tone, label abu-abu (var(--text-muted)) di atas, angka besar
+ * SELALU var(--navy-dark) (tone cuma mewarnai border, bukan angkanya) --
+ * disamakan 2026-09-01 (instruksi eksplisit user, sebelumnya kartu ini pakai
+ * gaya Tailwind slate/rose terpisah sendiri, beda dgn dashboard lain). Baris
+ * `sub` (keterangan tambahan) tetap dipertahankan, cuma ikut restyle muted.
+ */
 function Kpi({ label, value, sub, tone }: { label: string; value: string | number; sub: string; tone?: "amber" | "teal" | "red" }) {
-  const border = tone === "amber" ? "border-t-amber-500" : tone === "teal" ? "border-t-emerald-500" : tone === "red" ? "border-t-red-500" : "border-t-rose-500";
-  const color = tone === "amber" ? "text-amber-600" : tone === "teal" ? "text-emerald-600" : tone === "red" ? "text-red-600" : "text-slate-800";
+  const color = tone === "amber" ? "#d97706" : tone === "teal" ? "var(--success)" : tone === "red" ? "var(--danger)" : "var(--navy-light)";
   return (
-    <div className={`rounded-xl border border-slate-200 border-t-4 bg-white p-3.5 shadow-sm ${border}`}>
-      <div className="text-[0.66rem] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`mt-1.5 font-mono text-2xl font-bold ${color}`}>{value}</div>
-      <div className="mt-1 text-[0.68rem] leading-tight text-slate-500">{sub}</div>
+    <div className="panel" style={{ padding: 16, borderTop: `4px solid ${color}` }}>
+      <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{value}</div>
+      <div style={{ marginTop: 4, fontSize: "0.68rem", lineHeight: 1.3, color: "var(--text-muted)" }}>{sub}</div>
     </div>
   );
 }
@@ -550,7 +574,7 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string | numbe
 function StatusPill({ ready }: { ready: boolean }) {
   return (
     <span
-      className={`inline-block rounded px-1.5 py-0.5 font-mono text-[0.6rem] font-bold uppercase tracking-wide ${
+      className={`inline-block rounded px-1.5 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide ${
         ready ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
       }`}
     >

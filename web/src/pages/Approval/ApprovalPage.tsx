@@ -45,6 +45,7 @@ interface ApprovalRow {
   submitToCustomer: string | null;
   customer: string | null;
   custSegmen: string | null;
+  multipleCust: string | null;
   techName: string | null;
   techNameNik: string | null;
   finishApp: string | null;
@@ -135,6 +136,7 @@ const emptyForm = {
   submitToCustomer: "",
   customer: "",
   custSegmen: "",
+  multipleCust: "",
   techName: "",
   techNameNik: null as string | null,
   finishApp: "",
@@ -168,6 +170,7 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
   submitCust: 170,
   customer: 160,
   custSegmen: 150,
+  multipleCust: 150,
   techName: 160,
   finishApp: 170,
 };
@@ -178,7 +181,7 @@ const APPROVAL_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTankiRow2", "mrpPic", "salesPic"],
   ["prepareDate", "sprayMan", "wetSample", "panel", "lotCoa", "sendToTech"],
-  ["submitTech", "submitCust", "customer", "custSegmen", "techName", "finishApp"],
+  ["submitTech", "submitCust", "customer", "custSegmen", "multipleCust", "techName", "finishApp"],
 ];
 
 export default function ApprovalPage({
@@ -339,21 +342,56 @@ export default function ApprovalPage({
   });
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      editingApprovalId
-        ? api.put<{ success: boolean; data: ApprovalRow }>(`/approvals/${editingApprovalId}`, form)
-        : api.post<{ success: boolean; data: ApprovalRow }>("/approvals", form),
-    onSuccess: (res) => {
+    mutationFn: async () => {
+      if (editingApprovalId) {
+        const res = await api.put<{ success: boolean; data: ApprovalRow }>(`/approvals/${editingApprovalId}`, form);
+        return [res.data];
+      }
+      // Multiple Cust (2026-09-01, instruksi eksplisit user, mirip "tanki
+      // turunan" Milling tapi free-text bukan pilih dari daftar tetap):
+      // textarea ini kalau diisi LEBIH DARI 1 baris (1 customer per baris),
+      // tiap baris jadi 1 baris Approval TERPISAH di Lot History untuk Order
+      // yg SAMA -- field lain (termasuk Order Qty) disalin IDENTIK ke semua
+      // baris hasil pecahan, TIDAK dibagi (keputusan eksplisit user). HANYA
+      // berlaku utk Save baris BARU -- Edit baris yg sudah ada TETAP 1 baris
+      // spt biasa (tidak ikut pecah lagi), diputuskan eksplisit oleh user.
+      // Diisi 1 baris/kosong -> tetap 1 baris spt sebelum fitur ini ada.
+      const custLines = form.multipleCust
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      const payloads = custLines.length > 1 ? custLines.map((line) => ({ ...form, multipleCust: line })) : [form];
+      const created: ApprovalRow[] = [];
+      for (const payload of payloads) {
+        const res = await api.post<{ success: boolean; data: ApprovalRow }>("/approvals", payload);
+        created.push(res.data);
+      }
+      return created;
+    },
+    onSuccess: (created) => {
       setError("");
-      const wasEditing = editingApprovalId;
+      const wasEditing = !!editingApprovalId;
       setForm(emptyForm);
       setEditingApprovalId(null);
       queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
       queryClient.invalidateQueries({ queryKey: ["approval-queue"] });
       if (attachFile) {
-        uploadMutation.mutate({ approvalId: res.data.approvalId, file: attachFile });
+        // Lampiran diupload ke SEMUA baris hasil pecahan Multiple Cust
+        // (2026-09-01) -- sama prinsipnya dgn Order Qty di atas: lampiran itu
+        // konteks bersama Order ini, bukan spesifik 1 customer. Kalau tidak
+        // ada pecahan (1 baris biasa/Edit), `created` cuma 1 elemen -- perilaku
+        // sama persis spt sebelum fitur ini ada.
+        Promise.all(created.map((row) => uploadMutation.mutateAsync({ approvalId: row.approvalId, file: attachFile }))).catch(() => {
+          /* pesan error kegagalan upload sudah ditangani onError uploadMutation sendiri */
+        });
       } else {
-        setMessage(wasEditing ? "Data Approval berhasil diperbarui." : "Data Approval berhasil disimpan.");
+        setMessage(
+          wasEditing
+            ? "Data Approval berhasil diperbarui."
+            : created.length > 1
+            ? `Data Approval berhasil disimpan sbg ${created.length} baris terpisah (Multiple Cust).`
+            : "Data Approval berhasil disimpan."
+        );
       }
       onSaved?.();
     },
@@ -548,6 +586,7 @@ export default function ApprovalPage({
       submitToCustomer: row.submitToCustomer ?? "",
       customer: row.customer ?? "",
       custSegmen: row.custSegmen ?? "",
+      multipleCust: row.multipleCust ?? "",
       techName: row.techName ?? "",
       techNameNik: row.techNameNik ?? null,
       finishApp: row.finishApp ?? "",
@@ -811,6 +850,23 @@ export default function ApprovalPage({
                 <ExcelField label="Cust Segmen" widthPx={colWidths.custSegmen} onResizeStart={beginResize("custSegmen")} {...gridNav("custSegmen")}>
                   <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
                 </ExcelField>
+                <ExcelField label="Multiple Cust" widthPx={colWidths.multipleCust} onResizeStart={beginResize("multipleCust")} {...gridNav("multipleCust")}>
+                  {/* Textarea, 1 customer per baris (2026-09-01, instruksi
+                      eksplisit user, mirip "tanki turunan" Milling tapi
+                      free-text bukan pilih dari daftar tetap) -- kalau diisi
+                      LEBIH DARI 1 baris SAAT SAVE BARIS BARU (bukan Edit),
+                      tiap baris otomatis jadi 1 baris Approval TERPISAH di
+                      Lot History, field lain disalin identik (lihat
+                      saveMutation). Diisi 1 baris/kosong -> perilaku sama spt
+                      sebelumnya (field teks biasa). */}
+                  <textarea
+                    rows={2}
+                    value={form.multipleCust}
+                    onChange={(e) => setForm({ ...form, multipleCust: e.target.value })}
+                    placeholder="1 customer per baris kalau lebih dari 1"
+                    title="Isi lebih dari 1 baris (1 customer per baris) utk otomatis membuat baris Approval terpisah per customer di Lot History saat Save."
+                  />
+                </ExcelField>
                 <ExcelField label="Tech Name" widthPx={colWidths.techName} onResizeStart={beginResize("techName")} {...gridNav("techName")}>
                   <EmployeeNameSelect
                     bare
@@ -968,6 +1024,7 @@ export default function ApprovalPage({
                 },
                 { key: "customer", label: "Customer", render: (r) => r.customer },
                 { key: "custSegmen", label: "Cust Segmen", render: (r) => r.custSegmen },
+                { key: "multipleCust", label: "Multiple Cust", render: (r) => r.multipleCust },
                 { key: "techName", label: "Tech Name", render: (r) => r.techName },
                 {
                   key: "finishApp",

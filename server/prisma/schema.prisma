@@ -732,6 +732,7 @@ model ApprovalSchedule {
   submitToCustomer       DateTime?
   customer               String?
   custSegmen             String?
+  multipleCust           String?
   techName               String?
   techNameNik            String?
   finishApp              DateTime?

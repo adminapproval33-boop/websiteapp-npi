@@ -2332,7 +2332,7 @@ dashboardRouter.get(
   })
 );
 
-type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval";
+type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval" | "Assorted (NG)";
 
 interface QualityReviewRow {
   order: string;
@@ -2368,23 +2368,27 @@ interface QualityReviewRow {
 /**
  * Dashboard > Quality Check Review (2026-08-23, REVISI TOTAL sesuai instruksi
  * eksplisit user -- versi lama merekap per-baris Spec Parameter/verdict OK-NG,
- * DIGANTI TOTAL jadi rekap per NO ORDER dgn 4 status kerja QC, bukan lagi
- * per-item spec):
+ * DIGANTI TOTAL jadi rekap per NO ORDER dgn status kerja QC, bukan lagi
+ * per-item spec; "Assorted (NG)" ditambahkan 2026-09-01 instruksi eksplisit
+ * user, pola persis sama dgn "Approval"/"Improve" di bawah):
  *
  *   - "OK"        : Order ini SUDAH py AdminQc.qcPassed terisi (kolom "QC
  *                    Passed") -- TIDAK PEDULI Admin QC Stage-nya apa, begitu
  *                    QC Passed terisi otomatis "OK". Prioritas PALING TINGGI
- *                    (dicek duluan drpd 3 status lain).
+ *                    (dicek duluan drpd status lain).
  *   - "Approval"   : BELUM py qcPassed, DAN Admin QC Stage (typeLot) TERBARU
  *                    Order ini = "Approval".
  *   - "Improve"    : BELUM py qcPassed, DAN Admin QC Stage TERBARU = "Improve".
+ *   - "Assorted (NG)" : BELUM py qcPassed, DAN Admin QC Stage TERBARU =
+ *                    "Assorted (NG)".
  *   - "On Check"   : BELUM py qcPassed, Admin QC Stage TERBARU BUKAN
- *                    "Approval"/"Improve" (termasuk kalau belum py baris
- *                    AdminQc sama sekali), TAPI Order ini SUDAH py minimal 1
- *                    baris CheckResult (sudah masuk antrian QC).
- *   Order yg tidak masuk 4 kategori itu (mis. Admin QC Stage "Joint Lot"/"Lot
+ *                    "Approval"/"Improve"/"Assorted (NG)" (termasuk kalau
+ *                    belum py baris AdminQc sama sekali), TAPI Order ini
+ *                    SUDAH py minimal 1 baris CheckResult (sudah masuk
+ *                    antrian QC).
+ *   Order yg tidak masuk 5 kategori itu (mis. Admin QC Stage "Joint Lot"/"Lot
  *   Packing" tanpa qcPassed, dan BELUM PERNAH ada CheckResult) SENGAJA tidak
- *   dihitung sama sekali -- 4 definisi di atas persis instruksi eksplisit
+ *   dihitung sama sekali -- definisi di atas persis instruksi eksplisit
  *   user, tidak ditambah kategori "lain-lain".
  *
  * "TERBARU" = baris AdminQc/CheckResult PALING BARU (timestamp desc) per
@@ -2441,6 +2445,7 @@ dashboardRouter.get(
       if (qcPassed) status = "OK";
       else if (typeLot === "Approval") status = "Approval";
       else if (typeLot === "Improve") status = "Improve";
+      else if (typeLot === "Assorted (NG)") status = "Assorted (NG)";
       else if (check) status = "On Check";
 
       if (!status) continue;

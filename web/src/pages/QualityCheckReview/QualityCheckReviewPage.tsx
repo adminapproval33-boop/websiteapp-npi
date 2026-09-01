@@ -7,7 +7,7 @@ import { evaluateSpec } from "../../lib/specEval";
 import QcTrendChart, { QcTrendPoint } from "./QcTrendChart";
 import TrendLineChart, { TrendChartPoint, TrendSeries } from "../ProduktivitasDashboard/TrendLineChart";
 
-type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval";
+type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval" | "Assorted (NG)";
 
 interface QualityReviewRow {
   order: string;
@@ -100,17 +100,25 @@ const STATUS_COLOR: Record<OrderQcStatus, string> = {
   "On Check": "#94a3b8",
   Improve: "#f59e0b",
   Approval: "#0ea5e9",
+  "Assorted (NG)": "#dc2626",
 };
 
+// "Approval" SENGAJA tidak ada di daftar ini (2026-09-01, instruksi eksplisit
+// user) -- status itu dikeluarkan total dari halaman ini (lihat komentar di
+// tempat `rows` difilter), jadi tidak ada gunanya jadi opsi filter di sini.
 const STATUS_OPTIONS: { value: OrderQcStatus; label: string }[] = [
   { value: "OK", label: "OK (QC Passed)" },
   { value: "On Check", label: "On Check" },
   { value: "Improve", label: "Improve" },
-  { value: "Approval", label: "Approval" },
+  { value: "Assorted (NG)", label: "Assorted (NG)" },
 ];
 
-// Kartu KPI "Belum OK (QC Passed) -- Lama Menunggu" (2026-08-23, instruksi
-// eksplisit user, tab Ringkasan). Batas bucket NON-OVERLAP secara internal
+// Kartu KPI "Lama Proses" (2026-08-23, instruksi eksplisit user, tab
+// Ringkasan; DIREVISI 2026-09-01 dua kali -- sempat dikunci ke status "On
+// Check" saja, lalu diubah lagi jadi SEPENUHNYA reaktif thd kartu KPI Status
+// yg diklik: klik "OK (QC Passed)" -> kartu Lama Proses & tabel detail ikut
+// menampilkan SEMUA baris OK, dst -- lihat komentar `rowAgeBucket` di bawah).
+// Batas bucket NON-OVERLAP secara internal
 // (`maxDays`) meski label "15-21 Hari" & "21-30 Hari" sekilas tumpang tindih
 // di angka 21 -- itu murni teks label sesuai kalimat eksplisit user, logika
 // pembagiannya tetap tanpa duplikasi (bucket "21-30" sebenarnya menampung
@@ -123,11 +131,40 @@ const AGE_BUCKETS: { key: string; label: string; maxDays: number; color: string 
   { key: ">30", label: ">30 Hari", maxDays: Infinity, color: "#b91c1c" },
 ];
 
-/** Sudah berapa hari sejak `sinceIso` (dibulatkan ke atas, min 1 -- Order yg
- * baru masuk hari ini tetap dihitung "1 hari", bukan "0 hari"). */
-function ageDaysSince(sinceIso: string, nowMs: number): number {
-  const diff = nowMs - new Date(sinceIso).getTime();
-  return Math.max(1, Math.ceil(diff / 86_400_000));
+/** Sudah berapa HARI KERJA (exclude Sabtu/Minggu) sejak `sinceIso` sampai
+ * `endMs` -- DIREVISI 2026-09-01 (instruksi eksplisit user): Sabtu/Minggu
+ * TIDAK DIHITUNG, berlaku ke SEMUA kartu KPI & kolom yg pakai fungsi ini
+ * (Lama Proses/bucket umur/kolom tabel), bukan cuma satu tempat. Caranya:
+ * hitung dulu total "unit hari" yg lewat (pola SAMA dgn sebelumnya -- ceil
+ * durasi/24 jam, jadi hari yg baru mulai tetap kehitung 1 unit), lalu utk
+ * tiap unit hari itu (dimulai dari tanggal `sinceIso` sendiri, hari ke-0,
+ * ke-1, dst) cek hari apa itu -- Sabtu/Minggu dilewati, sisanya dihitung.
+ * Pakai getter waktu LOKAL browser (bukan UTC eksplisit) -- konsisten dgn
+ * `formatDateTime`/`toDateTimeLocalValue` di lib/datetime.ts yg jg pakai
+ * local time getters, asumsi browser sudah di zona WIB (kantor). */
+function ageDaysSince(sinceIso: string, endMs: number): number {
+  const start = new Date(sinceIso);
+  const totalDayUnits = Math.max(1, Math.ceil((endMs - start.getTime()) / 86_400_000));
+  let workdays = 0;
+  for (let i = 0; i < totalDayUnits; i++) {
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const dow = day.getDay(); // 0 = Minggu, 6 = Sabtu
+    if (dow !== 0 && dow !== 6) workdays++;
+  }
+  return workdays;
+}
+
+/** Titik akhir hitungan "Lama Proses" 1 baris (2026-09-01, instruksi
+ * eksplisit user) -- kalau Order-nya SUDAH SELESAI (`qcPassed` terisi, jadi
+ * status "OK" ATAU "Assorted (NG)" krn keduanya mewajibkan QC Passed),
+ * hitungannya BERHENTI di tanggal QC Passed (durasi proses yg SEBENARNYA,
+ * tidak terus nambah walau sudah lama selesai). Order yg MASIH BERJALAN
+ * (On Check/Improve, belum py QC Passed) tetap dihitung sampai SEKARANG,
+ * spt sebelumnya. Sengaja dicek dari `qcPassed`, BUKAN dari `status` --
+ * biar generik & otomatis benar utk status apa pun yg kelak mewajibkan QC
+ * Passed juga, tidak perlu daftar status manual di sini. */
+function rowAgeEndMs(r: QualityReviewRow, nowMs: number): number {
+  return r.qcPassed ? new Date(r.qcPassed).getTime() : nowMs;
 }
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -219,23 +256,26 @@ function KpiCard({
 /**
  * Dashboard > Quality Check Review (2026-08-23, REVISI TOTAL sesuai instruksi
  * eksplisit user -- versi lama merekap per-baris Spec Parameter/verdict
- * OK-NG, DIGANTI TOTAL jadi rekap per NO ORDER dgn 4 status kerja QC. Logika
- * lengkap penentuan status ada di backend (dashboard.routes.ts) -- halaman
- * ini murni menampilkan hasilnya:
- *   - "OK"       : Order sudah py "QC Passed" (kolom qcPassed di AdminQc).
- *   - "Approval" : belum QC Passed, Admin QC Stage TERBARU = "Approval".
- *   - "Improve"  : belum QC Passed, Admin QC Stage TERBARU = "Improve".
- *   - "On Check" : belum QC Passed, Admin QC Stage TERBARU BUKAN
- *                  Approval/Improve, TAPI sudah py minimal 1 baris Input
- *                  Check Results (sudah masuk antrian QC).
+ * OK-NG, DIGANTI TOTAL jadi rekap per NO ORDER dgn status kerja QC ("Assorted
+ * (NG)" ditambahkan 2026-09-01, instruksi eksplisit user). Logika lengkap
+ * penentuan status ada di backend (dashboard.routes.ts) -- halaman ini murni
+ * menampilkan hasilnya:
+ *   - "OK"            : Order sudah py "QC Passed" (kolom qcPassed di AdminQc).
+ *   - "Approval"      : belum QC Passed, Admin QC Stage TERBARU = "Approval".
+ *   - "Improve"        : belum QC Passed, Admin QC Stage TERBARU = "Improve".
+ *   - "Assorted (NG)" : belum QC Passed, Admin QC Stage TERBARU = "Assorted (NG)".
+ *   - "On Check"      : belum QC Passed, Admin QC Stage TERBARU BUKAN
+ *                        Approval/Improve/Assorted (NG), TAPI sudah py
+ *                        minimal 1 baris Input Check Results (sudah masuk
+ *                        antrian QC).
  *
  * Filter "Status" (2026-08-23, follow-up instruksi eksplisit user, DIREVISI
  * lagi sesuai instruksi eksplisit user berikutnya: tombolnya dibuat SAMA spt
  * tombol "Kolom" bawaan DataTable & sejajar dgn Kolom/Filter/Reset Kolom
  * dalam 1 baris -- pola sama persis dgn filter "TA/TB"/"Status Tanki" di
  * TankDashboardPage.tsx, dirender lewat prop `toolbarExtraLeft` DataTable)
- * -- multi-select, tidak ada yg dicentang = tampilkan semua. 5 kartu KPI
- * (Total + 4 status) SENGAJA dihitung dari `filteredRows` (baris SETELAH
+ * -- multi-select, tidak ada yg dicentang = tampilkan semua. Kartu KPI (Total
+ * + tiap status) SENGAJA dihitung dari `filteredRows` (baris SETELAH
  * difilter Status), BUKAN dari total keseluruhan tanpa filter -- supaya
  * begitu user filter, kartu KPI ikut "berubah sesuai apa yang dipilih"
  * (kartu status yg tidak dicentang otomatis jadi 0) -- ini behavior yg
@@ -406,18 +446,30 @@ export default function QualityCheckReviewPage() {
   }
 
   const nowMs = Date.now();
-  /** Bucket umur 1 row, atau `null` kalau tidak ternilai (sudah OK, sudah
-   * "Approval" -- dikeluarkan atas instruksi eksplisit user, tahapnya sudah
-   * lewat dari QC jadi tidak relevan dihitung "lama proses QC" -- atau belum
-   * py `sinceQcEntry` sama sekali) -- dipakai bareng oleh perhitungan kartu
-   * KPI & filter "Lama Proses" di bawah, supaya 1 logika saja. */
+  /** Bucket umur 1 row, atau `null` kalau belum py `sinceQcEntry` sama sekali
+   * -- DIREVISI 2026-09-01 (instruksi eksplisit user, 3x): (1) sempat
+   * dikunci ke status "On Check" saja, (2) lalu diubah jadi SEPENUHNYA
+   * reaktif ke kartu KPI Status yg diklik (via `statusFilter` ->
+   * `filteredRows`, fungsi ini dipanggil per baris di situ) TANPA
+   * pengecualian status, (3) titik akhir hitungannya SEKARANG pakai
+   * `rowAgeEndMs` (berhenti di QC Passed kalau sudah selesai, bukan terus
+   * jalan sampai sekarang) DAN Sabtu/Minggu tidak dihitung (lihat
+   * `ageDaysSince`). Dipakai bareng oleh perhitungan kartu KPI & filter
+   * "☰ Lama Proses" di bawah, supaya 1 logika saja. */
   function rowAgeBucket(r: QualityReviewRow): string | null {
-    if (r.status === "OK" || r.status === "Approval" || !r.sinceQcEntry) return null;
-    const ageDays = ageDaysSince(r.sinceQcEntry, nowMs);
+    if (!r.sinceQcEntry) return null;
+    const ageDays = ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs));
     return (AGE_BUCKETS.find((b) => ageDays <= b.maxDays) ?? AGE_BUCKETS[AGE_BUCKETS.length - 1]).key;
   }
 
-  const rows = query.data?.rows ?? [];
+  // Status "Approval" DIKELUARKAN TOTAL dari halaman ini (2026-09-01, instruksi
+  // eksplisit user: sudah ada Dashboard Approval sendiri yg jauh lebih detail
+  // -- awalnya cuma kartu KPI-nya yg dihapus, TAPI direvisi lagi supaya
+  // sekalian tidak ikut kehitung ke kartu "Total" & tidak ada lagi di opsi
+  // "☰ Status") -- difilter di sini, SEBELUM `filteredRows`, supaya
+  // konsisten ke SEMUA turunannya (kartu Total/Status/Lama Proses, tabel
+  // detail, Export CSV) dalam 1 titik saja.
+  const rows = (query.data?.rows ?? []).filter((r) => r.status !== "Approval");
   const filteredRows = rows
     .filter((r) => statusFilter.size === 0 || statusFilter.has(r.status))
     .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""));
@@ -426,9 +478,16 @@ export default function QualityCheckReviewPage() {
   // "Jumlah Formula (Order)" (jumlah baris, spt sebelumnya) & "Total Qty
   // (KG/Ltr)" (jumlah `orderQty` baris2 itu, lewat `parseQtyLocal`).
   const zeroMetric = () => ({ count: 0, qty: 0 });
-  const summary = { ok: zeroMetric(), onCheck: zeroMetric(), improve: zeroMetric(), approval: zeroMetric() };
+  const summary = { ok: zeroMetric(), onCheck: zeroMetric(), improve: zeroMetric(), assortedNg: zeroMetric() };
   for (const r of filteredRows) {
-    const bucket = r.status === "OK" ? summary.ok : r.status === "On Check" ? summary.onCheck : r.status === "Improve" ? summary.improve : summary.approval;
+    const bucket =
+      r.status === "OK"
+        ? summary.ok
+        : r.status === "On Check"
+        ? summary.onCheck
+        : r.status === "Improve"
+        ? summary.improve
+        : summary.assortedNg;
     bucket.count++;
     bucket.qty += parseQtyLocal(r.orderQty);
   }
@@ -437,10 +496,11 @@ export default function QualityCheckReviewPage() {
     zeroMetric()
   );
 
-  // Kartu KPI "Belum OK (QC Passed) -- Lama Proses" (2026-08-23, instruksi
-  // eksplisit user) -- dihitung dari `filteredRows` juga (sama konvensi
-  // reaktif-thd-filter Status/Lama Proses dgn kartu2 lain), pakai
-  // `rowAgeBucket` yg sama dgn yg dipakai filter di atas (1 sumber logika).
+  // Kartu KPI "Lama Proses" (2026-08-23, instruksi eksplisit user; DIREVISI
+  // 2x 2026-09-01, lihat komentar `rowAgeBucket` di atas) -- dihitung dari
+  // `filteredRows` (sama konvensi reaktif-thd-filter Status/Lama Proses dgn
+  // kartu2 lain), pakai `rowAgeBucket` yg sama dgn yg dipakai filter di atas
+  // (1 sumber logika).
   const ageBuckets: Record<string, { count: number; qty: number }> = Object.fromEntries(AGE_BUCKETS.map((b) => [b.key, zeroMetric()]));
   for (const r of filteredRows) {
     const bucket = rowAgeBucket(r);
@@ -530,7 +590,13 @@ export default function QualityCheckReviewPage() {
                 di bawah, jadi otomatis sinkron 2 arah (klik kartu = ikut
                 tercentang di panel Status, & sebaliknya). "Total" me-reset
                 filter (tampilkan semua), kartu lain toggle statusnya sendiri
-                masuk/keluar dari `statusFilter` (bisa pilih lebih dari 1). */}
+                masuk/keluar dari `statusFilter` (bisa pilih lebih dari 1).
+                Kartu "Approval" DIHAPUS 2026-09-01 (instruksi eksplisit user
+                -- sudah ada Dashboard Approval sendiri yg jauh lebih detail,
+                kartu ini dirasa mubazir) -- status "Approval" sendiri TETAP
+                ada (masih dihitung ke "Total", masih bisa difilter lewat
+                "☰ Status", masih tampil di tabel detail & badge Status),
+                cuma kartu KPI dedicated-nya yg hilang. */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <KpiCard
             label="Total"
@@ -569,18 +635,18 @@ export default function QualityCheckReviewPage() {
             dimmed={statusFilter.size > 0 && !statusFilter.has("Improve")}
           />
           <KpiCard
-            label="Approval"
-            count={summary.approval.count}
-            qty={summary.approval.qty}
-            color={STATUS_COLOR.Approval}
-            onClick={() => setStatusFilter((s) => toggleInSet(s, "Approval"))}
-            active={statusFilter.has("Approval")}
-            dimmed={statusFilter.size > 0 && !statusFilter.has("Approval")}
+            label="Assorted (NG)"
+            count={summary.assortedNg.count}
+            qty={summary.assortedNg.qty}
+            color={STATUS_COLOR["Assorted (NG)"]}
+            onClick={() => setStatusFilter((s) => toggleInSet(s, "Assorted (NG)"))}
+            active={statusFilter.has("Assorted (NG)")}
+            dimmed={statusFilter.size > 0 && !statusFilter.has("Assorted (NG)")}
           />
         </div>
 
         <div>
-          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Belum OK (QC Passed) -- Lama Proses</div>
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Lama Proses</div>
           {/* Sama pola dgn kartu Status di atas, tapi toggle ke `ageFilter`
               (state yg sama dgn tombol "☰ Lama Proses") -- 2 grup kartu ini
               SENGAJA independen (AND, bukan saling reset), sama spt 2 panel
@@ -662,6 +728,19 @@ export default function QualityCheckReviewPage() {
                 label: "QC Passed",
                 render: (r) => (r.qcPassed ? formatDateTime(r.qcPassed) : "-"),
                 csvValue: (r) => (r.qcPassed ? toExcelDateTimeString(r.qcPassed) : ""),
+              },
+              {
+                // Kolom "Lama Proses" per baris (2026-09-01, instruksi eksplisit
+                // user, sebelah "QC Passed") -- angka hari yg SAMA PERSIS dgn
+                // yg dipakai kartu KPI "Lama Proses" di atas (`ageDaysSince` +
+                // `rowAgeEndMs`, lihat komentar `rowAgeBucket`: berhenti di QC
+                // Passed kalau sudah selesai, Sabtu/Minggu tidak dihitung),
+                // cuma di sini ditampilkan sbg angka per-Order, bukan digroup
+                // ke bucket.
+                key: "ageDays",
+                label: "Lama Proses (Hari)",
+                render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
+                csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
               },
               { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
             ]}

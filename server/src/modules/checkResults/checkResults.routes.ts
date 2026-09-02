@@ -203,6 +203,31 @@ checkResultsRouter.get(
   })
 );
 
+/**
+ * Daftar nama Customer yang sudah pernah diinput di Check Results (2026-09-02,
+ * instruksi eksplisit user: kolom Customer bebas ketik selama ini jadi
+ * berantakan -- 170 varian teks utk perusahaan yang sebenarnya cuma ~135).
+ * Dipakai sbg saran datalist di form input (CheckResultsPage & ApprovalPage)
+ * supaya admin bisa PILIH nama yang sudah ada, bukan ketik ulang dari nol
+ * tiap kali -- placeholder "-" / "'-" dan string kosong disingkirkan karena
+ * itu bukan nama Customer sungguhan. Diurutkan dari yang paling sering
+ * dipakai supaya nama yang paling umum muncul duluan di saran.
+ */
+checkResultsRouter.get(
+  "/customer-suggestions",
+  asyncRoute(async (_req, res) => {
+    const rows = await prisma.checkResult.groupBy({
+      by: ["customer"],
+      _count: { customer: true },
+      orderBy: { _count: { customer: "desc" } },
+    });
+    const names = rows
+      .map((r) => (r.customer ?? "").trim())
+      .filter((name) => name && name !== "-" && name !== "'-");
+    res.json({ success: true, data: names });
+  })
+);
+
 checkResultsRouter.get(
   "/:checkId",
   asyncRoute(async (req, res) => {

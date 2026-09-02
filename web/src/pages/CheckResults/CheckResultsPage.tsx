@@ -11,6 +11,7 @@ import EmployeeNameSelect, {
   EmployeeOption,
 } from "../../components/EmployeeNameSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
+import CustomerSelect from "../../components/CustomerSelect";
 import DataTable from "../../components/DataTable";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
 import { ExcelRow, ExcelField } from "../../components/ExcelGrid";
@@ -99,6 +100,7 @@ interface HistoryFlatRow {
   batch2: string | null;
   materialDescription: string | null;
   customer: string | null;
+  custSegmen: string | null;
   iuPlant: string | null;
   lotCoa: string | null;
   itemCheck: string;
@@ -131,6 +133,7 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         batch2: r.batch2,
         materialDescription: r.materialDescription,
         customer: r.customer,
+        custSegmen: r.custSegmen,
         iuPlant: r.iuPlant,
         lotCoa: r.lotCoa,
         itemCheck: p ? p.parameter : "-",
@@ -826,10 +829,18 @@ export default function CheckResultsPage({
                   <TankSelect bare id="icr-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} required />
                 </ExcelField>
                 <ExcelField label="Customer *" widthPx={headerColWidths.customer} onResizeStart={beginHeaderColResize("customer")} {...gridNav("customer")}>
-                  <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} required />
+                  <CustomerSelect bare id="icr-customer" value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} required />
                 </ExcelField>
                 <ExcelField label="Cust Segmen" widthPx={headerColWidths.custSegmen} onResizeStart={beginHeaderColResize("custSegmen")} {...gridNav("custSegmen")}>
-                  <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
+                  <select value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })}>
+                    <option value="">-</option>
+                    <option value="AUTOMOTIVE">AUTOMOTIVE</option>
+                    <option value="MOTORCYCLE">MOTORCYCLE</option>
+                    <option value="GIU">GIU</option>
+                    <option value="CCL">CCL</option>
+                    <option value="SEMI HALB">SEMI HALB</option>
+                    <option value="HARDENER">HARDENER</option>
+                  </select>
                 </ExcelField>
                 <ExcelField label="Lot COA" widthPx={headerColWidths.lotCoa} onResizeStart={beginHeaderColResize("lotCoa")} {...gridNav("lotCoa")}>
                   <input value={form.lotCoa} onChange={(e) => setForm({ ...form, lotCoa: e.target.value })} />
@@ -1027,6 +1038,7 @@ export default function CheckResultsPage({
                 { key: "batch2", label: "Batch Loose", render: (r) => r.batch2 || "-" },
                 { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
                 { key: "customer", label: "Customer", render: (r) => r.customer },
+                { key: "custSegmen", label: "Cust Segmen", render: (r) => r.custSegmen || "-" },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "itemCheck", label: "Item Check", render: (r) => r.itemCheck },
                 { key: "spec", label: "Spec", render: (r) => r.spec || "-" },

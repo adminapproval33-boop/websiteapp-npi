@@ -4,6 +4,7 @@ import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
+import CustomerSelect from "../../components/CustomerSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
@@ -845,10 +846,18 @@ export default function ApprovalPage({
                   <input type="datetime-local" value={toDateTimeLocalValue(form.submitToCustomer)} onChange={(e) => setForm({ ...form, submitToCustomer: e.target.value })} />
                 </ExcelField>
                 <ExcelField label="Customer" widthPx={colWidths.customer} onResizeStart={beginResize("customer")} {...gridNav("customer")}>
-                  <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
+                  <CustomerSelect bare id="appr-customer" value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
                 </ExcelField>
                 <ExcelField label="Cust Segmen" widthPx={colWidths.custSegmen} onResizeStart={beginResize("custSegmen")} {...gridNav("custSegmen")}>
-                  <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
+                  <select value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })}>
+                    <option value="">-</option>
+                    <option value="AUTOMOTIVE">AUTOMOTIVE</option>
+                    <option value="MOTORCYCLE">MOTORCYCLE</option>
+                    <option value="GIU">GIU</option>
+                    <option value="CCL">CCL</option>
+                    <option value="SEMI HALB">SEMI HALB</option>
+                    <option value="HARDENER">HARDENER</option>
+                  </select>
                 </ExcelField>
                 <ExcelField label="Multiple Cust" widthPx={colWidths.multipleCust} onResizeStart={beginResize("multipleCust")} {...gridNav("multipleCust")}>
                   {/* Textarea, 1 customer per baris (2026-09-01, instruksi

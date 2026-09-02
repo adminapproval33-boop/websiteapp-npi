@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -9,6 +9,8 @@ import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
 import EmployeeNameSelect, {
+  displayNameWithNik,
+  EmployeeOption,
   formatInputBy,
   isKnownEmployeeName,
   useEmployeeOptions,
@@ -51,6 +53,7 @@ interface ApprovalRow {
   techNameNik: string | null;
   finishApp: string | null;
   remark: string | null;
+  needsImprove: boolean;
   inputBy: string;
 }
 
@@ -59,7 +62,7 @@ interface LotHistoryRow extends ApprovalRow {
    * lewat GET /approvals/lot-history di backend, bukan snapshot -- jadi
    * otomatis ikut berubah kalau Master Data Cooispi di-update ulang. */
   pctGR: string | null;
-  status: "Pending Approval" | "Approval" | "Oke Approval";
+  status: "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval";
   processingTime: string;
   hasAttachment: boolean;
 }
@@ -137,11 +140,18 @@ const emptyForm = {
   submitToCustomer: "",
   customer: "",
   custSegmen: "",
-  multipleCust: "",
+  // Default "-" (2026-09-02, instruksi eksplisit user) -- kasus paling umum
+  // memang tidak ada Multiple Cust tambahan, jadi admin tidak perlu ketik "-"
+  // manual tiap kali buat entri baru. Field ini WAJIB diisi (lihat validasi
+  // required di ExcelField-nya) -- default ini cuma nilai awal, admin tetap
+  // bebas ganti (mis. ketik nama customer) kalau memang mau bikin baris
+  // Multiple Cust terpisah.
+  multipleCust: "-",
   techName: "",
   techNameNik: null as string | null,
   finishApp: "",
   remark: "",
+  needsImprove: false,
 };
 
 /** Lebar default (px) tiap kolom form Input Proses -- dipakai sbg fallback sebelum
@@ -181,9 +191,216 @@ const APPROVAL_COL_DEFAULT_WIDTHS: Record<string, number> = {
 const APPROVAL_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTankiRow2", "mrpPic", "salesPic"],
-  ["prepareDate", "sprayMan", "wetSample", "panel", "lotCoa", "sendToTech"],
-  ["submitTech", "submitCust", "customer", "custSegmen", "multipleCust", "techName", "finishApp"],
+  ["prepareDate", "sprayMan", "wetSample", "panel", "multipleCust", "lotCoa", "sendToTech"],
+  ["submitTech", "submitCust", "customer", "custSegmen", "techName", "finishApp"],
 ];
+
+const APPROVAL_PANEL_BORDER = "1px solid #cbd5e1";
+
+/** String non-kosong (setelah trim) ATAU Date manapun dianggap "terisi" --
+ * versi client-side dari `isFilled` di approval.routes.ts (server). */
+function isFieldFilled(v: string | null): boolean {
+  return v !== null && v.trim().length > 0;
+}
+
+/** Verdict status per baris (2026-09-02, instruksi eksplisit user: 4 tingkat
+ * berdasar sekumpulan kolom yg sudah terisi) -- versi client-side dari
+ * `computeStatus` di approval.routes.ts (server), dipakai KHUSUS utk badge di
+ * panel `MultipleCustPanel` di bawah (murni tampilan, keputusan resmi status
+ * tetap dihitung server spt biasa di GET /lot-history). Lihat komentar
+ * lengkap di `computeStatus` (server) utk penjelasan tiap tingkat. */
+function approvalStatusBadge(row: ApprovalRow): "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval" {
+  const tier1 = [row.prepareProduksi, row.sprayMan, row.wetSample, row.panel, row.multipleCust, row.lotCoa, row.sendToTech].every(
+    isFieldFilled
+  );
+  if (!tier1) return "Prepare Approval";
+
+  const tier2 = [row.technicalDateReceiving, row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFieldFilled);
+  if (!tier2) return "Pending Approval";
+
+  return isFieldFilled(row.finishApp) ? "Oke Approval" : "Approval";
+}
+
+/** Warna badge per status (2026-09-02) -- dipakai di panel `MultipleCustPanel`
+ * di bawah. */
+const APPROVAL_STATUS_COLOR: Record<string, { background: string; color: string }> = {
+  "Prepare Approval": { background: "#f1f5f9", color: "#475569" },
+  "Pending Approval": { background: "#dbeafe", color: "#1e40af" },
+  Approval: { background: "#fef3c7", color: "#92400e" },
+  "Oke Approval": { background: "#dcfce7", color: "#166534" },
+};
+
+/** Panel "Multiple Cust" (2026-09-02, instruksi eksplisit user: tampilkan
+ * berapa baris Multiple Cust yg sudah pernah diinput utk Order yg lagi ada di
+ * form, gaya tampilan PERSIS sama dgn panel "Tanki Turunan" di Milling --
+ * lihat TankBranchPanel di MillingPage.tsx -- tapi informasinya menyesuaikan
+ * konteks Approval (Customer/Cust Segmen/Tech Name/status), bukan
+ * Tanki/Mesin/Qty Act). "Baris N" dihitung dari URUTAN ARRAY (backend GET
+ * /approvals/by-order sudah ASC by timestamp), sama pola dgn "Tanki N". */
+function MultipleCustPanel({
+  order,
+  rows,
+  editingId,
+  onEdit,
+  onAddNew,
+  onDelete,
+  canDelete,
+  onView,
+}: {
+  order: string;
+  rows: ApprovalRow[];
+  editingId: string | null;
+  onEdit: (row: ApprovalRow) => void;
+  onAddNew: () => void;
+  onDelete: (row: ApprovalRow) => void;
+  canDelete: boolean;
+  onView: (row: ApprovalRow) => void;
+}) {
+  return (
+    <div className="excel-block" style={{ marginBottom: 14, border: APPROVAL_PANEL_BORDER }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "6px 10px",
+          background: "#f1f5f9",
+          borderBottom: APPROVAL_PANEL_BORDER,
+        }}
+      >
+        <div>
+          <strong>Multiple Cust — Order {order}</strong>
+          <span style={{ marginLeft: 10, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+            {rows.length} baris sudah diinput
+          </span>
+        </div>
+        <button type="button" className="btn btn-success" style={{ padding: "4px 12px", fontSize: "0.8rem" }} onClick={onAddNew}>
+          + Baris Baru
+        </button>
+      </div>
+      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+        {rows.map((r, idx) => {
+          const status = approvalStatusBadge(r);
+          const isEditing = editingId === r.approvalId;
+          return (
+            <div
+              key={r.approvalId}
+              onClick={() => onView(r)}
+              title="Klik untuk lihat detail lengkap baris ini (read-only)"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-start",
+                gap: 12,
+                padding: "6px 8px",
+                border: isEditing ? "1px solid var(--navy)" : APPROVAL_PANEL_BORDER,
+                borderRadius: 4,
+                background: isEditing ? "#fff1f2" : "transparent",
+                fontSize: "0.85rem",
+                flexWrap: "wrap",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ fontWeight: 600, minWidth: 70 }}>Baris {idx + 1}</span>
+              {r.needsImprove && <span title="Perlu Improve dari Produksi">🔴</span>}
+              <span style={{ color: "var(--text-muted)" }}>Multiple Cust: {r.multipleCust || "-"}</span>
+              <span style={{ color: "var(--text-muted)" }}>Customer: {r.customer || "-"}</span>
+              <span style={{ color: "var(--text-muted)" }}>Cust Segmen: {r.custSegmen || "-"}</span>
+              <span style={{ color: "var(--text-muted)" }}>Tech Name: {r.techName || "-"}</span>
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 10,
+                  fontSize: "0.75rem",
+                  ...APPROVAL_STATUS_COLOR[status],
+                }}
+              >
+                {status}
+              </span>
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(r);
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(r);
+                    }}
+                  >
+                    🗑️ Hapus
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 1 baris label:value di modal detail read-only (`MultipleCustViewDetail` di
+ * bawah) -- sama komponen kecil dgn `ViewField` di MillingPage.tsx (tidak
+ * diimpor lintas file krn keduanya `function` lokal tak diekspor, cukup
+ * disalin -- isinya generik & sangat pendek). */
+function ApprovalViewField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 8, padding: "4px 0", borderBottom: "1px solid #f1f5f9", fontSize: "0.85rem" }}>
+      <span style={{ minWidth: 150, flexShrink: 0, fontWeight: 600, color: "var(--text-muted)" }}>{label}</span>
+      <span>{value ?? "-"}</span>
+    </div>
+  );
+}
+
+/** Isi modal detail read-only 1 baris Approval (2026-09-02) -- dibuka dgn
+ * klik baris di `MultipleCustPanel`, sama pola dgn `TankViewDetail` di
+ * MillingPage.tsx (klik utk lihat, tombol Edit terpisah utk muat ke form). */
+function MultipleCustViewDetail({ row, employees }: { row: ApprovalRow; employees: EmployeeOption[] | undefined }) {
+  return (
+    <div>
+      <ApprovalViewField label="Order" value={row.order} />
+      <ApprovalViewField label="Material Number" value={row.materialNumber} />
+      <ApprovalViewField label="Batch" value={row.batch} />
+      <ApprovalViewField label="Order Qty" value={row.orderQty} />
+      <ApprovalViewField label="Plant" value={row.plant} />
+      <ApprovalViewField label="IU Plant" value={row.iuPlant} />
+      <ApprovalViewField label="Code Tanki" value={row.codeTanki} />
+      <ApprovalViewField label="Customer" value={row.customer} />
+      <ApprovalViewField label="Cust Segmen" value={row.custSegmen} />
+      <ApprovalViewField label="Multiple Cust" value={row.multipleCust} />
+      <ApprovalViewField label="Mrp Pic" value={displayNameWithNik(employees, row.mrpPic, row.mrpPicNik)} />
+      <ApprovalViewField label="Sales Pic" value={displayNameWithNik(employees, row.salesPic, row.salesPicNik)} />
+      <ApprovalViewField label="Spray Man" value={displayNameWithNik(employees, row.sprayMan, row.sprayManNik)} />
+      <ApprovalViewField label="Tech Name" value={displayNameWithNik(employees, row.techName, row.techNameNik)} />
+      <ApprovalViewField label="Prepare Produksi" value={formatDateTime(row.prepareProduksi)} />
+      <ApprovalViewField label="Wet Sample" value={row.wetSample} />
+      <ApprovalViewField label="Panel" value={row.panel} />
+      <ApprovalViewField label="Lot COA" value={formatDateTime(row.lotCoa)} />
+      <ApprovalViewField label="Send To Tech" value={formatDateTime(row.sendToTech)} />
+      <ApprovalViewField label="Submit Tech" value={formatDateTime(row.technicalDateReceiving)} />
+      <ApprovalViewField label="Submit Cust" value={formatDateTime(row.submitToCustomer)} />
+      <ApprovalViewField label="Finish App" value={formatDateTime(row.finishApp)} />
+      <ApprovalViewField label="Remark" value={row.remark} />
+      <ApprovalViewField label="Improve" value={row.needsImprove ? "🔴 Perlu Improve dari Produksi" : "-"} />
+      <ApprovalViewField label="Input By" value={formatInputBy(employees, row.inputBy)} />
+      <ApprovalViewField label="Timestamp" value={formatDateTime(row.timestamp)} />
+    </div>
+  );
+}
 
 export default function ApprovalPage({
   embedded = false,
@@ -237,6 +454,120 @@ export default function ApprovalPage({
   const [filterCol, setFilterCol] = useState("order");
   const [filterValue, setFilterValue] = useState("");
   const [attachmentModalId, setAttachmentModalId] = useState<string | null>(null);
+  const [viewingApproval, setViewingApproval] = useState<ApprovalRow | null>(null);
+  /** Lagi fetch fresh riwayat Trial/Improve utk hitung nomor berikutnya
+   * (2026-09-02) -- lihat komentar panjang di tombol "Improve". Dipakai
+   * cuma utk `disabled` tombol itu sendiri, cegah double-klik nyelip di
+   * antara fetch & setForm. */
+  const [improveTrialLoading, setImproveTrialLoading] = useState(false);
+  /** Order yg lagi ada di `form.order` SUDAH TERKONFIRMASI ketemu di
+   * "Referensi Order / PO (SAP-COOISPI)" (2026-09-02, instruksi eksplisit
+   * user: tombol Save/Simpan Perubahan HARUS mati kalau Order tidak
+   * ditemukan -- termasuk kalau tadinya ketemu tapi teksnya diedit LAGI
+   * setelah itu, mis. ditambah karakter, TANPA sempat di-cari ulang &
+   * ketemu). `false` = default (form baru/order belum di-cek atau baru
+   * diketik ulang), jadi tombol Save mati sampai salah satu dari ini
+   * terjadi: (a) lookup Order berhasil (`handleOrderFound` -- dipanggil baik
+   * dari `onFound` OrderLookup maupun dari `loadIntoInput` Queue), atau (b)
+   * masuk mode Edit lewat baris yg SUDAH TERSIMPAN (`startEdit` -- order-nya
+   * otomatis dianggap valid, tidak perlu di-lookup ulang). Diset `false` lagi
+   * tiap kali teks Order berubah (`onChange` OrderLookup) atau lookup GAGAL
+   * (`onNotFound`), supaya admin WAJIB nunggu hasil pencarian TERBARU
+   * sebelum bisa Save -- tidak bisa "menang cepat" ketik-lalu-ubah-lagi
+   * sebelum lookup sempat jalan. */
+  const [orderConfirmed, setOrderConfirmed] = useState(false);
+
+  /** Semua baris Approval yg sudah pernah diinput utk Order yg lagi ada di
+   * form ini -- dasar panel "Multiple Cust" (2026-09-02, instruksi eksplisit
+   * user: tampilan sama pola dgn panel "Tanki Turunan" di Milling, lihat
+   * `MultipleCustPanel` di atas). Diurutkan ASC dari backend (GET
+   * /approvals/by-order), jadi index array = nomor "Baris N". */
+  const orderForMultiCust = form.order.trim();
+  const multiCustQuery = useQuery({
+    queryKey: ["approval-by-order", orderForMultiCust],
+    queryFn: () => api.get<{ success: boolean; data: ApprovalRow[] }>(`/approvals/by-order/${encodeURIComponent(orderForMultiCust)}`).then((r) => r.data),
+    enabled: orderForMultiCust.length > 0,
+  });
+  const existingApprovalsForOrder = multiCustQuery.data ?? [];
+
+  /** Tanggal HARI INI, format "dd/mm/yy" (2026-09-02, dipakai oleh
+   * appendNextImproveTrial & appendImproveResolved di bawah) -- tanggal LOKAL
+   * device (bukan UTC), supaya cocok dgn jam yg ditampilkan di pojok kanan
+   * atas aplikasi. */
+  function todayDDMMYY(): string {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, "0");
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(-2);
+    return `${dd}/${mm}/${yy}`;
+  }
+
+  /** Tambahkan 1 baris baru ke Remark yg SUDAH ADA TANPA menimpa isi lama
+   * (2026-09-02, instruksi eksplisit user: riwayat Trial/Improve harus tetap
+   * kelihatan semua, bukan tertimpa tiap klik). */
+  function appendRemarkLine(currentRemark: string, line: string): string {
+    const trimmed = currentRemark.trim();
+    return trimmed ? `${trimmed}\n${line}` : line;
+  }
+
+  /** Nomor Trial TERTINGGI yg sudah pernah tercatat utk Order ini -- dibaca
+   * dari Remark SAAT INI (`currentRemark`, termasuk baris2 lama yg mungkin
+   * belum ke-refetch dari server) DIGABUNG dgn Remark semua baris riwayat
+   * Order ini yg DIOPER lewat `historyRows` (2026-09-02 fix: SEMPAT baca
+   * langsung dari `existingApprovalsForOrder`/cache React Query, ternyata
+   * itu race condition -- kalau masuk mode Edit dari tombol Edit di tabel
+   * "Lot History" [BUKAN dari panel "Multiple Cust" di tab Input, yg baru
+   * tampil KALAU datanya sudah lebih dulu ke-load], query
+   * `/approvals/by-order` belum tentu selesai fetch ulang saat admin
+   * langsung klik "Improve" abis itu -- `existingApprovalsForOrder` sempat
+   * kosong/basi sesaat, nomor Trial jadi salah hitung ulang dari 1. Sekarang
+   * pemanggil (tombol Improve) WAJIB fetch fresh dulu & oper hasilnya ke
+   * sini lewat parameter, tidak baca closure lagi) -- pakai `matchAll`
+   * (bukan `match`) krn satu Remark sekarang bisa punya BANYAK baris "Trial N
+   * (NG)" sekaligus, bukan cuma satu. Baris yg lagi di-Edit TIDAK dikecualikan
+   * -- aman krn baik `historyRows` maupun `currentRemark` lokal sama2 dibaca,
+   * tidak ada yg ketinggalan. Dipakai bareng oleh appendNextImproveTrial (utk
+   * nomor Trial BERIKUTNYA) & appendImproveResolved (utk nomor Trial yg lagi
+   * DISELESAIKAN). */
+  function latestImproveTrialNumber(currentRemark: string, historyRows: ApprovalRow[]): number {
+    const pattern = /Trial (\d+) \(NG\)/gi;
+    let maxTrial = 0;
+    for (const row of historyRows) {
+      for (const match of (row.remark ?? "").matchAll(pattern)) {
+        maxTrial = Math.max(maxTrial, parseInt(match[1], 10));
+      }
+    }
+    for (const match of currentRemark.matchAll(pattern)) {
+      maxTrial = Math.max(maxTrial, parseInt(match[1], 10));
+    }
+    return maxTrial;
+  }
+
+  /** Nyalakan Tombol Improve -> Remark kena tambah "Trial N (NG) dd/mm/yy"
+   * (2026-09-02, instruksi eksplisit user, tanggal klik ikut dicatat; kalau
+   * nanti sudah di-improve tapi Approval ulang masih NG, klik lagi -> baris
+   * baru "Trial N+1 (NG) dd/mm/yy", dst -- riwayat SEBELUMNYA tidak
+   * hilang/tertimpa, lihat appendRemarkLine). `historyRows` HARUS hasil fetch
+   * fresh dari pemanggil (lihat komentar latestImproveTrialNumber). */
+  function appendNextImproveTrial(currentRemark: string, historyRows: ApprovalRow[]): string {
+    const nextTrial = latestImproveTrialNumber(currentRemark, historyRows) + 1;
+    return appendRemarkLine(currentRemark, `Trial ${nextTrial} (NG) ${todayDDMMYY()}`);
+  }
+
+  /** Matikan Tombol Improve (2026-09-02, instruksi eksplisit user) -> Remark
+   * kena tambah "Improve N dd/mm/yy" -- N SAMA PERSIS dgn nomor "Trial N (NG)"
+   * TERAKHIR yg tercatat (menandakan Trial itu yg baru selesai di-improve),
+   * BUKAN counter terpisah. Hasil akhirnya riwayat berpasangan turun ke bawah:
+   * "Trial 1 (NG) .." lalu "Improve 1 .." (begitu dimatikan lagi), lalu kalau
+   * masih NG & dinyalakan lagi "Trial 2 (NG) .." dst. `Math.max(1, ...)` cuma
+   * jaring pengaman kalau entah kenapa dimatikan tanpa Trial tercatat dulu
+   * (seharusnya tidak pernah terjadi lewat alur tombol normal). `historyRows`
+   * HARUS hasil fetch fresh dari pemanggil (lihat komentar
+   * latestImproveTrialNumber). */
+  function appendImproveResolved(currentRemark: string, historyRows: ApprovalRow[]): string {
+    const trialNumber = Math.max(1, latestImproveTrialNumber(currentRemark, historyRows));
+    return appendRemarkLine(currentRemark, `Improve ${trialNumber} ${todayDDMMYY()}`);
+  }
 
   /** Spray Man (2026-08-12, instruksi eksplisit user): Plant "1201" -> field
    * bebas teks (bukan dropdown Data Karyawan), Plant lain (mis. "1101") ->
@@ -372,6 +703,33 @@ export default function ApprovalPage({
         .split("\n")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
+      // Order ini ternyata SUDAH punya baris Approval (lihat `duplicateOrderWarning`,
+      // diisi di `handleOrderFound`) -- otomatis REPLACE baris yg sudah ada (PUT)
+      // KALAU Multiple Cust yg baru diketik "tidak ada perubahan" drpd baris yg
+      // ketemu itu (2026-09-02, instruksi eksplisit user: dulu Save baru selalu
+      // POST -> nambah baris kedua, ternyata bikin Lot History kedobelan tiap kali
+      // org lain melanjutkan isian Order yg sama lewat tab Input, bukan tombol
+      // Edit). "Tidak ada perubahan" = PERSIS sama dgn Multiple Cust baris yg
+      // ketemu -- EXACT MATCH, TIDAK ADA LAGI fallback "kosong dianggap sama
+      // dgn apa pun" (2026-09-02, revisi instruksi eksplisit user: Multiple
+      // Cust sekarang WAJIB diisi min. "-", lihat `required` di textarea-nya --
+      // kalau field WAJIB tapi kebetulan kosong berarti benar2 lupa diisi,
+      // bukan sinyal "lanjutan/replace" yg aman diasumsikan).
+      //
+      // Kalau beda (mis. admin sengaja ketik nama customer BARU 1 baris, lalu
+      // Save, ulangi lagi dgn customer lain, dst -- pola pakai Multiple Cust
+      // satu-satu per Save, BUKAN sekaligus multi-baris) -- itu maksudnya
+      // NAMBAH baris split baru, BUKAN nerusin isian yg sama -- WAJIB tetap
+      // POST baris baru (2026-09-02 fix: sempat ke-treat sbg "lanjutan" & malah
+      // NIMPA baris sebelumnya, ketauan dari kasus Order 1090016000 yg diinput
+      // 3x Multiple Cust beda tapi cuma nyisa 1 baris).
+      const existingCustLine = (duplicateOrderWarning?.multipleCust ?? "").trim();
+      const newCustLine = custLines[0] ?? "";
+      const isSameEntryContinuation = custLines.length <= 1 && newCustLine !== "" && newCustLine === existingCustLine;
+      if (duplicateOrderWarning && isSameEntryContinuation) {
+        const res = await api.put<{ success: boolean; data: ApprovalRow }>(`/approvals/${duplicateOrderWarning.approvalId}`, form);
+        return [res.data];
+      }
       const payloads = custLines.length > 1 ? custLines.map((line) => ({ ...form, multipleCust: line })) : [form];
       const created: ApprovalRow[] = [];
       for (const payload of payloads) {
@@ -382,12 +740,25 @@ export default function ApprovalPage({
     },
     onSuccess: (created) => {
       setError("");
-      const wasEditing = !!editingApprovalId;
+      // Sama persis kondisinya dgn cek di `mutationFn` di atas -- `form`/
+      // `duplicateOrderWarning`/`editingApprovalId` belum berubah antara klik
+      // Save & callback ini jalan, jadi aman dihitung ulang di sini utk
+      // nentuin pesan sukses yg tepat (baris di-UPDATE vs baris BARU).
+      const custLines = form.multipleCust
+        .split("\n")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      const existingCustLine = (duplicateOrderWarning?.multipleCust ?? "").trim();
+      const newCustLine = custLines[0] ?? "";
+      const isSameEntryContinuation = custLines.length <= 1 && newCustLine !== "" && newCustLine === existingCustLine;
+      const wasEditing = !!editingApprovalId || (!!duplicateOrderWarning && isSameEntryContinuation);
       setForm(emptyForm);
       setEditingApprovalId(null);
       setDuplicateOrderWarning(null);
+      setOrderConfirmed(false);
       queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
       queryClient.invalidateQueries({ queryKey: ["approval-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["approval-by-order"] });
       if (attachFile) {
         // Lampiran diupload ke SEMUA baris hasil pecahan Multiple Cust
         // (2026-09-01) -- sama prinsipnya dgn Order Qty di atas: lampiran itu
@@ -427,9 +798,14 @@ export default function ApprovalPage({
 
   const deleteMutation = useMutation({
     mutationFn: (approvalId: string) => api.delete(`/approvals/${approvalId}`),
-    onSuccess: () => {
+    onSuccess: (_res, deletedId) => {
       setMessage("Data Approval berhasil dihapus.");
       queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
+      queryClient.invalidateQueries({ queryKey: ["approval-by-order"] });
+      // Kalau baris yg dihapus itu yg SEDANG diedit di form (2026-09-02, tombol
+      // Hapus di panel Multiple Cust) -- keluar dari mode Edit, drpd form
+      // nyangkut nunjuk ke baris yg sudah tidak ada lagi.
+      setEditingApprovalId((current) => (current === deletedId ? null : current));
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menghapus data."),
   });
@@ -456,6 +832,10 @@ export default function ApprovalPage({
   });
 
   async function handleOrderFound(data: OrderRefData) {
+    // Dipanggil HANYA di jalur sukses (OrderLookup.onFound & loadIntoInput
+    // Queue) -- Order-nya TERKONFIRMASI ketemu, lepas blokir tombol
+    // Save/Simpan Perubahan (2026-09-02, lihat deklarasi `orderConfirmed`).
+    setOrderConfirmed(true);
     setForm((f) => ({
       ...f,
       materialNumber: data.materialNumber ?? "",
@@ -475,6 +855,26 @@ export default function ApprovalPage({
         const latest = res.data;
         setForm((f) => ({
           ...f,
+          // Multiple Cust WAJIB diisi (2026-09-02) -- kalau tidak ikut
+          // disarankan dari histori spt field lain di sini, admin yg re-entry
+          // Order lama (mis. cuma mau update Improve/Remark) kena stuck: Save
+          // ditolak diam-diam oleh validasi "wajib diisi" krn field ini
+          // kosong (bug nyata, ditemukan 2026-09-02 lewat kasus Order
+          // 2190019664 -- Save kelihatan tidak ngefek sama sekali, ternyata
+          // browser menahan submit tanpa pesan yg kelihatan). PRIORITAS
+          // DIBALIK drpd field lain di sini (`latest` didahulukan, bukan
+          // `f`) -- `emptyForm.multipleCust` sekarang default "-" (2026-09-02,
+          // instruksi eksplisit user), yg SELALU truthy, jadi pola biasa
+          // `f.field || latest.field || ""` tidak akan pernah sampai baca
+          // `latest` sama sekali (form dikira "sudah keisi" padahal cuma
+          // default kosongan) -- histori Order yg SEBENARNYA (mis. sudah
+          // pernah diisi nama customer lain sbg baris split) jadi ketiban
+          // "-" tanpa sengaja, bisa bikin deteksi "lanjutan vs baris baru" di
+          // saveMutation salah. Kalau admin memang mau bikin baris Multiple
+          // Cust BARU, dia tinggal GANTI nilainya manual stlh prefill ini --
+          // itu otomatis kepicu jalur "baris baru" di saveMutation (beda dari
+          // nilai lama = bukan lanjutan).
+          multipleCust: latest.multipleCust || f.multipleCust || "-",
           customer: f.customer || latest.customer || "",
           techName: f.techName || latest.techName || "",
           techNameNik: f.techName ? f.techNameNik : latest.techNameNik ?? null,
@@ -582,6 +982,10 @@ export default function ApprovalPage({
   function startEdit(row: ApprovalRow) {
     setEditingApprovalId(row.approvalId);
     setDuplicateOrderWarning(null);
+    // Order baris ini SUDAH TERSIMPAN (pasti pernah valid) -- tidak perlu
+    // di-lookup ulang, lepas blokir tombol Save/Simpan Perubahan langsung
+    // (2026-09-02, lihat deklarasi `orderConfirmed`).
+    setOrderConfirmed(true);
     setForm({
       order: row.order,
       materialNumber: row.materialNumber ?? "",
@@ -611,6 +1015,7 @@ export default function ApprovalPage({
       techNameNik: row.techNameNik ?? null,
       finishApp: row.finishApp ?? "",
       remark: row.remark ?? "",
+      needsImprove: row.needsImprove,
     });
     setTab("input");
     setMessage("");
@@ -620,7 +1025,25 @@ export default function ApprovalPage({
   function cancelEdit() {
     setEditingApprovalId(null);
     setDuplicateOrderWarning(null);
+    setOrderConfirmed(false);
     setForm(emptyForm);
+    setMessage("");
+    setError("");
+  }
+
+  /** Tombol "+ Baris Baru" di panel "Multiple Cust" (2026-09-02) -- BEDA dari
+   * "+ Tanki Baru" Milling yg reset field spesifik-fisik: di sini field lain
+   * SENGAJA dipertahankan semua (Order/Material/dst SAMPAI Customer/Cust
+   * Segmen/Tech Name) krn Multiple Cust memang didesain "field lain disalin
+   * IDENTIK ke semua baris hasil pecahan" (lihat komentar di saveMutation) --
+   * cuma Multiple Cust sendiri yg dikosongkan (supaya admin ketik nama
+   * customer baru) & keluar dari mode Edit/auto-replace, supaya Save
+   * berikutnya PASTI bikin baris baru (bukan menimpa baris yg lagi dilihat).
+   */
+  function startNewMultiCustRow() {
+    setEditingApprovalId(null);
+    setDuplicateOrderWarning(null);
+    setForm((f) => ({ ...f, multipleCust: "" }));
     setMessage("");
     setError("");
   }
@@ -629,6 +1052,30 @@ export default function ApprovalPage({
     e.preventDefault();
     setMessage("");
     setError("");
+    // Order ini SUDAH ADA di History (2026-09-02, instruksi eksplisit user) --
+    // WAJIB klik "Edit" (di panel Multiple Cust / tabel Lot History) atau "+
+    // Baris Baru" dulu sebelum bisa Save, TIDAK BOLEH langsung Save dari
+    // hasil ketik Order fresh. `duplicateOrderWarning` cuma kesetel kalau
+    // order-nya ketemu histori DAN kita SEDANG TIDAK di mode Edit (lihat
+    // handleOrderFound) -- klik Edit ATAU "+ Baris Baru" (lihat startEdit/
+    // startNewMultiCustRow) sama2 mengosongkan state ini, jadi begitu salah
+    // satu diklik, blokir ini otomatis lepas.
+    if (duplicateOrderWarning) {
+      setError('Order ini sudah ada di History -- klik "Edit" pada baris yang sesuai, atau "+ Baris Baru" kalau memang mau menambah baris terpisah, sebelum bisa Save.');
+      return;
+    }
+    // Order belum terkonfirmasi ketemu di Referensi Order / PO (SAP-COOISPI)
+    // (2026-09-02, instruksi eksplisit user) -- jaring pengaman server-side
+    // drpd tombol `disabled` di JSX doang (yg bisa saja ke-bypass, mis. Enter
+    // di keyboard tetap men-submit form HTML walau tombolnya sendiri mati).
+    if (!orderConfirmed) {
+      setError("Order belum terkonfirmasi ketemu di Referensi Order / PO (SAP-COOISPI) -- ketik nomor Order lalu tekan Enter dulu.");
+      return;
+    }
+    if (!form.multipleCust.trim()) {
+      setError('Multiple Cust wajib diisi -- ketik "-" kalau memang tidak ada Multiple Cust lain untuk Order ini.');
+      return;
+    }
     if (!isKnownEmployeeName(employees, form.mrpPic)) {
       setError("Mrp Pic tidak ditemukan di Data Karyawan. Pilih dari daftar saran.");
       return;
@@ -721,40 +1168,47 @@ export default function ApprovalPage({
                 ↺ Reset Lebar Kolom
               </button>
             </div>
+            {orderForMultiCust.length > 0 && existingApprovalsForOrder.length > 0 && (
+              <MultipleCustPanel
+                order={orderForMultiCust}
+                rows={existingApprovalsForOrder}
+                editingId={editingApprovalId}
+                onEdit={startEdit}
+                onAddNew={startNewMultiCustRow}
+                canDelete={getMenuLevel(user, "approval") === "INPUT"}
+                onDelete={(row) => {
+                  if (confirm(`Hapus data Approval untuk Order ${row.order} (Multiple Cust: ${row.multipleCust || "-"})?`)) {
+                    deleteMutation.mutate(row.approvalId);
+                  }
+                }}
+                onView={setViewingApproval}
+              />
+            )}
             {duplicateOrderWarning && !editingApprovalId && (
               <div
                 style={{
-                  background: "#fef3c7",
-                  border: "1px solid #f59e0b",
+                  background: "#fef2f2",
+                  border: "1px solid var(--danger)",
                   borderRadius: 6,
                   padding: "10px 14px",
                   marginBottom: 12,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
+                  fontSize: "0.85rem",
+                  color: "#991b1b",
                 }}
               >
-                <div style={{ fontSize: "0.85rem", color: "#92400e" }}>
-                  ⚠️ Order <strong>{duplicateOrderWarning.order}</strong> sudah pernah diinput ke Approval oleh{" "}
-                  {formatInputBy(employees, duplicateOrderWarning.inputBy)} pada {formatDateTime(duplicateOrderWarning.timestamp)}.
-                  Kalau mau melengkapi/mengubah data yang sudah ada (bukan bikin baris baru), klik "Edit Baris yang Sudah Ada" -- Save
-                  di sini tetap bisa dipakai kalau memang sengaja mau menambah baris terpisah utk Order ini (mis. Multiple Cust).
-                </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  <button type="button" className="btn btn-outline" style={{ padding: "3px 10px", fontSize: "0.78rem" }} onClick={() => startEdit(duplicateOrderWarning)}>
-                    Edit Baris yang Sudah Ada
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    style={{ padding: "3px 10px", fontSize: "0.78rem" }}
-                    onClick={() => setDuplicateOrderWarning(null)}
-                  >
-                    Tutup
-                  </button>
-                </div>
+                {/* SEKARANG BLOKIR TOTAL, bukan cuma info (2026-09-02, instruksi
+                    eksplisit user: Order yg sudah ada di History WAJIB lewat
+                    tombol "Edit" atau "+ Baris Baru" -- tidak boleh lagi
+                    langsung ketik Order lalu Save dari tab Input polos).
+                    Tombol pintas "Edit Baris yang Sudah Ada"/"Buat Baris Baru"
+                    di banner ini SENGAJA TIDAK ditampilkan lagi (instruksi
+                    eksplisit user sebelumnya) -- admin diarahkan pakai tombol
+                    Edit/"+ Baris Baru" di panel "Multiple Cust" di atas
+                    (satu2nya jalan lepas dari blokir ini). */}
+                ⛔ Order <strong>{duplicateOrderWarning.order}</strong> sudah ada di History (diinput oleh{" "}
+                {formatInputBy(employees, duplicateOrderWarning.inputBy)} pada {formatDateTime(duplicateOrderWarning.timestamp)}). Save{" "}
+                <strong>tidak bisa diklik</strong> dari sini -- klik <strong>✏️ Edit</strong> pada baris yang sesuai, atau{" "}
+                <strong>"+ Baris Baru"</strong> kalau memang mau menambah baris terpisah, di panel "Multiple Cust" di atas.
               </div>
             )}
             <ExcelBlock title="Production & MRP Schedule » Approval, Input Proses">
@@ -767,8 +1221,44 @@ export default function ApprovalPage({
                     onChange={(v) => {
                       setForm({ ...form, order: v });
                       setDuplicateOrderWarning(null);
+                      // Teks Order berubah (blm tentu sudah di-cari ulang) --
+                      // tombol Save WAJIB mati lagi sampai ada hasil pencarian
+                      // TERBARU (2026-09-02, instruksi eksplisit user: ketik
+                      // Order valid -> Enter -> balik lagi tambah karakter
+                      // TANPA sempat re-search juga harus tetap mati, bukan
+                      // cuma pas lookup gagal). Lihat deklarasi
+                      // `orderConfirmed`.
+                      setOrderConfirmed(false);
                     }}
                     onFound={handleOrderFound}
+                    onNotFound={() => {
+                      // Order yg diketik SEKARANG tidak ketemu -- reset SEMUA
+                      // field turunan Order (2026-09-02, instruksi eksplisit
+                      // user). Percobaan pertama (panggil `handleOrderFound`
+                      // dgn OrderRefData isi null semua) TERNYATA kurang --
+                      // itu cuma bersihkan blok pertama (Material
+                      // Number/Description/Batch/Order Qty/Plant), sedangkan
+                      // blok KEDUA (IU Plant/Code Tanki/Mrp Pic/Sales
+                      // Pic/Panel/Wet Sample/Lot COA/Send To Tech/Submit
+                      // Tech/Submit Cust/Customer/Cust Segmen/Tech Name/Finish
+                      // App -- semua yg disarankan dari
+                      // /approvals/latest-by-order) TIDAK PERNAH ke-reset krn
+                      // blok itu cuma NGUBAH field kalau fetch-nya BERHASIL
+                      // nemu histori, dibiarkan apa adanya kalau fetch gagal.
+                      // Ketauan dari live-test: Plant ke-reset ("") tapi Spray
+                      // Man TIDAK (msh "-" lama) -> Spray Man dianggap wajib
+                      // dropdown Data Karyawan lagi (krn Plant bukan "1201")
+                      // & langsung error validasi, padahal sebelumnya aman.
+                      // Reset TOTAL ke emptyForm skrg (kecuali Order/Multiple
+                      // Cust/Remark/needsImprove -- 3 itu bisa jadi isian
+                      // admin sendiri yg TIDAK berasal dari lookup Order,
+                      // sayang kalau ikut hilang cuma krn typo di kolom
+                      // Order) menghindari kombinasi "separuh lama separuh
+                      // baru" spt ini sama sekali.
+                      setForm((f) => ({ ...emptyForm, order: f.order, multipleCust: f.multipleCust, remark: f.remark, needsImprove: f.needsImprove }));
+                      setDuplicateOrderWarning(null);
+                      setOrderConfirmed(false);
+                    }}
                   />
                 </ExcelField>
                 <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
@@ -886,6 +1376,37 @@ export default function ApprovalPage({
                 <ExcelField label="Panel" widthPx={colWidths.panel} onResizeStart={beginResize("panel")} {...gridNav("panel")}>
                   <input value={form.panel} onChange={(e) => setForm({ ...form, panel: e.target.value })} />
                 </ExcelField>
+                <ExcelField label="Multiple Cust *" widthPx={colWidths.multipleCust} onResizeStart={beginResize("multipleCust")} {...gridNav("multipleCust")}>
+                  {/* Textarea, 1 customer per baris (2026-09-01, instruksi
+                      eksplisit user, mirip "tanki turunan" Milling tapi
+                      free-text bukan pilih dari daftar tetap) -- kalau diisi
+                      LEBIH DARI 1 baris SAAT SAVE BARIS BARU (bukan Edit),
+                      tiap baris otomatis jadi 1 baris Approval TERPISAH di
+                      Lot History, field lain disalin identik (lihat
+                      saveMutation). Dipindah ke baris "Production Input
+                      Column" sebelah "Panel" (2026-09-02, instruksi eksplisit
+                      user).
+                      WAJIB diisi (2026-09-02, instruksi eksplisit user) --
+                      dulu boleh kosong, ternyata itu bikin auto-replace (lihat
+                      saveMutation) ambigu: kalau baris sebelumnya SUDAH py
+                      Multiple Cust terisi tapi admin lupa isi ulang saat re-
+                      entry, sistem tidak bisa bedakan "sengaja mau
+                      kosongkan"/"lupa ketik" dari "memang tidak ada Multiple
+                      Cust" -- bisa menimpa nilai lama dgn kosong secara tidak
+                      sengaja. Sekarang WAJIB ketik sesuatu, minimal "-" kalau
+                      memang tidak ada Multiple Cust lain -- perbandingan
+                      "lanjutan/replace vs baris baru" di saveMutation jadi
+                      exact-match, tidak ada lagi kasus "kosong dianggap sama
+                      dgn apa pun". */}
+                  <textarea
+                    rows={2}
+                    value={form.multipleCust}
+                    onChange={(e) => setForm({ ...form, multipleCust: e.target.value })}
+                    placeholder='Wajib diisi -- ketik "-" kalau tidak ada Multiple Cust lain, atau 1 customer per baris kalau lebih dari 1'
+                    title='Wajib diisi. Ketik "-" kalau tidak ada Multiple Cust lain utk Order ini. Isi lebih dari 1 baris (1 customer per baris) utk otomatis membuat baris Approval terpisah per customer di Lot History saat Save.'
+                    required
+                  />
+                </ExcelField>
                 <ExcelField label="Lot COA" widthPx={colWidths.lotCoa} onResizeStart={beginResize("lotCoa")} {...gridNav("lotCoa")}>
                   <input
                     type="datetime-local"
@@ -923,23 +1444,6 @@ export default function ApprovalPage({
                     <option value="HARDENER">HARDENER</option>
                   </select>
                 </ExcelField>
-                <ExcelField label="Multiple Cust" widthPx={colWidths.multipleCust} onResizeStart={beginResize("multipleCust")} {...gridNav("multipleCust")}>
-                  {/* Textarea, 1 customer per baris (2026-09-01, instruksi
-                      eksplisit user, mirip "tanki turunan" Milling tapi
-                      free-text bukan pilih dari daftar tetap) -- kalau diisi
-                      LEBIH DARI 1 baris SAAT SAVE BARIS BARU (bukan Edit),
-                      tiap baris otomatis jadi 1 baris Approval TERPISAH di
-                      Lot History, field lain disalin identik (lihat
-                      saveMutation). Diisi 1 baris/kosong -> perilaku sama spt
-                      sebelumnya (field teks biasa). */}
-                  <textarea
-                    rows={2}
-                    value={form.multipleCust}
-                    onChange={(e) => setForm({ ...form, multipleCust: e.target.value })}
-                    placeholder="1 customer per baris kalau lebih dari 1"
-                    title="Isi lebih dari 1 baris (1 customer per baris) utk otomatis membuat baris Approval terpisah per customer di Lot History saat Save."
-                  />
-                </ExcelField>
                 <ExcelField label="Tech Name" widthPx={colWidths.techName} onResizeStart={beginResize("techName")} {...gridNav("techName")}>
                   <EmployeeNameSelect
                     bare
@@ -962,6 +1466,59 @@ export default function ApprovalPage({
                 <button type="button" className="btn btn-info" style={{ padding: "3px 12px" }} onClick={() => fileInputRef.current?.click()}>
                   Upload File
                 </button>
+                {/* Alert "perlu Improve dari Produksi" (2026-09-02, instruksi
+                    eksplisit user) -- toggle, mirip lampu: merah = perlu
+                    Improve, hijau = normal. Ditaruh di sebelah tombol "Upload
+                    File" (instruksi eksplisit user), kotak berdiri sendiri
+                    (bukan ExcelField/sel grid). Bagian dari data form biasa
+                    (ikut tersimpan waktu Save/Simpan Perubahan) -- versi
+                    INSTAN (langsung tersimpan tanpa perlu klik Save) ada di
+                    tombol "Improve" per-baris di tab Lot History. */}
+                <label style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Tombol Improve:</label>
+                <button
+                  type="button"
+                  className={form.needsImprove ? "btn btn-danger" : "btn btn-success"}
+                  style={{ padding: "3px 12px" }}
+                  disabled={improveTrialLoading}
+                  onClick={async () => {
+                    const turningOn = !form.needsImprove;
+                    const order = form.order.trim();
+                    // Riwayat Trial/Improve DIAMBIL FRESH langsung dari server di
+                    // sini (2026-09-02 fix), BUKAN baca `existingApprovalsForOrder`
+                    // (cache React Query) -- itu race condition kalau masuk mode
+                    // Edit dari tombol Edit di tabel "Lot History" (BEDA dari panel
+                    // "Multiple Cust" di tab Input yg baru tampil KALAU datanya
+                    // sudah lebih dulu ke-load): query by-order belum tentu
+                    // selesai fetch ulang saat admin langsung klik "Improve" abis
+                    // itu, nomor Trial jadi salah hitung ulang dari 1. Fallback ke
+                    // `existingApprovalsForOrder` kalau fetch fresh ini gagal
+                    // (mis. Order masih kosong/offline sesaat), drpd macet total.
+                    let historyRows = existingApprovalsForOrder;
+                    if (order) {
+                      setImproveTrialLoading(true);
+                      try {
+                        const res = await api.get<{ success: boolean; data: ApprovalRow[] }>(`/approvals/by-order/${encodeURIComponent(order)}`);
+                        historyRows = res.data;
+                      } catch {
+                        /* fetch fresh gagal -- lanjut pakai existingApprovalsForOrder apa adanya */
+                      } finally {
+                        setImproveTrialLoading(false);
+                      }
+                    }
+                    // Nyalakan -> Remark KENA TAMBAH baris "Trial N (NG) dd/mm/yy"
+                    // baru. Matikan -> Remark KENA TAMBAH baris "Improve N dd/mm/yy"
+                    // (N = nomor Trial yg baru diselesaikan). Riwayat SEBELUMNYA
+                    // tetap ada di kedua arah (2026-09-02, instruksi eksplisit
+                    // user, lihat appendNextImproveTrial/appendImproveResolved).
+                    setForm((f) => ({
+                      ...f,
+                      needsImprove: turningOn,
+                      remark: turningOn ? appendNextImproveTrial(f.remark, historyRows) : appendImproveResolved(f.remark, historyRows),
+                    }));
+                  }}
+                >
+                  {form.needsImprove ? "🔴 Improve" : "🟢 Normal"}
+                </button>
                 {attachFile && <span style={{ fontSize: 12, color: "var(--muted)" }}>{attachFile.name}</span>}
                 <input
                   ref={fileInputRef}
@@ -977,7 +1534,18 @@ export default function ApprovalPage({
             {message && <p className="status-text">{message}</p>}
 
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn btn-success" type="submit" disabled={saveMutation.isPending || uploadMutation.isPending}>
+              <button
+                className="btn btn-success"
+                type="submit"
+                disabled={saveMutation.isPending || uploadMutation.isPending || !!duplicateOrderWarning || !orderConfirmed}
+                title={
+                  duplicateOrderWarning
+                    ? 'Order ini sudah ada di History -- klik "Edit" atau "+ Baris Baru" dulu di atas.'
+                    : !orderConfirmed
+                    ? 'Order belum terkonfirmasi ketemu di Referensi Order / PO (SAP-COOISPI) -- ketik nomor Order lalu tekan Enter dulu.'
+                    : undefined
+                }
+              >
                 {saveMutation.isPending || uploadMutation.isPending ? "Menyimpan..." : editingApprovalId ? "Simpan Perubahan" : "Save Data"}
               </button>
               {editingApprovalId && (
@@ -1018,6 +1586,7 @@ export default function ApprovalPage({
                 <label>Status</label>
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                   <option value="">Semua</option>
+                  <option value="Prepare Approval">Prepare Approval</option>
                   <option value="Pending Approval">Pending Approval</option>
                   <option value="Approval">Approval</option>
                   <option value="Oke Approval">Oke Approval</option>
@@ -1044,6 +1613,7 @@ export default function ApprovalPage({
               exportFileName="approval-lot-history"
               storageKey="approval-lot-history"
               rows={historyQuery.data ?? []}
+              rowStyle={(r) => (r.needsImprove ? { background: "#fef2f2" } : undefined)}
               freezeFirstColumn
               columns={[
                 { key: "order", label: "Order", render: (r) => r.order },
@@ -1108,6 +1678,21 @@ export default function ApprovalPage({
                 { key: "remark", label: "Remark", render: (r) => r.remark },
                 { key: "inputBy", label: "Input By", render: (r) => formatInputBy(employees, r.inputBy) },
                 { key: "status", label: "Status", render: (r) => r.status },
+                {
+                  key: "needsImprove",
+                  label: "Improve",
+                  // Badge merah/hijau, SAMA persis dgn tombol "Improve" di form
+                  // Input/Edit (2026-09-02, instruksi eksplisit user -- dulu
+                  // merah/putih, tidak konsisten dgn tombolnya). Bukan tombol
+                  // beneran (tidak ada onClick) -- cuma tampilan status, sesuai
+                  // instruksi sebelumnya toggle-nya cuma boleh lewat form.
+                  render: (r) => (
+                    <span className={r.needsImprove ? "btn btn-danger" : "btn btn-success"} style={{ padding: "3px 12px", fontSize: "0.8rem" }}>
+                      {r.needsImprove ? "🔴 Improve" : "🟢 Normal"}
+                    </span>
+                  ),
+                  csvValue: (r) => (r.needsImprove ? "Improve" : "Normal"),
+                },
                 { key: "processingTime", label: "Processing Time", render: (r) => r.processingTime },
                 { key: "hasAttachment", label: "Lampiran", render: (r) => (r.hasAttachment ? "Filled" : "No File"), csvValue: (r) => (r.hasAttachment ? "Filled" : "No File") },
                 { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
@@ -1244,6 +1829,12 @@ export default function ApprovalPage({
             ))}
             {(attachmentsQuery.data ?? []).length === 0 && <li>Belum ada lampiran.</li>}
           </ul>
+        </Modal>
+      )}
+
+      {viewingApproval && (
+        <Modal title={`Detail Baris — Order ${viewingApproval.order}`} onClose={() => setViewingApproval(null)} width={640}>
+          <MultipleCustViewDetail row={viewingApproval} employees={employees} />
         </Modal>
       )}
     </div>

@@ -206,7 +206,24 @@ export default function ManualInputModal() {
         <div className="panel-body">
           <form onSubmit={handleSubmit}>
             <div className="field-grid">
-              <OrderLookup value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
+              <OrderLookup
+                value={form.order}
+                onChange={(v) => setForm({ ...form, order: v })}
+                onFound={handleOrderFound}
+                onNotFound={() =>
+                  handleOrderFound({
+                    order: form.order,
+                    batch: null,
+                    materialNumber: null,
+                    materialDescription: null,
+                    orderQty: null,
+                    plant: null,
+                    jenis: null,
+                    warnaDasar: null,
+                    volume: null,
+                  })
+                }
+              />
               <div className="field">
                 <label>Description</label>
                 <input value={form.materialDescription} onChange={(e) => setForm({ ...form, materialDescription: e.target.value })} />

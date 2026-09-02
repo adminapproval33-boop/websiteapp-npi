@@ -560,7 +560,25 @@ export default function AdminQcPage() {
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
                 <ExcelField label="Order" widthPx={headerColWidths.order} onResizeStart={beginHeaderResize("order")} {...gridNav("order")}>
-                  <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
+                  <OrderLookup
+                    bare
+                    value={form.order}
+                    onChange={(v) => setForm({ ...form, order: v })}
+                    onFound={handleOrderFound}
+                    onNotFound={() =>
+                      handleOrderFound({
+                        order: form.order,
+                        batch: null,
+                        materialNumber: null,
+                        materialDescription: null,
+                        orderQty: null,
+                        plant: null,
+                        jenis: null,
+                        warnaDasar: null,
+                        volume: null,
+                      })
+                    }
+                  />
                 </ExcelField>
                 <ExcelField label="Material Number" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} onChange={(e) => setForm({ ...form, materialNumber: e.target.value })} required />

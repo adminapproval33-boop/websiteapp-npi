@@ -622,7 +622,24 @@ export default function ProductionLabelEntryPage({
               ? "Cetak label produksi untuk printer Honeywell PC42T (ukuran sticker 100mm x 140mm). Cari nomor Order, lengkapi field manual di bawah, lalu klik Cetak Label."
               : "Cari nomor Order, lengkapi field manual di bawah, lalu klik Save."}
           </p>
-          <OrderLookup value={order} onChange={setOrder} onFound={handleOrderFound} />
+          <OrderLookup
+            value={order}
+            onChange={setOrder}
+            onFound={handleOrderFound}
+            onNotFound={() =>
+              handleOrderFound({
+                order,
+                batch: null,
+                materialNumber: null,
+                materialDescription: null,
+                orderQty: null,
+                plant: null,
+                jenis: null,
+                warnaDasar: null,
+                volume: null,
+              })
+            }
+          />
 
           {/* Field manual SELALU tampil, tidak lagi menunggu Order ketemu dulu
               (2026-08-20, instruksi eksplisit user: "hilangkan menu awal yang

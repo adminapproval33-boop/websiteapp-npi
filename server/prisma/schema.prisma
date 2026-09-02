@@ -737,6 +737,11 @@ model ApprovalSchedule {
   techNameNik            String?
   finishApp              DateTime?
   remark                 String?
+  /// Alert "perlu Improve dari Produksi" (2026-09-02, instruksi eksplisit
+  /// user) -- toggle: admin klik tombol "Improve" di Lot History (instan,
+  /// tidak perlu buka form Edit) ATAU di form Input saat Save/Edit, klik lagi
+  /// utk matikan. Default false (baris normal, tidak ada alert).
+  needsImprove           Boolean              @default(false)
   attachments            ApprovalAttachment[]
 
   @@index([order])

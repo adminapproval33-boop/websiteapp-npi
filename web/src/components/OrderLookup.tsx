@@ -46,11 +46,26 @@ export default function OrderLookup({
   value,
   onChange,
   onFound,
+  onNotFound,
   bare = false,
 }: {
   value: string;
   onChange: (order: string) => void;
   onFound: (data: OrderRefData) => void;
+  /** Dipanggil kalau Order yg diketik TIDAK ketemu di Master Data (2026-09-02,
+   * instruksi eksplisit user) -- opsional, SENGAJA callback TERPISAH dari
+   * `onFound` (bukan memanggil `onFound` dgn data kosong): beberapa pemanggil
+   * (mis. "Cari Order" di popup Production Order Monitoring) memaknai
+   * `onFound` sbg "Order ini BENERAN ada, lakukan aksi" (buka modal detail),
+   * jadi tidak aman dipanggil jg saat GAGAL. Konsumen yg cuma isi field form
+   * biasa (pola `data.field ?? ""`, mayoritas pemanggil komponen ini) aman &
+   * dianjurkan pasang ini utk kosongkan field2 turunannya (Material
+   * Number/Description/dst) supaya tidak ada data BASI dari lookup
+   * SEBELUMNYA yg nempel begitu Order diedit jadi tidak valid lagi (bug
+   * ditemukan 2026-09-02: field lain dibiarkan apa adanya walau Order sudah
+   * berubah/tidak ketemu). Konsumen yg TIDAK pasang ini otomatis tetap
+   * berperilaku spt sebelumnya (tidak ada perubahan). */
+  onNotFound?: () => void;
   /** Jika true, render input polos saja (tanpa wrapper .field + label) supaya bisa dibungkus komponen layout lain, mis. ExcelField. */
   bare?: boolean;
 }) {
@@ -72,6 +87,7 @@ export default function OrderLookup({
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Order tidak ditemukan.");
+      onNotFound?.();
     } finally {
       setLoading(false);
     }
@@ -80,7 +96,13 @@ export default function OrderLookup({
   const input = (
     <input
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => {
+        onChange(e.target.value);
+        // Ketikan berubah -- error lookup lama (kalau ada) sudah tidak
+        // relevan lagi, biar border merahnya tidak nyangkut menunjuk teks
+        // yg sudah berubah (2026-09-02, bareng fix onFound "kosong" di atas).
+        if (error) setError("");
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -90,6 +112,8 @@ export default function OrderLookup({
       onBlur={handleSearch}
       placeholder="Ketik nomor Order, lalu tekan Enter"
       required
+      style={error ? { borderColor: "var(--danger)", background: "#fef2f2" } : undefined}
+      title={error || undefined}
     />
   );
 

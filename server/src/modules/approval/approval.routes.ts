@@ -49,11 +49,25 @@ const saveSchema = z
     submitToCustomer: optionalDate,
     customer: z.string().optional(),
     custSegmen: z.string().optional(),
-    multipleCust: z.string().optional(),
+    // Wajib diisi (2026-09-02, instruksi eksplisit user, min. "-" kalau
+    // memang tidak ada Multiple Cust lain) -- dulu opsional, ternyata field
+    // kosong itu ambigu ("sengaja kosong" vs "lupa diisi") dan bikin logika
+    // auto-replace di frontend (ApprovalPage saveMutation, deteksi "lanjutan
+    // vs baris baru") gampang salah asumsi & menimpa data lama tanpa sengaja.
+    multipleCust: z.string().trim().min(1, "Multiple Cust wajib diisi -- ketik \"-\" kalau tidak ada Multiple Cust lain."),
     techName: z.string().optional(),
     techNameNik: z.string().trim().optional().nullable(),
     finishApp: notFutureDate(optionalDate, "Finish App"),
     remark: z.string().optional(),
+    // Alert "perlu Improve dari Produksi" (2026-09-02, instruksi eksplisit
+    // user) -- HANYA bisa diubah lewat tombol "Improve" di form Input/Edit
+    // (ikut tersimpan bareng Save/Simpan Perubahan biasa). Sempat ada juga
+    // toggle instan PATCH /:approvalId/improve dari tombol per-baris di Lot
+    // History, DIHAPUS (2026-09-02, instruksi eksplisit user) krn nomor
+    // "Trial N (NG)"/"Improve N" di Remark cuma dihitung benar lewat alur
+    // form (lihat ApprovalPage.tsx), toggle instan dari tabel tidak menyentuh
+    // Remark sama sekali.
+    needsImprove: z.boolean().optional().default(false),
   })
   .superRefine((data, ctx) => {
     // Order/Material Number/Material Description/Batch/Order Qty/Plant/IU
@@ -171,12 +185,51 @@ const saveSchema = z
     }
   });
 
-type StatusVerdict = "Pending Approval" | "Approval" | "Oke Approval";
+type StatusVerdict = "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval";
 
-function computeStatus(techName: string | null, finishApp: Date | null): StatusVerdict {
-  if (finishApp) return "Oke Approval";
-  if (techName) return "Approval";
-  return "Pending Approval";
+/** String non-kosong (setelah trim) ATAU Date manapun dianggap "terisi" --
+ * "-" placeholder (Customer/Cust Segmen/Multiple Cust) SENGAJA dihitung
+ * terisi (itu isian sah, bukan kosong beneran, lihat validasi Multiple Cust
+ * wajib min. "-"). */
+function isFilled(v: string | Date | null): boolean {
+  if (v === null) return false;
+  if (v instanceof Date) return true;
+  return v.trim().length > 0;
+}
+
+/** Status "Approval — Lot History" (2026-09-02, instruksi eksplisit user) --
+ * 4 tingkat berdasar SEKUMPULAN kolom yang sudah terisi, bukan cuma
+ * techName/finishApp spt sebelumnya:
+ * - Tier 1 (Prepare Date, Spray Man, Wet Sample, Panel, Multiple Cust, Lot
+ *   COA, Send To Tech) semua terisi -> "Pending Approval" (Submit Tech
+ *   opsional ikut terisi di tingkat ini, TIDAK mengubah status -- makanya
+ *   tidak perlu tier terpisah utk itu).
+ * - Tier 1 + (Submit Tech, Submit Cust, Customer, Cust Segmen, Tech Name)
+ *   semua terisi -> "Approval".
+ * - Tier di atas + Finish App terisi -> "Oke Approval".
+ * - Selain semua itu (Tier 1 belum lengkap) -> "Prepare Approval". */
+function computeStatus(row: {
+  prepareProduksi: Date | null;
+  sprayMan: string | null;
+  wetSample: string | null;
+  panel: string | null;
+  multipleCust: string | null;
+  lotCoa: Date | null;
+  sendToTech: Date | null;
+  technicalDateReceiving: Date | null;
+  submitToCustomer: Date | null;
+  customer: string | null;
+  custSegmen: string | null;
+  techName: string | null;
+  finishApp: Date | null;
+}): StatusVerdict {
+  const tier1 = [row.prepareProduksi, row.sprayMan, row.wetSample, row.panel, row.multipleCust, row.lotCoa, row.sendToTech].every(isFilled);
+  if (!tier1) return "Prepare Approval";
+
+  const tier2 = [row.technicalDateReceiving, row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFilled);
+  if (!tier2) return "Pending Approval";
+
+  return isFilled(row.finishApp) ? "Oke Approval" : "Approval";
 }
 
 function formatProcessingTime(start: Date, end: Date | null): string {
@@ -220,6 +273,29 @@ approvalRouter.get(
         })
       : null;
     res.json({ success: true, data: latest });
+  })
+);
+
+/**
+ * Semua baris Approval yg sudah pernah diinput utk 1 Order yg SAMA PERSIS
+ * (2026-09-02, instruksi eksplisit user: panel "Multiple Cust" di tab Input,
+ * gaya tampilan sama dgn "Tanki Turunan" di Milling) -- dasar panel yg
+ * menampilkan berapa baris Multiple Cust yg sudah ada utk Order yg lagi
+ * diketik di form, supaya admin bisa lihat/Edit langsung tanpa perlu buka
+ * tab Lot History & filter manual. Diurutkan ASC by timestamp (baris paling
+ * lama = "Baris 1"), sama pola dgn GET /milling/by-order.
+ */
+approvalRouter.get(
+  "/by-order/:order",
+  asyncRoute(async (req, res) => {
+    const order = String(req.params.order).trim();
+    const rows = order
+      ? await prisma.approvalSchedule.findMany({
+          where: { order },
+          orderBy: { timestamp: "asc" },
+        })
+      : [];
+    res.json({ success: true, data: rows });
   })
 );
 
@@ -374,7 +450,7 @@ async function fetchLotHistory(filterCol: string, filterValue: string, statusFil
   const enriched = rows.map((row) => ({
     ...row,
     pctGR: pctGrByOrder.get(row.order) ?? null,
-    status: computeStatus(row.techName, row.finishApp),
+    status: computeStatus(row),
     processingTime: formatProcessingTime(row.timestamp, row.finishApp),
     hasAttachment: row.attachments.length > 0,
   }));

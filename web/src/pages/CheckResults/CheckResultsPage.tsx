@@ -787,7 +787,25 @@ export default function CheckResultsPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Order Pack" widthPx={headerColWidths.order} onResizeStart={beginHeaderColResize("order")} {...gridNav("order")}>
-                  <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
+                  <OrderLookup
+                    bare
+                    value={form.order}
+                    onChange={(v) => setForm({ ...form, order: v })}
+                    onFound={handleOrderFound}
+                    onNotFound={() =>
+                      handleOrderFound({
+                        order: form.order,
+                        batch: null,
+                        materialNumber: null,
+                        materialDescription: null,
+                        orderQty: null,
+                        plant: null,
+                        jenis: null,
+                        warnaDasar: null,
+                        volume: null,
+                      })
+                    }
+                  />
                 </ExcelField>
                 <ExcelField label="Material Number Pack" widthPx={headerColWidths.materialNumber} onResizeStart={beginHeaderColResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input value={form.materialNumber} readOnly />
@@ -812,7 +830,25 @@ export default function CheckResultsPage({
               </ExcelRow>
               <ExcelRow>
                 <ExcelField label="Order Loose" widthPx={headerColWidths.order2} onResizeStart={beginHeaderColResize("order2")} {...gridNav("order2")}>
-                  <OrderLookup bare value={form.order2} onChange={(v) => setForm({ ...form, order2: v })} onFound={handleOrder2Found} />
+                  <OrderLookup
+                    bare
+                    value={form.order2}
+                    onChange={(v) => setForm({ ...form, order2: v })}
+                    onFound={handleOrder2Found}
+                    onNotFound={() =>
+                      handleOrder2Found({
+                        order: form.order2,
+                        batch: null,
+                        materialNumber: null,
+                        materialDescription: null,
+                        orderQty: null,
+                        plant: null,
+                        jenis: null,
+                        warnaDasar: null,
+                        volume: null,
+                      })
+                    }
+                  />
                 </ExcelField>
                 <ExcelField label="Material Number Loose" widthPx={headerColWidths.materialNumber2} onResizeStart={beginHeaderColResize("materialNumber2")} {...gridNav("materialNumber2")}>
                   <input value={form.materialNumber2} readOnly />

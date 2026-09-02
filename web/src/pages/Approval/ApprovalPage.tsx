@@ -211,6 +211,17 @@ export default function ApprovalPage({
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  /** Order yang ternyata SUDAH punya baris Approval (2026-09-02, instruksi
+   * eksplisit user: banyak Order kedobelan di Lot History krn orang ke-2
+   * (biasanya tim Teknikal) ketik ulang Order yg sama di tab Input alih-alih
+   * klik Edit ✏️ di baris yg sudah ada -- Save baru (POST) selalu bikin baris
+   * TERPISAH, bukan menimpa). Diisi di `handleOrderFound` begitu
+   * `/approvals/latest-by-order` nemu baris existing DAN kita TIDAK lagi
+   * sedang mode Edit -- dipakai buat nampilin banner peringatan + tombol
+   * pintas "Edit Baris yang Sudah Ada" supaya admin sadar & tidak bikin
+   * duplikat baru tanpa sengaja. TIDAK memblokir Save total (Multiple Cust
+   * yg sengaja nambah baris utk Order yg sama tetap harus tetap bisa). */
+  const [duplicateOrderWarning, setDuplicateOrderWarning] = useState<ApprovalRow | null>(null);
   const [attachFile, setAttachFile] = useState<File | null>(null);
   const [queueSearch, setQueueSearch] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -374,6 +385,7 @@ export default function ApprovalPage({
       const wasEditing = !!editingApprovalId;
       setForm(emptyForm);
       setEditingApprovalId(null);
+      setDuplicateOrderWarning(null);
       queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
       queryClient.invalidateQueries({ queryKey: ["approval-queue"] });
       if (attachFile) {
@@ -454,6 +466,11 @@ export default function ApprovalPage({
     }));
     try {
       const res = await api.get<{ success: boolean; data: ApprovalRow | null }>(`/approvals/latest-by-order/${encodeURIComponent(data.order)}`);
+      // Order ini sudah punya baris Approval -- kalau kita SEDANG TIDAK mode
+      // Edit, tandai supaya banner peringatan muncul (lihat komentar di
+      // deklarasi state `duplicateOrderWarning`). Mode Edit tidak perlu
+      // ditandai krn Save-nya PUT ke baris yg sama, bukan bikin baris baru.
+      setDuplicateOrderWarning(res.data && !editingApprovalId ? res.data : null);
       if (res.data) {
         const latest = res.data;
         setForm((f) => ({
@@ -483,6 +500,7 @@ export default function ApprovalPage({
       }
     } catch {
       /* tidak ada histori Approval sebelumnya untuk Order ini -- biarkan kosong */
+      setDuplicateOrderWarning(null);
     }
     if ((data.materialNumber ?? "").trim()) {
       await suggestCustomerFromCheckResults(data.materialNumber!.trim());
@@ -561,8 +579,9 @@ export default function ApprovalPage({
     setError("");
   }
 
-  function startEdit(row: LotHistoryRow) {
+  function startEdit(row: ApprovalRow) {
     setEditingApprovalId(row.approvalId);
+    setDuplicateOrderWarning(null);
     setForm({
       order: row.order,
       materialNumber: row.materialNumber ?? "",
@@ -600,6 +619,7 @@ export default function ApprovalPage({
 
   function cancelEdit() {
     setEditingApprovalId(null);
+    setDuplicateOrderWarning(null);
     setForm(emptyForm);
     setMessage("");
     setError("");
@@ -701,11 +721,55 @@ export default function ApprovalPage({
                 ↺ Reset Lebar Kolom
               </button>
             </div>
+            {duplicateOrderWarning && !editingApprovalId && (
+              <div
+                style={{
+                  background: "#fef3c7",
+                  border: "1px solid #f59e0b",
+                  borderRadius: 6,
+                  padding: "10px 14px",
+                  marginBottom: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontSize: "0.85rem", color: "#92400e" }}>
+                  ⚠️ Order <strong>{duplicateOrderWarning.order}</strong> sudah pernah diinput ke Approval oleh{" "}
+                  {formatInputBy(employees, duplicateOrderWarning.inputBy)} pada {formatDateTime(duplicateOrderWarning.timestamp)}.
+                  Kalau mau melengkapi/mengubah data yang sudah ada (bukan bikin baris baru), klik "Edit Baris yang Sudah Ada" -- Save
+                  di sini tetap bisa dipakai kalau memang sengaja mau menambah baris terpisah utk Order ini (mis. Multiple Cust).
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button type="button" className="btn btn-outline" style={{ padding: "3px 10px", fontSize: "0.78rem" }} onClick={() => startEdit(duplicateOrderWarning)}>
+                    Edit Baris yang Sudah Ada
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                    onClick={() => setDuplicateOrderWarning(null)}
+                  >
+                    Tutup
+                  </button>
+                </div>
+              </div>
+            )}
             <ExcelBlock title="Production & MRP Schedule » Approval, Input Proses">
               {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
               <ExcelRow>
                 <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")} {...gridNav("order")}>
-                  <OrderLookup bare value={form.order} onChange={(v) => setForm({ ...form, order: v })} onFound={handleOrderFound} />
+                  <OrderLookup
+                    bare
+                    value={form.order}
+                    onChange={(v) => {
+                      setForm({ ...form, order: v });
+                      setDuplicateOrderWarning(null);
+                    }}
+                    onFound={handleOrderFound}
+                  />
                 </ExcelField>
                 <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")} {...gridNav("materialNumber")}>
                   <input

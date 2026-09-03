@@ -185,7 +185,7 @@ const saveSchema = z
     }
   });
 
-type StatusVerdict = "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval";
+type StatusVerdict = "Prepare Approval" | "Wait Approval" | "Approval" | "Oke Approval";
 
 /** String non-kosong (setelah trim) ATAU Date manapun dianggap "terisi" --
  * "-" placeholder (Customer/Cust Segmen/Multiple Cust) SENGAJA dihitung
@@ -197,17 +197,38 @@ function isFilled(v: string | Date | null): boolean {
   return v.trim().length > 0;
 }
 
-/** Status "Approval — Lot History" (2026-09-02, instruksi eksplisit user) --
- * 4 tingkat berdasar SEKUMPULAN kolom yang sudah terisi, bukan cuma
- * techName/finishApp spt sebelumnya:
- * - Tier 1 (Prepare Date, Spray Man, Wet Sample, Panel, Multiple Cust, Lot
- *   COA, Send To Tech) semua terisi -> "Pending Approval" (Submit Tech
- *   opsional ikut terisi di tingkat ini, TIDAK mengubah status -- makanya
- *   tidak perlu tier terpisah utk itu).
- * - Tier 1 + (Submit Tech, Submit Cust, Customer, Cust Segmen, Tech Name)
- *   semua terisi -> "Approval".
- * - Tier di atas + Finish App terisi -> "Oke Approval".
- * - Selain semua itu (Tier 1 belum lengkap) -> "Prepare Approval". */
+/** Status "Approval — Lot History" (2026-09-04, instruksi eksplisit user,
+ * DIREVISI ULANG ke-2x di hari yg sama -- status "Pending Approval" DIGANTI
+ * NAMA jadi "Wait Approval", mekanisme tier TIDAK berubah dari revisi
+ * sebelumnya) -- 4 tingkat berdasar SEKUMPULAN kolom yang sudah terisi:
+ * - Tier 1 (Prepare Date SAMPAI Send To Tech: Prepare Date, Spray Man, Wet
+ *   Sample, Panel, Multiple Cust, Lot COA, Send To Tech) BELUM semua terisi
+ *   -> "Prepare Approval". Ini SEKALIGUS mencakup permintaan user "kalau Lot
+ *   COA/Send To Tech belum terisi -> Prepare Approval" (keduanya anggota
+ *   Tier 1) DAN "kalau Prepare Date s.d. Submit Tech belum ada yg terisi ->
+ *   Prepare Approval" (kasus tak satupun terisi otomatis bikin Tier 1 gagal
+ *   juga) -- SATU kondisi ini menaungi kedua kalimat itu tanpa perlu
+ *   pengecekan terpisah (supaya tidak tertumpuk/dobel).
+ * - Tier 1 semua terisi, Tier 2 (Submit Cust SAMPAI Tech Name: Submit Cust,
+ *   Customer, Cust Segmen, Tech Name) BELUM semua terisi -> "Wait Approval".
+ *   Field `technicalDateReceiving` (Submit Tech) SENGAJA TIDAK ikut dicek di
+ *   Tier manapun (tetap opsional utk status, cuma wajib saat submit Finish
+ *   App) -- begitu Tier 1 lolos tapi Tier 2 belum, statusnya sudah "Wait
+ *   Approval" terlepas dari Submit Tech sudah/belum terisi, jadi otomatis
+ *   menaungi juga permintaan user "kalau Submit Tech terisi -> Wait
+ *   Approval" (Submit Tech normalnya baru terisi setelah Tier 1 lengkap,
+ *   sesuai urutan form, jadi tidak pernah muncul kasus Submit Tech terisi
+ *   duluan sebelum Tier 1 -- tidak ada celah tertumpuk).
+ * - Tier 1 + Tier 2 semua terisi, Finish App belum terisi -> "Approval".
+ * - Finish App terisi (otomatis berarti Tier 1+2 + Submit Tech juga sudah
+ *   lengkap, sudah divalidasi wajib lengkap saat Save di ApprovalPage.tsx)
+ *   -> "Oke Approval".
+ *
+ * PENTING (supaya tidak tertumpuk dgn logika lain, instruksi eksplisit
+ * user): fungsi INI SATU-SATUNYA sumber kebenaran status. Ada SALINAN
+ * client-side (`approvalStatusBadge` di ApprovalPage.tsx, dipakai KHUSUS
+ * badge panel "Multiple Cust", murni tampilan) -- WAJIB selalu disamakan
+ * persis kalau logika di sini diubah lagi nanti. */
 function computeStatus(row: {
   prepareProduksi: Date | null;
   sprayMan: string | null;
@@ -226,8 +247,8 @@ function computeStatus(row: {
   const tier1 = [row.prepareProduksi, row.sprayMan, row.wetSample, row.panel, row.multipleCust, row.lotCoa, row.sendToTech].every(isFilled);
   if (!tier1) return "Prepare Approval";
 
-  const tier2 = [row.technicalDateReceiving, row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFilled);
-  if (!tier2) return "Pending Approval";
+  const tier2 = [row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFilled);
+  if (!tier2) return "Wait Approval";
 
   return isFilled(row.finishApp) ? "Oke Approval" : "Approval";
 }
@@ -399,7 +420,10 @@ approvalRouter.get(
       select: { order: true, orderType: true },
     });
     const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
-    const data = rows.map((r) => ({ ...r, orderType: orderTypeByOrder.get(r.order) ?? null }));
+    // `status` (2026-09-03, instruksi eksplisit user) dihitung sekali di sini
+    // pakai `computeStatus` yg sama dgn Lot History, supaya Dashboard Approval
+    // bisa filter tabel per status tanpa duplikasi logika tier di frontend.
+    const data = rows.map((r) => ({ ...r, orderType: orderTypeByOrder.get(r.order) ?? null, status: computeStatus(r) }));
 
     res.json({ success: true, data });
   })

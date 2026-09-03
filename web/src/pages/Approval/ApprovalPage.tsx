@@ -1,4 +1,5 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -22,7 +23,7 @@ import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
 
-interface ApprovalRow {
+export interface ApprovalRow {
   approvalId: string;
   timestamp: string;
   order: string;
@@ -57,12 +58,12 @@ interface ApprovalRow {
   inputBy: string;
 }
 
-interface LotHistoryRow extends ApprovalRow {
+export interface LotHistoryRow extends ApprovalRow {
   /** Diambil live dari MasterOrder ("Referensi Order / PO (SAP-COOISPI)")
    * lewat GET /approvals/lot-history di backend, bukan snapshot -- jadi
    * otomatis ikut berubah kalau Master Data Cooispi di-update ulang. */
   pctGR: string | null;
-  status: "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval";
+  status: "Prepare Approval" | "Wait Approval" | "Approval" | "Oke Approval";
   processingTime: string;
   hasAttachment: boolean;
 }
@@ -203,29 +204,35 @@ function isFieldFilled(v: string | null): boolean {
   return v !== null && v.trim().length > 0;
 }
 
-/** Verdict status per baris (2026-09-02, instruksi eksplisit user: 4 tingkat
- * berdasar sekumpulan kolom yg sudah terisi) -- versi client-side dari
- * `computeStatus` di approval.routes.ts (server), dipakai KHUSUS utk badge di
- * panel `MultipleCustPanel` di bawah (murni tampilan, keputusan resmi status
- * tetap dihitung server spt biasa di GET /lot-history). Lihat komentar
- * lengkap di `computeStatus` (server) utk penjelasan tiap tingkat. */
-function approvalStatusBadge(row: ApprovalRow): "Prepare Approval" | "Pending Approval" | "Approval" | "Oke Approval" {
+/** Verdict status per baris (2026-09-04, instruksi eksplisit user, DIREVISI
+ * ULANG ke-2x -- "Pending Approval" diganti nama jadi "Wait Approval",
+ * mekanisme tier sama dgn revisi sebelumnya, Submit Tech tetap OPSIONAL,
+ * tidak wajib di tier manapun) -- versi client-side dari `computeStatus` di
+ * approval.routes.ts (server), dipakai KHUSUS utk badge di panel
+ * `MultipleCustPanel` di bawah (murni tampilan, keputusan resmi status
+ * tetap dihitung server spt biasa di GET /lot-history). HARUS SELALU
+ * DISAMAKAN PERSIS dgn `computeStatus` (server) kalau logikanya diubah lagi
+ * -- ini SATU-SATUNYA salinan client-side yg boleh ada, jangan bikin
+ * salinan lain. Lihat komentar lengkap di `computeStatus` (server) utk
+ * penjelasan tiap tingkat & alasan tidak tertumpuk dgn logika lain. */
+function approvalStatusBadge(row: ApprovalRow): "Prepare Approval" | "Wait Approval" | "Approval" | "Oke Approval" {
   const tier1 = [row.prepareProduksi, row.sprayMan, row.wetSample, row.panel, row.multipleCust, row.lotCoa, row.sendToTech].every(
     isFieldFilled
   );
   if (!tier1) return "Prepare Approval";
 
-  const tier2 = [row.technicalDateReceiving, row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFieldFilled);
-  if (!tier2) return "Pending Approval";
+  const tier2 = [row.submitToCustomer, row.customer, row.custSegmen, row.techName].every(isFieldFilled);
+  if (!tier2) return "Wait Approval";
 
   return isFieldFilled(row.finishApp) ? "Oke Approval" : "Approval";
 }
 
-/** Warna badge per status (2026-09-02) -- dipakai di panel `MultipleCustPanel`
- * di bawah. */
+/** Warna badge per status (2026-09-02, key "Pending Approval" diganti jadi
+ * "Wait Approval" 2026-09-04) -- dipakai di panel `MultipleCustPanel` di
+ * bawah. */
 const APPROVAL_STATUS_COLOR: Record<string, { background: string; color: string }> = {
   "Prepare Approval": { background: "#f1f5f9", color: "#475569" },
-  "Pending Approval": { background: "#dbeafe", color: "#1e40af" },
+  "Wait Approval": { background: "#dbeafe", color: "#1e40af" },
   Approval: { background: "#fef3c7", color: "#92400e" },
   "Oke Approval": { background: "#dcfce7", color: "#166534" },
 };
@@ -423,7 +430,18 @@ export default function ApprovalPage({
   const { data: techNameSuggestions } = useNameSuggestions("approval", "techName");
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
+  /** Deep-link dari tombol Aksi tabel "Item explorer" di Dashboard Approval
+   * (2026-09-04, instruksi eksplisit user: kolom Aksi Dashboard ikut tombol
+   * Edit/Lampiran/Hapus spt Lot History) -- SENGAJA TIDAK menduplikasi form
+   * Edit di Dashboard (form ini besar & rawan divergen), Dashboard cuma
+   * navigate kesini bawa `editApprovalId`+`editOrder` (buka tab History,
+   * filter by Order, lalu auto klik Edit baris yg approvalId-nya cocok) atau
+   * `attachmentApprovalId` (buka modal Lampiran langsung). */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() => {
+    if (searchParams.get("editApprovalId") || searchParams.get("attachmentApprovalId")) return "history";
+    return isViewOnly ? "history" : "input";
+  });
   const [form, setForm] = useState(emptyForm);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -452,8 +470,8 @@ export default function ApprovalPage({
 
   const [statusFilter, setStatusFilter] = useState("");
   const [filterCol, setFilterCol] = useState("order");
-  const [filterValue, setFilterValue] = useState("");
-  const [attachmentModalId, setAttachmentModalId] = useState<string | null>(null);
+  const [filterValue, setFilterValue] = useState(() => searchParams.get("editOrder") ?? "");
+  const [attachmentModalId, setAttachmentModalId] = useState<string | null>(() => searchParams.get("attachmentApprovalId"));
   const [viewingApproval, setViewingApproval] = useState<ApprovalRow | null>(null);
   /** Lagi fetch fresh riwayat Trial/Improve utk hitung nomor berikutnya
    * (2026-09-02) -- lihat komentar panjang di tombol "Improve". Dipakai
@@ -671,6 +689,26 @@ export default function ApprovalPage({
     // nampilin form Input -- lihat komentar sama di PremixAftermixPage.tsx.
     enabled: !embedded,
   });
+
+  // Selesaikan deep-link `editApprovalId` dari Dashboard Approval (2026-09-04,
+  // lihat komentar panjang di deklarasi `searchParams` di atas) -- begitu
+  // `historyQuery` (sudah difilter by Order lewat init `filterValue` di atas)
+  // kebawa data, cari baris yg approvalId-nya cocok lalu buka form Edit spt
+  // klik ✏️ manual, lalu bersihkan query param dari URL. Kalau cuma
+  // `attachmentApprovalId` (tanpa editApprovalId) modalnya sudah kebuka lewat
+  // init `attachmentModalId` di atas -- di sini tinggal beresin URL-nya.
+  useEffect(() => {
+    const deepEditId = searchParams.get("editApprovalId");
+    const deepAttachId = searchParams.get("attachmentApprovalId");
+    if (!deepEditId && !deepAttachId) return;
+    if (deepEditId) {
+      if (!historyQuery.data) return;
+      const match = historyQuery.data.find((r) => r.approvalId === deepEditId);
+      if (match) startEdit(match);
+    }
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyQuery.data]);
 
   const attachmentsQuery = useQuery({
     queryKey: ["approval-attachments", attachmentModalId],
@@ -1113,6 +1151,32 @@ export default function ApprovalPage({
     if (dateError) {
       setError(dateError);
       return;
+    }
+    // Finish App tidak boleh diisi kalau kolom SEBELUMNYA (Prepare Date s.d.
+    // Tech Name) belum lengkap semua (2026-09-04, instruksi eksplisit user) --
+    // jaring pengaman supaya status "Oke Approval" (Lot History, lihat
+    // computeStatus di server) selalu berarti SELURUH tahap benar2 lengkap,
+    // bukan cuma Finish App-nya doang yg keisi.
+    if (form.finishApp.trim()) {
+      const requiredBeforeFinish: [string, string][] = [
+        [form.prepareProduksi, "Prepare Date"],
+        [form.sprayMan, "Spray Man"],
+        [form.wetSample, "Wet Sample"],
+        [form.panel, "Panel"],
+        [form.multipleCust, "Multiple Cust"],
+        [form.lotCoa, "Lot COA"],
+        [form.sendToTech, "Send To Tech"],
+        [form.technicalDateReceiving, "Submit Tech"],
+        [form.submitToCustomer, "Submit Cust"],
+        [form.customer, "Customer"],
+        [form.custSegmen, "Cust Segmen"],
+        [form.techName, "Tech Name"],
+      ];
+      const missing = requiredBeforeFinish.find(([v]) => !v.trim());
+      if (missing) {
+        setError(`Finish App belum bisa diisi -- kolom "${missing[1]}" masih kosong. Lengkapi dulu semua kolom dari Prepare Date sampai Finish App.`);
+        return;
+      }
     }
     saveMutation.mutate();
   }
@@ -1587,7 +1651,7 @@ export default function ApprovalPage({
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                   <option value="">Semua</option>
                   <option value="Prepare Approval">Prepare Approval</option>
-                  <option value="Pending Approval">Pending Approval</option>
+                  <option value="Wait Approval">Wait Approval</option>
                   <option value="Approval">Approval</option>
                   <option value="Oke Approval">Oke Approval</option>
                 </select>

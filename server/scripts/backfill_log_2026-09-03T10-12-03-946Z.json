@@ -1,0 +1,156 @@
+[
+  {
+    "approvalId": "a5486fae-99bf-4d8e-897e-1139d81528dc",
+    "order": "1010163777",
+    "field": "customer",
+    "from": "",
+    "to": "PT. SHINANOA INDONESIA / PT. HCMI"
+  },
+  {
+    "approvalId": "a5486fae-99bf-4d8e-897e-1139d81528dc",
+    "order": "1010163777",
+    "field": "custSegmen",
+    "from": "",
+    "to": "GIU"
+  },
+  {
+    "approvalId": "3d2e43df-8807-4937-84d7-5ba349e29821",
+    "order": "1010166114",
+    "field": "customer",
+    "from": "",
+    "to": "PT.  SHINANOA INDONESIA /  PT. HCMI"
+  },
+  {
+    "approvalId": "3d2e43df-8807-4937-84d7-5ba349e29821",
+    "order": "1010166114",
+    "field": "custSegmen",
+    "from": "",
+    "to": "MOTORCYCLE"
+  },
+  {
+    "approvalId": "f8638e91-ab4c-4fc0-bb55-85eb8cf42f21",
+    "order": "1040008911",
+    "field": "customer",
+    "from": "",
+    "to": "PT. TOYOTA MOTOR MANUFACTURING INDONESIA"
+  },
+  {
+    "approvalId": "f8638e91-ab4c-4fc0-bb55-85eb8cf42f21",
+    "order": "1040008911",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "eef257f0-9160-4702-82f7-60572c802373",
+    "order": "1030052546",
+    "field": "customer",
+    "from": "",
+    "to": "PT. K R M"
+  },
+  {
+    "approvalId": "eef257f0-9160-4702-82f7-60572c802373",
+    "order": "1030052546",
+    "field": "custSegmen",
+    "from": "",
+    "to": "GIU"
+  },
+  {
+    "approvalId": "cec3e4b4-5022-4431-9927-5abc9250ca7d",
+    "order": "1070025124",
+    "field": "customer",
+    "from": "",
+    "to": "PT.  ASTRA HONDA MOTOR  / PT.  YASUNLI"
+  },
+  {
+    "approvalId": "cec3e4b4-5022-4431-9927-5abc9250ca7d",
+    "order": "1070025124",
+    "field": "custSegmen",
+    "from": "",
+    "to": "MOTORCYCLE"
+  },
+  {
+    "approvalId": "e7a8a432-8840-47e9-b8d7-1800f4e72e88",
+    "order": "1090016032",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "2a31c595-62fa-4ca4-adb8-dc5d1f934162",
+    "order": "1090015887",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "eb075fc2-e659-468c-9364-962c1f7574b9",
+    "order": "1090015925",
+    "field": "customer",
+    "from": "",
+    "to": "PT. TOYOTA MOTOR MANUFACTURING INDONESIA"
+  },
+  {
+    "approvalId": "eb075fc2-e659-468c-9364-962c1f7574b9",
+    "order": "1090015925",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "9044d47c-fb92-457c-ad2f-3f267a6b6ef8",
+    "order": "1090015905",
+    "field": "customer",
+    "from": "",
+    "to": "PT.TMMIN"
+  },
+  {
+    "approvalId": "61c72863-cdb4-47fc-8072-06e8c26e4e0c",
+    "order": "1090016129",
+    "field": "customer",
+    "from": "",
+    "to": "PT.TMMIN"
+  },
+  {
+    "approvalId": "817bc1bb-4cfa-4de3-a4d5-c1d318215226",
+    "order": "1090015848",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "d2a40fe8-34aa-4106-9cd2-d5e190d9b168",
+    "order": "1090015997",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "57692ee9-3ab5-4222-9b11-6dd84a27e762",
+    "order": "1090016571",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "eca62f9b-f244-441c-ab52-a122b10d6e3c",
+    "order": "1090016027",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "a008d7c0-fd70-431c-983b-f1289d0a513a",
+    "order": "1090016572",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  },
+  {
+    "approvalId": "50429dd1-926b-4800-b661-295e32eb1747",
+    "order": "1090016031",
+    "field": "custSegmen",
+    "from": "",
+    "to": "AUTOMOTIVE"
+  }
+]

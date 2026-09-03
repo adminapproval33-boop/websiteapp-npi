@@ -124,11 +124,11 @@ const STATUS_OPTIONS: { value: OrderQcStatus; label: string }[] = [
 // pembagiannya tetap tanpa duplikasi (bucket "21-30" sebenarnya menampung
 // hari ke-22 s.d. 30, bukan 21).
 const AGE_BUCKETS: { key: string; label: string; maxDays: number; color: string }[] = [
-  { key: "1-7", label: "1-7 Hari", maxDays: 7, color: "#fecaca" },
-  { key: "8-14", label: "8-14 Hari", maxDays: 14, color: "#fca5a5" },
-  { key: "15-21", label: "15-21 Hari", maxDays: 21, color: "#f87171" },
-  { key: "21-30", label: "21-30 Hari", maxDays: 30, color: "#ef4444" },
-  { key: ">30", label: ">30 Hari", maxDays: Infinity, color: "#b91c1c" },
+  { key: "1-7", label: "1-7 Hari", maxDays: 7, color: "#2ECC71" },
+  { key: "8-14", label: "8-14 Hari", maxDays: 14, color: "#F1C40F" },
+  { key: "15-21", label: "15-21 Hari", maxDays: 21, color: "#E67E22" },
+  { key: "21-30", label: "21-30 Hari", maxDays: 30, color: "#E74C3C" },
+  { key: ">30", label: ">30 Hari", maxDays: Infinity, color: "#962D22" },
 ];
 
 /** Sudah berapa HARI KERJA (exclude Sabtu/Minggu) sejak `sinceIso` sampai
@@ -292,6 +292,11 @@ export default function QualityCheckReviewPage() {
   // jadi tidak pernah cocok bucket manapun begitu filter ini aktif).
   const [ageFilter, setAgeFilter] = useState<Set<string>>(new Set());
   const [showAgePanel, setShowAgePanel] = useState(false);
+  // Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit user) --
+  // filter berdasar "Tanggal Masuk QC" (sinceQcEntry). String kosong = tanpa
+  // batas.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const query = useQuery({
     queryKey: ["quality-check-review"],
@@ -469,7 +474,20 @@ export default function QualityCheckReviewPage() {
   // "☰ Status") -- difilter di sini, SEBELUM `filteredRows`, supaya
   // konsisten ke SEMUA turunannya (kartu Total/Status/Lama Proses, tabel
   // detail, Export CSV) dalam 1 titik saja.
-  const rows = (query.data?.rows ?? []).filter((r) => r.status !== "Approval");
+  const rows = (query.data?.rows ?? [])
+    .filter((r) => r.status !== "Approval")
+    // Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit user) --
+    // filter berdasar "Tanggal Masuk QC" (sinceQcEntry), diletakkan di sini
+    // (bareng exclude "Approval" di atas) supaya konsisten ke SEMUA turunan
+    // (kartu Total/Status/Lama Proses, tabel detail, Export CSV).
+    .filter((r) => {
+      if (!dateFrom && !dateTo) return true;
+      if (!r.sinceQcEntry) return false;
+      const d = r.sinceQcEntry.slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      return true;
+    });
   const filteredRows = rows
     .filter((r) => statusFilter.size === 0 || statusFilter.has(r.status))
     .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""));
@@ -584,6 +602,28 @@ export default function QualityCheckReviewPage() {
         <div className="panel">
           <div className="panel-header">Quality Check Review</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit
+                user) -- filter berdasar "Tanggal Masuk QC", berlaku ke SEMUA
+                kartu KPI/tabel/Export CSV di bawah (bagian dari `rows`). */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: "0.8rem" }}>
+              <span style={{ fontWeight: 600, color: "var(--text-muted)" }}>Range waktu (Tanggal Masuk QC):</span>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ width: 160 }} />
+              <span style={{ color: "var(--text-muted)" }}>s/d</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ width: 160 }} />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                >
+                  ✕ Reset tanggal
+                </button>
+              )}
+            </div>
+
             {/* Klik kartu KPI Status utk filter tabel di bawah (2026-08-27,
                 instruksi eksplisit user) -- toggle langsung ke `statusFilter`,
                 state YANG SAMA dipakai tombol "☰ Status" & tabel `filteredRows`
@@ -602,7 +642,7 @@ export default function QualityCheckReviewPage() {
             label="Total"
             count={total.count}
             qty={total.qty}
-            color="var(--navy-light)"
+            color="#3498DB"
             onClick={() => setStatusFilter(new Set())}
             active={statusFilter.size === 0}
             dimmed={statusFilter.size > 0}
@@ -611,7 +651,7 @@ export default function QualityCheckReviewPage() {
             label="OK (QC Passed)"
             count={summary.ok.count}
             qty={summary.ok.qty}
-            color={STATUS_COLOR.OK}
+            color="#2ECC71"
             onClick={() => setStatusFilter((s) => toggleInSet(s, "OK"))}
             active={statusFilter.has("OK")}
             dimmed={statusFilter.size > 0 && !statusFilter.has("OK")}
@@ -620,7 +660,7 @@ export default function QualityCheckReviewPage() {
             label="On Check"
             count={summary.onCheck.count}
             qty={summary.onCheck.qty}
-            color={STATUS_COLOR["On Check"]}
+            color="#F1C40F"
             onClick={() => setStatusFilter((s) => toggleInSet(s, "On Check"))}
             active={statusFilter.has("On Check")}
             dimmed={statusFilter.size > 0 && !statusFilter.has("On Check")}
@@ -629,7 +669,7 @@ export default function QualityCheckReviewPage() {
             label="Improve"
             count={summary.improve.count}
             qty={summary.improve.qty}
-            color={STATUS_COLOR.Improve}
+            color="#E74C3C"
             onClick={() => setStatusFilter((s) => toggleInSet(s, "Improve"))}
             active={statusFilter.has("Improve")}
             dimmed={statusFilter.size > 0 && !statusFilter.has("Improve")}
@@ -638,7 +678,7 @@ export default function QualityCheckReviewPage() {
             label="Assorted (NG)"
             count={summary.assortedNg.count}
             qty={summary.assortedNg.qty}
-            color={STATUS_COLOR["Assorted (NG)"]}
+            color="#E74C3C"
             onClick={() => setStatusFilter((s) => toggleInSet(s, "Assorted (NG)"))}
             active={statusFilter.has("Assorted (NG)")}
             dimmed={statusFilter.size > 0 && !statusFilter.has("Assorted (NG)")}
@@ -656,7 +696,7 @@ export default function QualityCheckReviewPage() {
               label="Total"
               count={ageTotal.count}
               qty={ageTotal.qty}
-              color="var(--navy-light)"
+              color="#3498DB"
               onClick={() => setAgeFilter(new Set())}
               active={ageFilter.size === 0}
               dimmed={ageFilter.size > 0}

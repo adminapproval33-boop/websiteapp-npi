@@ -56,6 +56,12 @@ export function fileUrl(relativePath: string): string {
   return `${API_BASE}/files/${relativePath}?token=${encodeURIComponent(session?.token ?? "")}`;
 }
 
+/** URL untuk link <a href> download file backup database (menu Backup & Storage) -- pola sama dgn fileUrl(). */
+export function backupDownloadUrl(fileName: string): string {
+  const session = loadSession();
+  return `${API_BASE}/backup/download/${encodeURIComponent(fileName)}?token=${encodeURIComponent(session?.token ?? "")}`;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {

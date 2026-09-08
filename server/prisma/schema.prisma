@@ -975,3 +975,46 @@ model Message {
   @@index([receiverNik, senderNik, timestamp])
   @@map("messages")
 }
+
+enum BackupAction {
+  CREATE
+  AUTO_CREATE
+  RESTORE
+  DELETE
+  CLEANUP
+}
+
+/// Riwayat/audit trail Sistem Backup (2026-09-08, instruksi eksplisit user:
+/// "buatkan sistem backup manajemen"). File dump-nya sendiri TIDAK disimpan
+/// di DB (ada di folder BACKUP_DIR di disk, lihat modules/backup/backupService.ts)
+/// -- tabel ini murni catatan "siapa/kapan/apa" utk keperluan audit, terutama
+/// utk RESTORE yg destruktif thd seluruh database produksi.
+model BackupEvent {
+  id        Int          @id @default(autoincrement())
+  action    BackupAction
+  fileName  String?
+  byNik     String?
+  /// null = dipicu sistem (AUTO_CREATE/CLEANUP terjadwal), bukan oleh user.
+  note      String?
+  createdAt DateTime     @default(now())
+
+  @@index([createdAt])
+  @@map("backup_events")
+}
+
+/// Konfigurasi Sistem Backup, 1 baris singleton (id selalu "singleton").
+/// Diatur lewat menu Developer Tools > Backup & Storage.
+model BackupSetting {
+  id                String   @id @default("singleton")
+  autoBackupEnabled Boolean  @default(true)
+  /// Jam (0-23, waktu server) dijalankannya backup otomatis harian.
+  autoBackupHour    Int      @default(2)
+  /// Backup yg lebih tua dari sekian hari otomatis dihapus (retensi).
+  retentionDays     Int      @default(30)
+  /// Maksimum jumlah file backup yg disimpan -- kalau lebih, yg paling lama dihapus duluan.
+  retentionMaxCount Int      @default(60)
+  updatedAt         DateTime @updatedAt
+  updatedByNik      String?
+
+  @@map("backup_settings")
+}

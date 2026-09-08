@@ -25,6 +25,7 @@ import ProductionLabelEntryFgPage from "../pages/ProductionLabel/ProductionLabel
 import MaintenanceFormPage from "../pages/Maintenance/MaintenanceFormPage";
 import MaintenanceListPage from "../pages/Maintenance/MaintenanceListPage";
 import MaintenanceSchedulePage from "../pages/Maintenance/MaintenanceSchedulePage";
+import BackupManagementPage from "../pages/Backup/BackupManagementPage";
 
 export interface MenuLeaf {
   type: "leaf";
@@ -97,6 +98,7 @@ export const menuTree: MenuNode[] = [
     [
       leaf("User Management", "/admin/users", <UserManagementPage />),
       leaf("Master Data", "/admin/master-data", <MasterDataPage />),
+      leaf("Backup & Storage", "/admin/backup", <BackupManagementPage />),
     ],
     true
   ),

@@ -38,4 +38,16 @@ export const env = {
   // literal kalau ditempel ke .env dalam satu baris -- di-unescape di sini.
   googleServiceAccountPrivateKey: (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ?? "").replace(/\\n/g, "\n"),
   googleApprovalSheetId: process.env.GOOGLE_APPROVAL_SHEET_ID ?? "",
+  // Sistem Backup (2026-09-08, instruksi eksplisit user). Folder tujuan file
+  // dump -- default 1 folder di atas root repo ("../../../backups" dari
+  // server/src/lib) supaya konsisten dgn folder /backups manual yg sudah ada
+  // sebelumnya (sudah di-.gitignore). Sengaja BUKAN os.tmpdir() -- pg_dump
+  // menulis LANGSUNG ke file final di folder ini (lihat backupService.ts),
+  // jadi tidak pernah ada file dump yang mampir ke penyimpanan sementara.
+  backupDir: process.env.BACKUP_DIR ?? "",
+  // Folder "bin" instalasi PostgreSQL (isi pg_dump.exe/pg_restore.exe) --
+  // wajib diisi kalau pg_dump/pg_restore TIDAK ada di PATH sistem (umum di
+  // Windows, lihat instalasi native di C:\Program Files\PostgreSQL\<versi>\bin).
+  // Kosongkan kalau sudah ada di PATH (mis. di server Linux produksi).
+  pgBinDir: process.env.PG_BIN_DIR ?? "",
 };

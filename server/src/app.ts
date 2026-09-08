@@ -24,6 +24,7 @@ import { productionLabelFgRouter } from "./modules/productionLabelFg/productionL
 import { maintenanceRouter } from "./modules/maintenance/maintenance.routes";
 import { postsRouter } from "./modules/posts/posts.routes";
 import { chatRouter } from "./modules/chat/chat.routes";
+import { backupRouter } from "./modules/backup/backup.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 export function createApp() {
@@ -57,6 +58,7 @@ export function createApp() {
   app.use("/api/maintenance", maintenanceRouter);
   app.use("/api/posts", postsRouter);
   app.use("/api/chat", chatRouter);
+  app.use("/api/backup", backupRouter);
 
   // Serve hasil build frontend (web/dist) kalau ada -- dipakai worktree "live"
   // yang jalankan production build (server + web) dari 1 proses/port, jadi

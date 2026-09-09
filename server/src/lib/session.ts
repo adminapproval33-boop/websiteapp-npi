@@ -5,9 +5,9 @@ function expiryFromNow(): Date {
   return new Date(Date.now() + env.sessionTtlMinutes * 60 * 1000);
 }
 
-export async function createSession(nik: string): Promise<string> {
+export async function createSession(nik: string, ip?: string | null, userAgent?: string | null): Promise<string> {
   const session = await prisma.session.create({
-    data: { nik, expiresAt: expiryFromNow() },
+    data: { nik, expiresAt: expiryFromNow(), ip: ip ?? null, userAgent: userAgent ?? null },
   });
   return session.token;
 }
@@ -33,8 +33,18 @@ export async function revokeSessionsForUser(nik: string, reason: string): Promis
  * Validasi token dan kembalikan NIK pemiliknya. Setiap pemanggilan yang
  * valid memperpanjang masa berlaku sesi (sliding expiration), sama seperti
  * pola CacheService di versi Apps Script.
+ *
+ * Kalau `ip`/`userAgent` diisi, DIBANDINGKAN dgn yg tercatat saat sesi ini
+ * dibuat (lihat createSession) -- request yg tidak cocok DITOLAK (401) tapi
+ * sesi-nya SENGAJA tidak dihapus/expire, supaya perangkat yg sah (yg terus
+ * request dgn IP+UA yg cocok) tidak ikut ke-logout gara-gara ada perangkat
+ * lain yg pakai token hasil salinan manual (2026-09-09).
  */
-export async function validateSession(token: string | undefined | null): Promise<string> {
+export async function validateSession(
+  token: string | undefined | null,
+  ip?: string | null,
+  userAgent?: string | null
+): Promise<string> {
   const cleanToken = String(token ?? "").trim();
   if (!cleanToken) {
     throw new SessionError("Sesi tidak valid. Silakan login ulang.");
@@ -47,6 +57,13 @@ export async function validateSession(token: string | undefined | null): Promise
     throw new SessionError(
       revokedReason ? `Sesi Anda diakhiri: ${revokedReason}. Silakan login ulang.` : "Sesi telah berakhir. Silakan login ulang."
     );
+  }
+
+  if (session.ip && ip && session.ip !== ip) {
+    throw new SessionError("Sesi ini terdaftar dari perangkat/IP lain. Silakan login ulang dari perangkat ini.");
+  }
+  if (session.userAgent && userAgent && session.userAgent !== userAgent) {
+    throw new SessionError("Sesi ini terdaftar dari perangkat/browser lain. Silakan login ulang dari perangkat ini.");
   }
 
   await prisma.session.update({

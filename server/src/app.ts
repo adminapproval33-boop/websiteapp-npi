@@ -30,6 +30,13 @@ import { errorHandler } from "./middleware/errorHandler";
 export function createApp() {
   const app = express();
 
+  // Perlu supaya req.ip baca IP client ASLI dari header X-Forwarded-For
+  // (bukan IP reverse proxy itu sendiri) saat di belakang nginx/proxy lain
+  // (mis. server IT di mes.nipseapaint.com) -- dipakai validateSession() utk
+  // ikat sesi ke IP+User-Agent (2026-09-09). TIDAK berpengaruh kalau diakses
+  // langsung tanpa proxy (LAN, :5173) -- req.ip tetap IP klien asli.
+  app.set("trust proxy", true);
+
   app.use(cors({ origin: env.corsOrigin, credentials: true }));
   app.use(express.json({ limit: "2mb" }));
 

@@ -76,7 +76,7 @@ authRouter.post(
       await revokeSessionsForUser(user.nik, "login dari perangkat/browser lain");
     }
 
-    const token = await createSession(user.nik);
+    const token = await createSession(user.nik, req.ip, req.headers["user-agent"]);
 
     res.json({
       success: true,

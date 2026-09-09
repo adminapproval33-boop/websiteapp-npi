@@ -67,6 +67,16 @@ model Session {
   /// saat sesi ini dipakai lagi, supaya pesan errornya jelas ("diakhiri krn
   /// login di perangkat lain") bukan cuma "sesi berakhir" generik.
   revokedReason String?
+  /// IP & User-Agent SAAT LOGIN -- dipakai validateSession() utk menolak
+  /// request yg pakai token yg sama tapi dari kombinasi IP+UA yg beda (2026-
+  /// 09-09, instruksi eksplisit user: cegah 1 akun dipakai bersamaan dari
+  /// perangkat lain lewat token yg disalin manual, krn gerbang "1 sesi aktif"
+  /// yg lama cuma dicek saat login, bukan di tiap request). SENGAJA tidak
+  /// menghapus/expire sesi saat mismatch (beda dari revokeSessionsForUser) --
+  /// cukup tolak request dari perangkat yg tidak cocok, supaya device yg sah
+  /// tidak ikut ke-logout kalau device lain kebetulan lebih dulu request.
+  ip            String?
+  userAgent     String?
 
   @@index([nik])
   @@map("sessions")

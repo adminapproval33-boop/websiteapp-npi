@@ -30,7 +30,7 @@ function extractToken(req: Request): string | undefined {
 /** Wajib login (level akses apa pun). NIK & akses SELALU diambil dari DB via token, tidak pernah dari body/query client. */
 export async function requireAuth(req: AuthedRequest, res: Response, next: NextFunction) {
   try {
-    const nik = await validateSession(extractToken(req));
+    const nik = await validateSession(extractToken(req), req.ip, req.headers["user-agent"]);
     const user = await prisma.user.findUnique({ where: { nik } });
     if (!user) {
       throw new SessionError("Akun Anda sudah tidak terdaftar. Silakan login ulang.");

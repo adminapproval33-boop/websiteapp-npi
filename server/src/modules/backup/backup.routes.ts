@@ -18,7 +18,7 @@ import {
 import { getBlobUsage } from "./blobUsage";
 import {
   AdvancedCategory,
-  buildExportWorkbook,
+  streamExportWorkbook,
   categoryTableSummary,
   commitImport,
   CommitResult,
@@ -260,16 +260,15 @@ backupRouter.get(
   "/advanced/export",
   asyncRoute(async (req: AuthedRequest, res) => {
     const categories = parseCategories(req.query.categories);
-    const { workbook, tableCounts } = await buildExportWorkbook(categories, `${req.auth!.name} (${req.auth!.nik})`);
-    const totalRows = tableCounts.reduce((sum, t) => sum + t.rows, 0);
-    await logEvent("EXPORT_ADVANCED", null, req.auth!.nik, `Kategori: ${categories.join(", ")} (${totalRows} baris, ${tableCounts.length} tabel)`);
-
     const fileName = `data-export-${categories.join("-")}-${new Date().toISOString().replace(/[:.]/g, "-")}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-    // Ditulis LANGSUNG ke response stream, tidak pernah ke file sementara di disk.
-    await workbook.xlsx.write(res);
-    res.end();
+    // Streaming langsung ke response -- lihat catatan lengkap di
+    // streamExportWorkbook() (bukan cuma "tidak pernah ke file sementara di
+    // disk", tapi juga tidak pernah menahan seluruh isi tabel di RAM).
+    const { tableCounts } = await streamExportWorkbook(res, categories, `${req.auth!.name} (${req.auth!.nik})`);
+    const totalRows = tableCounts.reduce((sum, t) => sum + t.rows, 0);
+    await logEvent("EXPORT_ADVANCED", null, req.auth!.nik, `Kategori: ${categories.join(", ")} (${totalRows} baris, ${tableCounts.length} tabel)`);
   })
 );
 

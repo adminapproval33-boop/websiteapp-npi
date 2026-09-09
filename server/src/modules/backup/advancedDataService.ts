@@ -1,6 +1,8 @@
 import ExcelJS from "exceljs";
+import { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
+import { HttpError } from "../../middleware/errorHandler";
 
 /** Sistem Import & Export Data Advance (2026-09-09, instruksi eksplisit user:
  * "fitur import & export advance yang mengandung semua data termasuk Master
@@ -160,54 +162,76 @@ function cellFromValue(value: unknown, field: FieldMeta): ExcelJS.CellValue {
 }
 
 export interface ExportResult {
-  workbook: ExcelJS.Workbook;
   tableCounts: { model: string; label: string; rows: number }[];
 }
 
-export async function buildExportWorkbook(categories: AdvancedCategory[], exportedByName: string): Promise<ExportResult> {
-  const tables = tablesForCategories(categories);
-  if (tables.length === 0) throw new Error("Pilih minimal 1 kategori data untuk di-export.");
+const EXPORT_PAGE_SIZE = 5000;
 
-  const workbook = new ExcelJS.Workbook();
+/** Export SELALU streaming (langsung ke response stream, per-baris/per-halaman
+ * DB) -- TIDAK PERNAH menampung seluruh isi tabel di memori JS sekaligus.
+ * DITEMUKAN via SIT (2026-09-09): `findMany()` tanpa batas + ExcelJS non-
+ * streaming pada MasterOrder (ratusan ribu baris, sinkron dari SAP-COOISPI)
+ * bikin proses Node crash "JavaScript heap out of memory". Cursor pagination
+ * by primary key (bukan OFFSET/skip) supaya tetap cepat walau di baris ke-
+ * ratusan-ribu sekalipun. */
+export async function streamExportWorkbook(res: Response, categories: AdvancedCategory[], exportedByName: string): Promise<ExportResult> {
+  const tables = tablesForCategories(categories);
+  if (tables.length === 0) throw new HttpError(400, "Pilih minimal 1 kategori data untuk di-export.");
+
+  // count() dulu (query agregat murah, tidak menarik baris) supaya sheet
+  // _MetaInfo bisa ditulis PALING AWAL (streaming writer tidak bisa
+  // menyisipkan/memindah sheet setelah baris lain sudah dikirim ke stream).
+  const tableCounts = await Promise.all(
+    tables.map(async (def) => ({ model: def.model, label: def.model, rows: await delegate(def.model).count() }))
+  );
+
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true });
   workbook.creator = "NPI Website App -- Import & Export Data (Advance)";
   workbook.created = new Date();
 
-  const tableCounts: { model: string; label: string; rows: number }[] = [];
-
-  for (const def of tables) {
-    const meta = getModelMeta(def.model);
-    const rows: Record<string, unknown>[] = await delegate(def.model).findMany({ orderBy: undefined });
-    tableCounts.push({ model: def.model, label: def.model, rows: rows.length });
-
-    const sheet = workbook.addWorksheet(def.model.slice(0, 31));
-    sheet.columns = meta.fields.map((f) => ({ header: f.name, key: f.name, width: 20 }));
-    sheet.getRow(1).font = { bold: true };
-    for (const row of rows) {
-      const rowValues: Record<string, ExcelJS.CellValue> = {};
-      for (const f of meta.fields) {
-        rowValues[f.name] = cellFromValue(row[f.name], f);
-      }
-      sheet.addRow(rowValues);
-    }
-  }
-
-  const metaSheet = workbook.addWorksheet("_MetaInfo", { properties: {} });
+  const metaSheet = workbook.addWorksheet("_MetaInfo");
   metaSheet.columns = [
     { header: "Key", key: "k", width: 24 },
     { header: "Value", key: "v", width: 60 },
   ];
   metaSheet.getRow(1).font = { bold: true };
-  metaSheet.addRow({ k: "Aplikasi", v: "NPI Website App -- Import & Export Data (Advance)" });
-  metaSheet.addRow({ k: "Diexport pada", v: new Date().toISOString() });
-  metaSheet.addRow({ k: "Diexport oleh", v: exportedByName });
-  metaSheet.addRow({ k: "Kategori", v: categories.map((c) => CATEGORY_LABELS[c]).join(", ") });
-  metaSheet.addRow({ k: "", v: "" });
-  metaSheet.addRow({ k: "Tabel", v: "Jumlah Baris" });
-  for (const tc of tableCounts) metaSheet.addRow({ k: tc.model, v: tc.rows });
-  // Pindahkan _MetaInfo jadi sheet PALING PERTAMA supaya langsung terlihat saat file dibuka.
-  workbook.worksheets.unshift(workbook.worksheets.pop()!);
+  metaSheet.addRow({ k: "Aplikasi", v: "NPI Website App -- Import & Export Data (Advance)" }).commit();
+  metaSheet.addRow({ k: "Diexport pada", v: new Date().toISOString() }).commit();
+  metaSheet.addRow({ k: "Diexport oleh", v: exportedByName }).commit();
+  metaSheet.addRow({ k: "Kategori", v: categories.map((c) => CATEGORY_LABELS[c]).join(", ") }).commit();
+  metaSheet.addRow({ k: "", v: "" }).commit();
+  metaSheet.addRow({ k: "Tabel", v: "Jumlah Baris" }).commit();
+  for (const tc of tableCounts) metaSheet.addRow({ k: tc.model, v: tc.rows }).commit();
+  metaSheet.commit();
 
-  return { workbook, tableCounts };
+  for (const def of tables) {
+    const meta = getModelMeta(def.model);
+    const idField = meta.fields.find((f) => f.isId)!;
+    const sheet = workbook.addWorksheet(def.model.slice(0, 31));
+    sheet.columns = meta.fields.map((f) => ({ header: f.name, key: f.name, width: 20 }));
+    sheet.getRow(1).font = { bold: true };
+
+    let cursor: unknown = undefined;
+    for (;;) {
+      const page: Record<string, unknown>[] = await delegate(def.model).findMany({
+        take: EXPORT_PAGE_SIZE,
+        orderBy: { [idField.name]: "asc" },
+        ...(cursor !== undefined ? { cursor: { [idField.name]: cursor }, skip: 1 } : {}),
+      });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const rowValues: Record<string, ExcelJS.CellValue> = {};
+        for (const f of meta.fields) rowValues[f.name] = cellFromValue(row[f.name], f);
+        sheet.addRow(rowValues).commit();
+      }
+      cursor = page[page.length - 1][idField.name];
+      if (page.length < EXPORT_PAGE_SIZE) break;
+    }
+    sheet.commit();
+  }
+
+  await workbook.commit();
+  return { tableCounts };
 }
 
 // ---------------------------------------------------------------------------
@@ -272,12 +296,39 @@ export interface ParsedSheet {
 
 const REQUIRED_META_SHEET = "_MetaInfo";
 
+/** Batas ukuran file utk IMPORT (BEDA dari batas upload umum di env.maxImportMb)
+ * -- DITEMUKAN via SIT (2026-09-09): ExcelJS.stream.xlsx.WorkbookReader
+ * (streaming) TERNYATA punya bug internal ("Cannot read properties of
+ * undefined (reading 'sheets')", lihat exceljs lib/stream/xlsx/workbook-reader.js)
+ * saat membaca file yang ditulis oleh writer LAIN drpd streaming writer-nya
+ * sendiri -- termasuk kemungkinan file yang diedit ulang & disimpan oleh
+ * Microsoft Excel asli (skenario UTAMA fitur ini: "export, edit manual,
+ * import balik"). Jadi baca file TETAP pakai `workbook.xlsx.load()` biasa
+ * (kompatibel dgn writer/aplikasi Excel apa pun) TAPI DIBATASI ukurannya --
+ * `.load()` sendiri crash ("Invalid string length" dari JSZip) pada file
+ * >~50-80MB (Export kategori Master Data penuh, ~650rb baris, terbukti
+ * crash). Kalau perlu resync SELURUH Master Data (bukan hasil edit), pakai
+ * Import CSV/Excel per-tabel yang sudah ada (menu Master Data), BUKAN fitur
+ * ini -- fitur ini utk data yang diedit/dipilih manual, bukan bulk resync. */
+const MAX_IMPORT_FILE_BYTES = 30 * 1024 * 1024; // 30 MB
+
 export async function parseImportWorkbook(buffer: Buffer): Promise<ParsedSheet[]> {
+  if (buffer.length > MAX_IMPORT_FILE_BYTES) {
+    throw new HttpError(
+      400,
+      `File terlalu besar untuk Import Data (Advance) (${(buffer.length / 1024 / 1024).toFixed(1)} MB, maks ${MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB). ` +
+        `Ini biasanya terjadi kalau kategori "Master Data" di-export & mau di-import ulang UTUH (didominasi ratusan ribu baris Referensi Order/PO) -- ` +
+        `fitur ini ditujukan utk data yang sudah diedit/dipilih manual, bukan resync massal. Untuk resync massal Referensi Order/PO, ` +
+        `pakai menu Master Data > Import CSV/Excel yang memang dibuat utk volume besar.`
+    );
+  }
+
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
 
   if (!workbook.getWorksheet(REQUIRED_META_SHEET)) {
-    throw new Error(
+    throw new HttpError(
+      400,
       'File tidak dikenali sebagai hasil Export Data (Advance) -- sheet "_MetaInfo" tidak ditemukan. Gunakan file hasil Export dari menu ini.'
     );
   }

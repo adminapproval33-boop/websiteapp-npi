@@ -62,6 +62,12 @@ export function backupDownloadUrl(fileName: string): string {
   return `${API_BASE}/backup/download/${encodeURIComponent(fileName)}?token=${encodeURIComponent(session?.token ?? "")}`;
 }
 
+/** URL untuk link <a href> Export Data (Advance) -- kategori dipisah koma, token lewat query string sama pola dgn backupDownloadUrl(). */
+export function advancedExportUrl(categories: string[]): string {
+  const session = loadSession();
+  return `${API_BASE}/backup/advanced/export?categories=${encodeURIComponent(categories.join(","))}&token=${encodeURIComponent(session?.token ?? "")}`;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {

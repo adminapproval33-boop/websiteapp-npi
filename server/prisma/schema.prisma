@@ -982,6 +982,13 @@ enum BackupAction {
   RESTORE
   DELETE
   CLEANUP
+  /// Export Excel selektif per-kategori (Master/Transaksi/QC & Approval/Sosial),
+  /// lihat modules/backup/advancedDataService.ts -- 2026-09-09, instruksi
+  /// eksplisit user: "fitur import & export advance yang mengandung semua data".
+  EXPORT_ADVANCED
+  /// Import Excel selektif -- upsert per baris ke tabel terkait. SELALU didahului
+  /// snapshot pg_dump otomatis (sama pola dgn RESTORE) sebelum baris pertama ditulis.
+  IMPORT_ADVANCED
 }
 
 /// Riwayat/audit trail Sistem Backup (2026-09-08, instruksi eksplisit user:

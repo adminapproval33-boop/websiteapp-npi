@@ -39,14 +39,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Poll /auth/me selagi login -- ini yg bikin sesi ini otomatis ke-logout
   // begitu diakhiri paksa dari perangkat lain, tanpa nunggu user klik apa pun
   // di sini dulu (lihat SESSION_POLL_MS di atas).
+  //
+  // PENTING: hanya logout kalau server EKSPLISIT bilang 401 (sesi memang
+  // sudah tidak valid). Error lain (mis. 502 dari proxy, network timeout
+  // sesaat) BUKAN berarti sesi invalid -- itu cuma gangguan sementara, jadi
+  // diabaikan saja & akan dicoba lagi di polling berikutnya. Sebelum ini,
+  // 502 sesaat langsung menghapus sesi & melempar ke /login walau sesi di
+  // server masih valid (2026-09-09, bug dilaporkan user setelah migrasi ke
+  // mes.nipseapaint.com:8090).
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(() => {
       api.get<{ success: boolean }>("/auth/me").catch((err) => {
         if (!userRef.current) return;
-        clearSession();
-        setUser(null);
-        setForcedLogoutMessage(err instanceof ApiError ? err.message : "Sesi Anda telah berakhir. Silakan login ulang.");
+        if (err instanceof ApiError && err.status === 401) {
+          clearSession();
+          setUser(null);
+          setForcedLogoutMessage(err.message);
+        }
       });
     }, SESSION_POLL_MS);
     return () => clearInterval(interval);
@@ -63,9 +73,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((res) => {
         setUser({ ...stored, ...res });
       })
-      .catch(() => {
-        clearSession();
-        setUser(null);
+      .catch((err) => {
+        // Sama seperti polling di atas: hanya hapus sesi kalau 401 eksplisit.
+        // Error lain (mis. 502 saat refresh) -- percayai dulu sesi yang
+        // tersimpan supaya user tidak ke-logout paksa gara-gara gangguan
+        // sesaat; validasi ulang lewat polling /auth/me berikutnya.
+        if (err instanceof ApiError && err.status === 401) {
+          clearSession();
+          setUser(null);
+        } else {
+          setUser(stored);
+        }
       })
       .finally(() => setLoading(false));
   }, []);

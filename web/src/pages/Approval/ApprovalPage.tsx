@@ -483,6 +483,13 @@ export default function ApprovalPage({
   const [filterValue, setFilterValue] = useState(() => searchParams.get("editOrder") ?? "");
   const [attachmentModalId, setAttachmentModalId] = useState<string | null>(() => searchParams.get("attachmentApprovalId"));
   const [viewingApproval, setViewingApproval] = useState<ApprovalRow | null>(null);
+  /** Tombol Edit di tab Lot History (2026-09-11, instruksi eksplisit user) --
+   * buka pop-up modal (SAMA gayanya dgn Dashboard Approval), BUKAN ganti tab
+   * ke "Input" spt sebelumnya, supaya user tetap di tab History saat modal
+   * ditutup. Modal-nya me-render ApprovalPage INI SENDIRI dlm mode
+   * embedded+editRecord (reuse form yg sama, tanpa duplikasi/lookup ulang) --
+   * SAMA PERSIS trik yg dipakai OpenApprovalWorklist.tsx (Dashboard). */
+  const [modalEditRow, setModalEditRow] = useState<ApprovalRow | null>(null);
   /** Lagi fetch fresh riwayat Trial/Improve utk hitung nomor berikutnya
    * (2026-09-02) -- lihat komentar panjang di tombol "Improve". Dipakai
    * cuma utk `disabled` tombol itu sendiri, cegah double-klik nyelip di
@@ -1786,7 +1793,7 @@ export default function ApprovalPage({
                   label: "Aksi",
                   render: (r) => (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => startEdit(r)}>
+                      <button className="btn btn-outline" type="button" title="Edit" aria-label="Edit" style={{ padding: "6px 10px" }} onClick={() => setModalEditRow(r)}>
                         ✏️
                       </button>
                       <button
@@ -1920,6 +1927,29 @@ export default function ApprovalPage({
       {viewingApproval && (
         <Modal title={`Detail Baris — Order ${viewingApproval.order}`} onClose={() => setViewingApproval(null)} width={640}>
           <MultipleCustViewDetail row={viewingApproval} employees={employees} />
+        </Modal>
+      )}
+
+      {/* Tombol Edit di tab Lot History (2026-09-11, instruksi eksplisit user)
+          -- lihat komentar deklarasi `modalEditRow`. `!embedded` mencegah
+          pop-up bersarang tak berujung saat komponen ini sendiri sedang
+          dirender dlm mode embedded (mis. dari sini sendiri, atau dari
+          Dashboard Approval). */}
+      {!embedded && modalEditRow && (
+        <Modal
+          title={`Edit Approval — Order ${modalEditRow.order}`}
+          onClose={() => setModalEditRow(null)}
+          width={980}
+          closeOnBackdropClick={false}
+        >
+          <ApprovalPage
+            embedded
+            editRecord={modalEditRow}
+            onSaved={() => {
+              setModalEditRow(null);
+              queryClient.invalidateQueries({ queryKey: ["approval-lot-history"] });
+            }}
+          />
         </Modal>
       )}
     </div>

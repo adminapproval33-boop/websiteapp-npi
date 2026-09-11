@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import Modal from "../../components/Modal";
+import CheckResultsPage from "../CheckResults/CheckResultsPage";
+import AdminQcPage from "../AdminQc/AdminQcPage";
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec } from "../../lib/specEval";
+import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 import QcTrendChart, { QcTrendPoint } from "./QcTrendChart";
 import TrendLineChart, { TrendChartPoint, TrendSeries } from "../ProduktivitasDashboard/TrendLineChart";
+
+/** Pilihan "mau input/hapus dari menu mana?" utk pop-up Edit & Hapus di
+ * Dashboard Quality Check Review (2026-09-11, instruksi eksplisit user) --
+ * BEDA dari dashboard lain (Colour Matching/Approval): 1 Order di sini bisa
+ * py ENTRI TERPISAH di 2 modul berbeda (Check Results DAN Admin QC, lihat
+ * komentar `QualityReviewRow` -- baris ini agregat, bukan 1 record mentah),
+ * jadi user harus pilih dulu mau edit/hapus yang mana. */
+type QcModuleTarget = "checkResults" | "adminQc";
 
 type OrderQcStatus = "OK" | "On Check" | "Improve" | "Approval" | "Assorted (NG)";
 
@@ -297,6 +310,50 @@ export default function QualityCheckReviewPage() {
   // batas.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Pop-up Edit (2026-09-11, instruksi eksplisit user) -- `editOrder` dulu
+  // diisi begitu tombol Edit diklik (buka layar pilihan), `editTarget` diisi
+  // setelah user pilih Check Results/Admin QC (baru form-nya muncul). Reset
+  // keduanya bareng saat modal ditutup.
+  const [editOrder, setEditOrder] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<QcModuleTarget | null>(null);
+  // Pop-up Hapus (2026-09-11, instruksi eksplisit user) -- `deleteOrder` diisi
+  // begitu tombol Hapus diklik (buka layar pilihan Check Results/Admin QC).
+  // Beda dari Edit: tidak ada langkah form, langsung lookup ID lewat by-order
+  // lalu DELETE begitu salah satu opsi diklik & dikonfirmasi.
+  const [deleteOrder, setDeleteOrder] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const { user } = useAuth();
+  const canDeleteCheckResults = getMenuLevel(user, "checkResults") === "INPUT";
+  const canDeleteAdminQc = getMenuLevel(user, "adminQc") === "INPUT";
+  const queryClient = useQueryClient();
+
+  const deleteCheckResultsMutation = useMutation({
+    mutationFn: async (order: string) => {
+      const res = await api.get<{ success: boolean; data: { checkId: string } | null }>(`/check-results/by-order/${encodeURIComponent(order)}`);
+      if (!res.data) throw new Error(`Order ${order} belum punya data Check Results.`);
+      await api.delete(`/check-results/${res.data.checkId}`);
+    },
+    onSuccess: () => {
+      setDeleteError("");
+      setDeleteOrder(null);
+      queryClient.invalidateQueries({ queryKey: ["quality-check-review"] });
+    },
+    onError: (err) => setDeleteError(err instanceof ApiError || err instanceof Error ? err.message : "Gagal menghapus data."),
+  });
+
+  const deleteAdminQcMutation = useMutation({
+    mutationFn: async (order: string) => {
+      const res = await api.get<{ success: boolean; data: { adminQcId: string } | null }>(`/admin-qc/latest-by-order/${encodeURIComponent(order)}`);
+      if (!res.data) throw new Error(`Order ${order} belum punya data Admin QC.`);
+      await api.delete(`/admin-qc/${res.data.adminQcId}`);
+    },
+    onSuccess: () => {
+      setDeleteError("");
+      setDeleteOrder(null);
+      queryClient.invalidateQueries({ queryKey: ["quality-check-review"] });
+    },
+    onError: (err) => setDeleteError(err instanceof ApiError || err instanceof Error ? err.message : "Gagal menghapus data."),
+  });
 
   const query = useQuery({
     queryKey: ["quality-check-review"],
@@ -783,6 +840,43 @@ export default function QualityCheckReviewPage() {
                 csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
               },
               { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
+              {
+                key: "actions",
+                label: "Aksi",
+                render: (r) => (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      title="Edit"
+                      aria-label="Edit"
+                      style={{ padding: "6px 10px" }}
+                      onClick={() => {
+                        setEditOrder(r.order);
+                        setEditTarget(null);
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    {(canDeleteCheckResults || canDeleteAdminQc) && (
+                      <button
+                        className="btn btn-danger"
+                        type="button"
+                        title="Hapus"
+                        aria-label="Hapus"
+                        style={{ padding: "6px 10px" }}
+                        onClick={() => {
+                          setDeleteError("");
+                          setDeleteOrder(r.order);
+                        }}
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
+                ),
+                csvValue: () => "",
+              },
             ]}
             />
           </div>
@@ -1024,6 +1118,92 @@ export default function QualityCheckReviewPage() {
             )}
           </div>
         </div>
+      )}
+
+      {editOrder && (
+        <Modal
+          title={editTarget ? `Edit ${editTarget === "checkResults" ? "Check Results" : "Admin QC"} — Order ${editOrder}` : `Edit — Order ${editOrder}`}
+          onClose={() => {
+            setEditOrder(null);
+            setEditTarget(null);
+          }}
+          onBack={editTarget ? () => setEditTarget(null) : undefined}
+          width={980}
+          closeOnBackdropClick={false}
+        >
+          {!editTarget ? (
+            // Beda dari Dashboard Colour Matching/Approval (2026-09-11, instruksi
+            // eksplisit user): 1 Order di sini bisa py entri TERPISAH di 2 modul
+            // (Check Results & Admin QC), jadi tanya dulu mau edit yang mana
+            // sebelum form-nya muncul.
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ margin: 0, color: "var(--text-muted)" }}>Mau input/edit lewat menu yang mana untuk Order {editOrder}?</p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button className="btn" type="button" onClick={() => setEditTarget("checkResults")}>
+                  Input Check Results
+                </button>
+                <button className="btn" type="button" onClick={() => setEditTarget("adminQc")}>
+                  Input Admin QC
+                </button>
+              </div>
+            </div>
+          ) : editTarget === "checkResults" ? (
+            <CheckResultsPage
+              embedded
+              initialOrder={editOrder}
+              onSaved={() => {
+                setEditOrder(null);
+                setEditTarget(null);
+                queryClient.invalidateQueries({ queryKey: ["quality-check-review"] });
+              }}
+            />
+          ) : (
+            <AdminQcPage
+              embedded
+              initialOrder={editOrder}
+              onSaved={() => {
+                setEditOrder(null);
+                setEditTarget(null);
+                queryClient.invalidateQueries({ queryKey: ["quality-check-review"] });
+              }}
+            />
+          )}
+        </Modal>
+      )}
+
+      {deleteOrder && (
+        <Modal title={`Hapus — Order ${deleteOrder}`} onClose={() => setDeleteOrder(null)} closeOnBackdropClick={false}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p style={{ margin: 0, color: "var(--text-muted)" }}>Hapus data yang mana untuk Order {deleteOrder}?</p>
+            {deleteError && <p className="error-text">{deleteError}</p>}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {canDeleteCheckResults && (
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  disabled={deleteCheckResultsMutation.isPending}
+                  onClick={() => {
+                    if (confirm(`Hapus Check Results untuk Order ${deleteOrder}?`)) deleteCheckResultsMutation.mutate(deleteOrder);
+                  }}
+                >
+                  Hapus Check Results
+                </button>
+              )}
+              {canDeleteAdminQc && (
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  disabled={deleteAdminQcMutation.isPending}
+                  onClick={() => {
+                    if (confirm(`Hapus Admin QC untuk Order ${deleteOrder}?`)) deleteAdminQcMutation.mutate(deleteOrder);
+                  }}
+                >
+                  Hapus Admin QC
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

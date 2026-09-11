@@ -2634,3 +2634,179 @@ dashboardRouter.get(
     res.json({ success: true, data: { period, from, to, granularity, buckets } });
   })
 );
+
+// ---------------------------------------------------------------------------
+// Dashboard > Colour Matching: 2 tab (2026-09-11, instruksi eksplisit user) --
+// "Dashboard Colour Matching" = agregasi per-member (Total Output/Jumlah
+// Order, urut output tertinggi), "Colour Matching Review" = KPI Total
+// Order/Oke/Wait Colour Matching + tabel histori transaksi (SAMA PERSIS
+// kolomnya dgn "History Colour Matching" di ColourMatchingPage.tsx, tanpa
+// kolom Aksi krn dashboard ini read-only). Keduanya pakai filter (tanggal/
+// SPV/Leader/Types of Products/Base Color) & dataset `rows` yang SAMA.
+interface ColourMatchingMemberEntry {
+  name: string;
+  nik: string | null;
+}
+
+/** `members` Json bisa 2 bentuk: array string polos (baris lama sebelum NIK
+ * eksplisit ditambah) ATAU array {name, nik} (lihat sanitizeMembers di
+ * lib/employeeNik.ts) -- dukung dua-duanya supaya histori lama tidak hilang
+ * dari perhitungan. */
+function parseColourMatchingMembers(raw: unknown): ColourMatchingMemberEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ColourMatchingMemberEntry[] = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      const name = item.trim();
+      if (name) out.push({ name, nik: null });
+    } else if (item && typeof item === "object") {
+      const name = String((item as { name?: unknown }).name ?? "").trim();
+      const nikRaw = (item as { nik?: unknown }).nik;
+      const nik = typeof nikRaw === "string" && nikRaw.trim() ? nikRaw.trim() : null;
+      if (name) out.push({ name, nik });
+    }
+  }
+  return out;
+}
+
+dashboardRouter.get(
+  "/colour-matching",
+  asyncRoute(async (req, res) => {
+    const fromStr = req.query.from ? String(req.query.from) : "";
+    const toStr = req.query.to ? String(req.query.to) : "";
+    const fromInstant = fromStr ? wibDayStartInstant(fromStr) : null;
+    const toInstant = toStr ? wibDayEndInstant(toStr) : null;
+
+    const allRows = await prisma.colourMatchingLog.findMany({
+      where: {
+        ...(fromInstant || toInstant
+          ? { timestamp: { ...(fromInstant ? { gte: fromInstant } : {}), ...(toInstant ? { lte: toInstant } : {}) } }
+          : {}),
+      },
+      orderBy: { timestamp: "desc" },
+      select: {
+        id: true,
+        timestamp: true,
+        order: true,
+        materialNumber: true,
+        materialDescription: true,
+        batch: true,
+        orderQty: true,
+        plant: true,
+        iuPlant: true,
+        codeTanki: true,
+        typesOfProducts: true,
+        baseColor: true,
+        formPerMan: true,
+        formReceived: true,
+        start: true,
+        finish: true,
+        spvName: true,
+        spvNik: true,
+        spvColourMatching: true,
+        spvColourMatchingNik: true,
+        leaderName: true,
+        leaderNik: true,
+        members: true,
+        remark: true,
+        inputBy: true,
+        _count: { select: { attachments: true } },
+      },
+    });
+
+    // Opsi dropdown filter (2026-09-11, instruksi eksplisit user) -- SELALU
+    // dari `allRows` (cuma discope oleh Dari/Sampai Tanggal), BUKAN dari hasil
+    // yang sudah difilter spv/leader/dkk -- supaya user bisa lihat & ganti ke
+    // kombinasi filter lain tanpa opsi di dropdown ikut menghilang.
+    const sortedUnique = (values: (string | null | undefined)[]) =>
+      Array.from(new Set(values.map((v) => (v ?? "").trim()).filter(Boolean))).sort();
+    const filterOptions = {
+      spvOptions: sortedUnique(allRows.map((r) => r.spvColourMatching)),
+      leaderOptions: sortedUnique(allRows.map((r) => r.leaderName)),
+      typesOfProductsOptions: sortedUnique(allRows.map((r) => r.typesOfProducts)),
+      baseColorOptions: sortedUnique(allRows.map((r) => r.baseColor)),
+    };
+
+    const spvFilter = req.query.spv ? String(req.query.spv).trim() : "";
+    const leaderFilter = req.query.leader ? String(req.query.leader).trim() : "";
+    const typesOfProductsFilter = req.query.typesOfProducts ? String(req.query.typesOfProducts).trim() : "";
+    const baseColorFilter = req.query.baseColor ? String(req.query.baseColor).trim() : "";
+    const rows = allRows.filter(
+      (r) =>
+        (!spvFilter || (r.spvColourMatching ?? "").trim() === spvFilter) &&
+        (!leaderFilter || (r.leaderName ?? "").trim() === leaderFilter) &&
+        (!typesOfProductsFilter || (r.typesOfProducts ?? "").trim() === typesOfProductsFilter) &&
+        (!baseColorFilter || (r.baseColor ?? "").trim() === baseColorFilter)
+    );
+
+    // "Total Order" / "Oke Colour Matching" / "Wait Colour Matching" (2026-09-11,
+    // instruksi eksplisit user, menggantikan kartu Jumlah SPV/Leader/Member +
+    // Total & Rata-rata Output) -- 1 Order dianggap "Oke" kalau ADA saja baris
+    // Colour Matching-nya yang Finish-nya sudah terisi (SAMA definisi dgn
+    // "Colour Matching - DN" di `colourMatchingProcessLabel` atas), sisanya
+    // "Wait" (form belum jalan / masih diproses).
+    const orderFinishedMap = new Map<string, boolean>();
+    for (const row of rows) {
+      orderFinishedMap.set(row.order, (orderFinishedMap.get(row.order) ?? false) || !!row.finish);
+    }
+    const totalOrderCount = orderFinishedMap.size;
+    let okeCount = 0;
+    for (const finished of orderFinishedMap.values()) if (finished) okeCount++;
+    const waitCount = totalOrderCount - okeCount;
+
+    // Tab "Dashboard Colour Matching" -- agregasi per-member (2026-09-11,
+    // instruksi eksplisit user: nama member, total output/"pendapatan", &
+    // jumlah Order yang pernah diproses, urut dari output TERBESAR). "Total
+    // Output (KG/Ltr)" = Order Qty dibagi rata ke semua member yg
+    // mengerjakan tiap baris, lalu dijumlah per orang (sama pola dgn Qty/Man
+    // di Premix/Aftermix).
+    interface MemberAgg {
+      name: string;
+      nik: string | null;
+      orders: Set<string>;
+      totalOutputKgLtr: number;
+    }
+    const memberMap = new Map<string, MemberAgg>();
+    for (const row of rows) {
+      const members = parseColourMatchingMembers(row.members);
+      if (members.length === 0) continue;
+      const qty = parseQtyNumber(row.orderQty);
+      const perMemberQty = qty / members.length;
+      for (const m of members) {
+        const key = m.nik ? `nik:${m.nik}` : `name:${m.name.toLowerCase()}`;
+        let agg = memberMap.get(key);
+        if (!agg) {
+          agg = { name: m.name, nik: m.nik, orders: new Set(), totalOutputKgLtr: 0 };
+          memberMap.set(key, agg);
+        }
+        agg.orders.add(row.order);
+        agg.totalOutputKgLtr += perMemberQty;
+      }
+    }
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const members = Array.from(memberMap.values())
+      .map((agg) => ({
+        name: agg.name,
+        nik: agg.nik,
+        orderCount: agg.orders.size,
+        totalOutputKgLtr: round2(agg.totalOutputKgLtr),
+      }))
+      .sort((a, b) => b.totalOutputKgLtr - a.totalOutputKgLtr);
+
+    res.json({
+      success: true,
+      data: {
+        from: fromStr || null,
+        to: toStr || null,
+        filterOptions,
+        summary: {
+          totalOrderCount,
+          okeCount,
+          waitCount,
+        },
+        members,
+        historyRows: rows,
+      },
+    });
+  })
+);

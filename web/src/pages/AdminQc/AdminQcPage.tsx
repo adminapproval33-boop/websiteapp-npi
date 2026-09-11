@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, fileUrl } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
@@ -173,7 +173,25 @@ function ResizableHeader({ width, onResizeStart, children }: { width: number; on
   );
 }
 
-export default function AdminQcPage() {
+export default function AdminQcPage({
+  embedded = false,
+  initialOrder,
+  onSaved,
+}: {
+  /** Mode ringkas dipakai pop-up "Edit" di Dashboard Quality Check Review
+   * (2026-09-11, instruksi eksplisit user) -- cuma nampilin form Input, sama
+   * pola dgn embedded di ColourMatchingPage.tsx/ApprovalPage.tsx/
+   * CheckResultsPage.tsx. */
+  embedded?: boolean;
+  /** Order yg mau di-edit/diinput -- `handleOrderFound` di bawah SUDAH otomatis
+   * deteksi kalau Order ini ternyata sudah py entri Admin QC (lewat
+   * /admin-qc/latest-by-order) dan masuk mode Edit, jadi TIDAK perlu prop
+   * terpisah utk "load record yg sudah ada" spt `editRecord` di halaman lain --
+   * Dashboard QC Review cuma py data agregat per-Order (bukan baris mentah
+   * AdminQcHistoryRow), jadi Order-based lookup ini justru yg paling pas. */
+  initialOrder?: string;
+  onSaved?: () => void;
+} = {}) {
   const { data: employees } = useEmployeeOptions();
   const { data: tanks } = useTankOptions();
   const { user } = useAuth();
@@ -233,6 +251,10 @@ export default function AdminQcPage() {
   const historyQuery = useQuery({
     queryKey: ["admin-qc-history"],
     queryFn: () => api.get<{ success: boolean; data: AdminQcHistoryRow[] }>("/admin-qc/history").then((r) => r.data),
+    // Mode "embedded" (pop-up Edit dari Dashboard Quality Check Review,
+    // 2026-09-11) cuma nampilin form Input -- lihat komentar sama di
+    // PremixAftermixPage.tsx/ColourMatchingPage.tsx.
+    enabled: !embedded,
   });
 
   const attachmentsQuery = useQuery({
@@ -362,6 +384,35 @@ export default function AdminQcPage() {
     setRemarkBaseline("");
   }
 
+  // Mode pop-up "Edit" dari Dashboard Quality Check Review (embedded+
+  // initialOrder, 2026-09-11, instruksi eksplisit user) -- pakai
+  // `handleOrderFound` yg SAMA PERSIS dgn ketik manual di OrderLookup,
+  // termasuk auto-deteksi via /admin-qc/latest-by-order kalau Order ini
+  // ternyata sudah py entri (otomatis masuk mode Edit, bukan bikin baris
+  // baru) -- sama pola dgn embedded+initialOrder di ColourMatchingPage.tsx/
+  // ApprovalPage.tsx/CheckResultsPage.tsx.
+  useEffect(() => {
+    if (!embedded || !initialOrder) return;
+    setForm((f) => ({ ...f, order: initialOrder }));
+    api
+      .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)
+      .then((res) => handleOrderFound(res.data))
+      .catch(() =>
+        handleOrderFound({
+          order: initialOrder,
+          batch: null,
+          materialNumber: null,
+          materialDescription: null,
+          orderQty: null,
+          plant: null,
+          jenis: null,
+          warnaDasar: null,
+          volume: null,
+        })
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, initialOrder]);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       // Spec Parameters (params) TETAP view-only di halaman ini -- Admin QC
@@ -411,6 +462,7 @@ export default function AdminQcPage() {
       } else {
         setMessage((wasEditing ? "Data Admin QC berhasil diperbarui." : "Data Admin QC berhasil disimpan.") + res.syncWarning);
       }
+      onSaved?.();
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan data."),
   });
@@ -537,18 +589,20 @@ export default function AdminQcPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        {!isViewOnly && (
-          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-            Input Admin QC
+      {!embedded && (
+        <div style={{ display: "flex", gap: 8 }}>
+          {!isViewOnly && (
+            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+              Input Admin QC
+            </button>
+          )}
+          <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
+            History
           </button>
-        )}
-        <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
-          History
-        </button>
-      </div>
+        </div>
+      )}
 
-      {tab === "input" && (
+      {(embedded || tab === "input") && (
         <form className="panel" onSubmit={handleSubmit}>
           <div className="panel-body">
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>

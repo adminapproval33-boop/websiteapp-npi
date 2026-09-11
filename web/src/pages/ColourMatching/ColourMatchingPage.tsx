@@ -106,6 +106,38 @@ interface HistoryRow {
   attachments: { id: number; fileName: string; filePath: string }[];
 }
 
+/** Subset field yg dibutuhkan `startEdit` (2026-09-11, instruksi eksplisit
+ * user: tombol Edit di Dashboard Colour Matching) -- dipisah dari `HistoryRow`
+ * supaya pemanggil dari luar (Dashboard) tidak wajib punya field `attachments`
+ * (bentuknya beda -- Dashboard cuma select `_count.attachments`, bukan array
+ * lengkap) buat bisa masuk mode Edit. */
+export type ColourMatchingEditRecord = Pick<
+  HistoryRow,
+  | "id"
+  | "order"
+  | "materialNumber"
+  | "materialDescription"
+  | "batch"
+  | "orderQty"
+  | "plant"
+  | "iuPlant"
+  | "codeTanki"
+  | "typesOfProducts"
+  | "baseColor"
+  | "formPerMan"
+  | "formReceived"
+  | "start"
+  | "finish"
+  | "spvName"
+  | "spvNik"
+  | "spvColourMatching"
+  | "spvColourMatchingNik"
+  | "leaderName"
+  | "leaderNik"
+  | "members"
+  | "remark"
+>;
+
 const emptyForm = {
   order: "",
   materialNumber: "",
@@ -134,6 +166,7 @@ const emptyForm = {
 export default function ColourMatchingPage({
   embedded = false,
   initialOrder,
+  editRecord,
   onSaved,
 }: {
   /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
@@ -141,6 +174,16 @@ export default function ColourMatchingPage({
    * di PremixAftermixPage.tsx. */
   embedded?: boolean;
   initialOrder?: string;
+  /** Alternatif dari `initialOrder` (2026-09-11, instruksi eksplisit user:
+   * tombol Edit di Dashboard Colour Matching) -- langsung masuk mode Edit
+   * dari DATA YANG SUDAH ADA di tangan pemanggil (lewat `startEdit`, SAMA
+   * PERSIS dgn tombol Edit di tab History), TANPA lookup ulang ke Master Data
+   * Order. Dipakai saat pemanggil sudah py record lengkapnya (mis. baris
+   * tabel History Colour Matching di Dashboard) -- beda dgn `initialOrder`
+   * yg didesain utk Order BARU dari alur "Tahap Selanjutnya"/PWO Queue (situ
+   * lookup dari Master Data Order krn body pemanggil cuma py nomor Order).
+   * Kalau keduanya diisi bareng, `editRecord` yang menang. */
+  editRecord?: ColourMatchingEditRecord;
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
@@ -303,12 +346,24 @@ export default function ColourMatchingPage({
     }
   }
 
+  // Mode pop-up "Edit" dari Dashboard Colour Matching (embedded+editRecord,
+  // 2026-09-11, instruksi eksplisit user) -- pakai `startEdit` yg SAMA PERSIS
+  // dgn tombol Edit di tab History, dari data yg SUDAH ADA di tangan
+  // pemanggil (bukan lookup ulang ke Master Data Order spt initialOrder di
+  // bawah) -- supaya Order LAMA yg sudah hilang dari Master Data Order tetap
+  // bisa diedit dgn benar (editingId ke-set, bukan malah bikin baris baru).
+  useEffect(() => {
+    if (!embedded || !editRecord) return;
+    startEdit(editRecord);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, editRecord]);
+
   // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
   // sama di PremixAftermixPage.tsx. Cleanup placeholder "-" di jenis/warnaDasar
   // direplikasi manual di sini (biasanya dilakukan OrderLookup sendiri),
   // krn panggilan API-nya langsung, tidak lewat komponen OrderLookup.
   useEffect(() => {
-    if (!embedded || !initialOrder) return;
+    if (!embedded || editRecord || !initialOrder) return;
     setForm((f) => ({ ...f, order: initialOrder }));
     const cleanPlaceholder = (v: string | null) => {
       const trimmed = (v ?? "").trim();
@@ -365,7 +420,7 @@ export default function ColourMatchingPage({
     });
   }
 
-  function startEdit(row: HistoryRow) {
+  function startEdit(row: ColourMatchingEditRecord) {
     setEditingId(row.id);
     setForm({
       order: row.order,

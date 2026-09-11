@@ -7,7 +7,8 @@ import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeName
 import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
 import { useAuth } from "../../auth/AuthContext";
 import { getMenuLevel } from "../../lib/menuAccess";
-import type { LotHistoryRow } from "../Approval/ApprovalPage";
+import Modal from "../../components/Modal";
+import ApprovalPage, { LotHistoryRow } from "../Approval/ApprovalPage";
 
 type StatusVerdict = "Prepare Approval" | "Wait Approval" | "Approval" | "Oke Approval";
 
@@ -27,10 +28,12 @@ interface WorklistItem {
   ready: boolean;
   status: StatusVerdict;
   needsImprove: boolean;
-  /** Tanggal "Prepare Date" (yyyy-mm-dd) -- dasar filter range waktu (2026-09-03,
-   * instruksi eksplisit user). Fallback ke `timestamp` kalau Prepare Date kosong,
-   * SAMA PERSIS dgn `start` yg dipakai hitung `days`/bucket, supaya konsisten. */
-  prepareDate: string;
+  /** Tanggal "Submit Cust" (yyyy-mm-dd) -- dasar filter range waktu (2026-09-11,
+   * instruksi eksplisit user: Lama Proses dihitung dari Submit Cust, bukan lagi
+   * Prepare Date). Fallback ke `timestamp` kalau Submit Cust kosong (belum masuk
+   * tier2/belum di-submit ke customer), SAMA PERSIS dgn `start` yg dipakai hitung
+   * `days`/bucket, supaya konsisten. */
+  submitCustDate: string;
 }
 
 // Filter kartu KPI utama (2026-09-03, instruksi eksplisit user) -- "Improve"
@@ -95,20 +98,25 @@ const VIEW_LABEL: Record<ViewMode, string> = { tech: "Tech PIC", sales: "Sales P
  * formatnya disamakan dgn tabel "Approval — Lot History" di
  * /planning/approval) -- HARUS SELALU disamakan dgn array `columns` di dalam
  * `tab === "history"` punya ApprovalPage.tsx (kolom data, urutan, & render
- * masing2 kolom harus identik), KECUALI kolom Aksi: di sini SENGAJA tidak
- * membuka form Edit lokal (form itu besar & rawan divergen dari
- * ApprovalPage.tsx) -- Edit/Lampiran cuma `navigate()` ke
- * /planning/approval bawa approvalId/order lewat query string (lihat
- * `useEffect` deep-link di ApprovalPage.tsx), Hapus tetap panggil endpoint
- * DELETE /approvals/:id langsung krn tidak ada logika bisnis yg perlu
- * disinkronkan. */
+ * masing2 kolom harus identik), KECUALI kolom Aksi: Edit di sini membuka
+ * pop-up modal yg me-reuse form Input Approval yg SAMA PERSIS dgn
+ * ApprovalPage.tsx lewat prop `embedded`+`editRecord`
+ * (2026-09-11, instruksi eksplisit user: dulu `navigate()` ke
+ * /planning/approval, sekarang tanpa pindah halaman -- lihat state `editRow`
+ * & <Modal> di komponen utama di bawah) TANPA menduplikasi form (form ini
+ * besar & rawan divergen kalau ditulis ulang) -- hasil Save tetap PUT
+ * /approvals/:id yg sama, otomatis konsisten dgn "Approval — Lot History".
+ * Lampiran tetap `navigate()` ke /planning/approval (di luar scope
+ * perubahan ini), Hapus tetap panggil endpoint DELETE /approvals/:id
+ * langsung krn tidak ada logika bisnis yg perlu disinkronkan. */
 function buildItemExplorerColumns(opts: {
   navigate: (path: string) => void;
   canDelete: boolean;
+  onEdit: (row: LotHistoryRow) => void;
   onDelete: (row: LotHistoryRow) => void;
   employees: ReturnType<typeof useEmployeeOptions>["data"];
 }): DataTableColumn<LotHistoryRow>[] {
-  const { navigate, canDelete, onDelete, employees } = opts;
+  const { navigate, canDelete, onEdit, onDelete, employees } = opts;
   return [
     { key: "order", label: "Order", render: (r) => r.order },
     {
@@ -196,7 +204,7 @@ function buildItemExplorerColumns(opts: {
             title="Edit"
             aria-label="Edit"
             style={{ padding: "6px 10px" }}
-            onClick={() => navigate(`/planning/approval?editApprovalId=${encodeURIComponent(r.approvalId)}&editOrder=${encodeURIComponent(r.order)}`)}
+            onClick={() => onEdit(r)}
           >
             ✏️
           </button>
@@ -244,7 +252,7 @@ export default function OpenApprovalWorklist() {
   const items: WorklistItem[] = useMemo(() => {
     const now = Date.now();
     return (data ?? []).map((r) => {
-      const start = r.prepareProduksi ? new Date(r.prepareProduksi) : new Date(r.timestamp);
+      const start = r.submitToCustomer ? new Date(r.submitToCustomer) : new Date(r.timestamp);
       const days = Math.max(0, Math.floor((now - start.getTime()) / 86400000));
       const qty = Number(String(r.orderQty ?? "").replace(/,/g, "")) || 0;
       return {
@@ -263,7 +271,7 @@ export default function OpenApprovalWorklist() {
         ready: !!r.submitToCustomer,
         status: r.status,
         needsImprove: r.needsImprove,
-        prepareDate: start.toISOString().slice(0, 10),
+        submitCustDate: start.toISOString().slice(0, 10),
       };
     });
   }, [data]);
@@ -278,6 +286,12 @@ export default function OpenApprovalWorklist() {
   const [customerFilter, setCustomerFilter] = useState<string | null>(null);
   const [segmentFilter, setSegmentFilter] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  // Baris yg sedang di-Edit lewat pop-up (2026-09-11, instruksi eksplisit
+  // user) -- di-snapshot ke state saat tombol Edit diklik (BUKAN diturunkan
+  // langsung dari `data`/`explorerRawRows` tiap render), supaya refetch React
+  // Query di belakang layar tidak mereset form yg sedang diisi user di dalam
+  // modal.
+  const [editRow, setEditRow] = useState<LotHistoryRow | null>(null);
   // Dropdown "☰ Kelompokkan" (2026-09-03, instruksi eksplisit user, gaya
   // disamakan dgn "☰ Status" di Quality Check Review) -- GANTI tampilan dari
   // 4 tombol tab jadi 1 tombol dropdown, TAPI perilakunya tetap satu pilihan
@@ -288,8 +302,8 @@ export default function OpenApprovalWorklist() {
   // tombol Plant terpisah jadi 1 tombol dropdown, gaya & pola SAMA PERSIS dgn
   // "☰ Kelompokkan" di sebelahnya (radio single-select).
   const [showPlantPanel, setShowPlantPanel] = useState(false);
-  // Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit user) --
-  // filter berdasar "Prepare Date" (fallback timestamp kalau kosong, sama
+  // Range waktu "Dari - Sampai" (2026-09-11, instruksi eksplisit user) --
+  // filter berdasar "Submit Cust" (fallback timestamp kalau kosong, sama
   // dgn dasar hitung Lama Proses). String kosong = tanpa batas.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -301,8 +315,8 @@ export default function OpenApprovalWorklist() {
       items.filter(
         (i) =>
           (plant === "ALL" || i.plant === plant) &&
-          (!dateFrom || i.prepareDate >= dateFrom) &&
-          (!dateTo || i.prepareDate <= dateTo)
+          (!dateFrom || i.submitCustDate >= dateFrom) &&
+          (!dateTo || i.submitCustDate <= dateTo)
       ),
     [items, plant, dateFrom, dateTo]
   );
@@ -386,6 +400,7 @@ export default function OpenApprovalWorklist() {
         navigate,
         canDelete: canDeleteApproval,
         employees,
+        onEdit: (row) => setEditRow(row),
         onDelete: (row) => {
           if (confirm(`Hapus data Approval untuk Order ${row.order}?`)) deleteMutation.mutate(row.approvalId);
         },
@@ -628,7 +643,7 @@ export default function OpenApprovalWorklist() {
             )}
           </div>
 
-          <span className="text-xs font-semibold text-slate-600">Range waktu (Prepare Date):</span>
+          <span className="text-xs font-semibold text-slate-600">Range waktu (Submit Cust):</span>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
           <span className="text-xs text-slate-400">s/d</span>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs" />
@@ -742,6 +757,30 @@ export default function OpenApprovalWorklist() {
           columns={itemExplorerColumns}
         />
       </div>
+
+      {editRow && (
+        <Modal
+          title={`Edit Approval — Order ${editRow.order}`}
+          onClose={() => setEditRow(null)}
+          width={980}
+          closeOnBackdropClick={false}
+        >
+          {/* `embedded` + `editRecord` (2026-09-11, instruksi eksplisit user)
+              -- reuse form Input Approval yang sama persis dgn menu Approval
+              asli, langsung masuk mode Edit dari snapshot baris ini. Hasil
+              Save tetap masuk ke tabel ApprovalSchedule yang sama, jadi
+              otomatis muncul juga di "Approval — Lot History" maupun tabel
+              di atas. */}
+          <ApprovalPage
+            embedded
+            editRecord={editRow}
+            onSaved={() => {
+              setEditRow(null);
+              queryClient.invalidateQueries({ queryKey: ["approval-lot-history-dashboard"] });
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

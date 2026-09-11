@@ -412,6 +412,7 @@ function MultipleCustViewDetail({ row, employees }: { row: ApprovalRow; employee
 export default function ApprovalPage({
   embedded = false,
   initialOrder,
+  editRecord,
   onSaved,
 }: {
   /** Mode ringkas dipakai pop-up "Tahap Selanjutnya" di Production Order
@@ -419,6 +420,15 @@ export default function ApprovalPage({
    * di PremixAftermixPage.tsx. */
   embedded?: boolean;
   initialOrder?: string;
+  /** Alternatif dari `initialOrder` (2026-09-11, instruksi eksplisit user:
+   * tombol Edit di Dashboard Approval jadi pop-up, bukan navigate ke
+   * /planning/approval) -- langsung masuk mode Edit dari DATA YANG SUDAH ADA
+   * di tangan pemanggil (lewat `startEdit`, SAMA PERSIS dgn tombol Edit di
+   * tab History), TANPA bergantung pada `historyQuery` (yg memang sengaja
+   * `enabled: !embedded`, jadi deep-link `editApprovalId` lewat query-string
+   * di bawah TIDAK JALAN dlm mode embedded). Kalau keduanya diisi bareng,
+   * `editRecord` yang menang. */
+  editRecord?: ApprovalRow;
   onSaved?: () => void;
 } = {}) {
   const { user } = useAuth();
@@ -973,10 +983,21 @@ export default function ApprovalPage({
     }
   }
 
+  // Mode pop-up "Edit" dari Dashboard Approval (embedded+editRecord,
+  // 2026-09-11, instruksi eksplisit user) -- pakai `startEdit` yg SAMA PERSIS
+  // dgn tombol Edit di tab History, dari data yg SUDAH ADA di tangan
+  // pemanggil (bukan lewat query-string+historyQuery spt deep-link
+  // `editApprovalId` lama, yg tidak jalan dlm mode embedded).
+  useEffect(() => {
+    if (!embedded || !editRecord) return;
+    startEdit(editRecord);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, editRecord]);
+
   // Mode pop-up "Tahap Selanjutnya" (embedded+initialOrder) -- lihat komentar
   // sama di PremixAftermixPage.tsx.
   useEffect(() => {
-    if (!embedded || !initialOrder) return;
+    if (!embedded || editRecord || !initialOrder) return;
     setForm((f) => ({ ...f, order: initialOrder }));
     api
       .get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(initialOrder)}`)

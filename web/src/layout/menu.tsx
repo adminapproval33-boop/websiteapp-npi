@@ -15,6 +15,7 @@ import CheckResultsPage from "../pages/CheckResults/CheckResultsPage";
 import AdminQcPage from "../pages/AdminQc/AdminQcPage";
 import ApprovalPage from "../pages/Approval/ApprovalPage";
 import ApprovalDashboardPage from "../pages/ApprovalDashboard/ApprovalDashboardPage";
+import ColourMatchingDashboardPage from "../pages/ColourMatchingDashboard/ColourMatchingDashboardPage";
 import ProductionOrderDashboardPage from "../pages/ProductionOrderDashboard/ProductionOrderDashboardPage";
 import TankDashboardPage from "../pages/TankDashboard/TankDashboardPage";
 import ProduktivitasDashboardPage from "../pages/ProduktivitasDashboard/ProduktivitasDashboardPage";
@@ -60,6 +61,7 @@ export const menuTree: MenuNode[] = [
   group("Dashboard", [
     leaf("Dashboard Produktivitas", "/dashboard/produktivitas", <ProduktivitasDashboardPage />),
     leaf("Dashboard Approval", "/dashboard/approval", <ApprovalDashboardPage />),
+    leaf("Dashboard Colour Matching", "/dashboard/colour-matching", <ColourMatchingDashboardPage />),
     leaf("Production Order Monitoring", "/dashboard/production-order", <ProductionOrderDashboardPage />),
     leaf("Tank Monitoring", "/dashboard/tank", <TankDashboardPage />),
     leaf("Mesin Monitoring", "/dashboard/mesin", <MesinDashboardPage />),

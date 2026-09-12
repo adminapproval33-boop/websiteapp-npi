@@ -1,5 +1,7 @@
 # Idempotent local DEV startup for websiteapp-npi (PRIBADI - bukan untuk rekan kerja).
-# Starts backend (:4000) + frontend dev/HMR (:8080) + keep-awake if not already running.
+# Starts backend (:4000) + frontend dev/HMR (:8080) kalau belum jalan. Keep-awake &
+# mouse-jiggle SENGAJA dimatikan (2026-09-12, instruksi eksplisit user) - tidak lagi
+# di-auto-start di sini.
 #
 # Rekan kerja akses http://mes.nipseapaint.com:8090/login (dikelola tim IT, di-update
 # lewat email setelah kode di-push ke GitHub) - bukan lewat server "live" lokal :5173
@@ -28,20 +30,8 @@ function Test-PortListening($port) {
     return $null -ne (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
 
-function Test-KeepAwakeRunning {
-    return $null -ne (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-        Where-Object { $_.CommandLine -like '*keep-awake.ps1*' })
-}
-
-function Test-MouseJiggleRunning {
-    return $null -ne (Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-        Where-Object { $_.CommandLine -like '*mouse-jiggle.ps1*' })
-}
-
 $backendUp = Test-PortListening 4000
 $frontendUp = Test-PortListening 8080
-$keepAwakeUp = Test-KeepAwakeRunning
-$mouseJiggleUp = Test-MouseJiggleRunning
 
 $pg = Get-Service postgresql-x64-18 -ErrorAction SilentlyContinue
 if ($pg -and $pg.Status -ne 'Running') {
@@ -55,14 +45,6 @@ if (-not $backendUp) {
 if (-not $frontendUp) {
     Write-Host "[NPI] Starting frontend..." -ForegroundColor Cyan
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-NoExit', '-Command', 'npm run dev' -WorkingDirectory "$repoRoot\web" -WindowStyle Minimized
-}
-if (-not $keepAwakeUp) {
-    Write-Host "[NPI] Starting keep-awake..." -ForegroundColor Cyan
-    Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$repoRoot\scripts\keep-awake.ps1" -WindowStyle Minimized
-}
-if (-not $mouseJiggleUp) {
-    Write-Host "[NPI] Starting mouse-jiggle..." -ForegroundColor Cyan
-    Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$repoRoot\scripts\mouse-jiggle.ps1" -WindowStyle Minimized
 }
 if (-not $backendUp -or -not $frontendUp) {
     $elapsed = 0
@@ -88,7 +70,7 @@ if ($lanIp) {
 } else {
     Write-Host "[NPI] Tidak menemukan LAN IP aktif - cek koneksi jaringan." -ForegroundColor Red
 }
-Write-Host "[NPI] Backend + Frontend + Keep-awake siap. (Ngrok tidak dinyalakan - mode lokal saja.)" -ForegroundColor Green
+Write-Host "[NPI] Backend + Frontend siap. (Ngrok tidak dinyalakan - mode lokal saja.)" -ForegroundColor Green
 Write-Host "[NPI] Rekan kerja akses http://mes.nipseapaint.com:8090/login - push ke GitHub lalu email tim IT untuk update di sana." -ForegroundColor DarkGray
 Write-Host ""
 

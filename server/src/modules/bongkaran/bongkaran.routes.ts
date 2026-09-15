@@ -16,7 +16,7 @@ bongkaranRouter.use(requireMenuView("bongkaran"));
 // saat Edit, Prisma benar-benar meng-null-kannya -- sama pola dgn
 // colourMatching.routes.ts.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 /**

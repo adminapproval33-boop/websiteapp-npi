@@ -22,7 +22,7 @@ const sectionEnum = z.enum(["PREMIX", "AFTERMIX"]);
 // `update()` menganggap `undefined` sebagai "jangan ubah field ini", jadi
 // kalau di-transform ke undefined nilai lama malah tetap nyangkut.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 /** SAMA seperti optionalDate, tapi wajib terisi (bukan boleh dikosongkan) --
@@ -31,7 +31,7 @@ const optionalDate = z
  * terisi" dibaca sbg wajib BASELINE (berlaku di setiap Save), BUKAN cuma
  * trigger tahap begitu Form Received itu sendiri diisi. */
 const requiredDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null))
   .refine((v): v is Date => v !== null, { message: "Form Received wajib diisi." });
 

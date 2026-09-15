@@ -19,13 +19,13 @@ colourMatchingRouter.use(requireMenuView("colourMatching"));
 // `update()` menganggap `undefined` sebagai "jangan ubah field ini", jadi
 // kalau di-transform ke undefined nilai lama malah tetap nyangkut.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 /** SAMA seperti optionalDate, tapi wajib terisi -- lihat requiredDate di
  * premixAftermix.routes.ts utk alasan lengkapnya (revisi 2026-07-28). */
 const requiredDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null))
   .refine((v): v is Date => v !== null, { message: "Form Received wajib diisi." });
 

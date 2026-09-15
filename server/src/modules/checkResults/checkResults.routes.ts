@@ -30,7 +30,7 @@ checkResultsRouter.use(requireMenuView("checkResults"));
 // omit key) utk baris yang belum diisi, dan `z.coerce.date()` polos akan
 // gagal ("Invalid date") kalau mencoba meng-coerce string kosong itu.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 const parameterSchema = z

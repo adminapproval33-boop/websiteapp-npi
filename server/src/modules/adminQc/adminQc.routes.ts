@@ -14,7 +14,7 @@ adminQcRouter.use(requireMenuView("adminQc"));
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 const saveSchema = z

@@ -11,7 +11,7 @@ productionLabelRouter.use(requireAuth);
 productionLabelRouter.use(requireMenuView("productionLabel"));
 
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 const saveSchema = z.object({

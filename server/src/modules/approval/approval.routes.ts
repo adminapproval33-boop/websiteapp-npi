@@ -18,7 +18,7 @@ approvalRouter.use(requireMenuView("approval"));
 // `update()` menganggap `undefined` sebagai "jangan ubah field ini", jadi
 // kalau di-transform ke undefined nilai lama malah tetap nyangkut.
 const optionalDate = z
-  .union([z.coerce.date(), z.literal(""), z.null(), z.undefined()])
+  .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
   .transform((v) => (v ? v : null));
 
 const saveSchema = z

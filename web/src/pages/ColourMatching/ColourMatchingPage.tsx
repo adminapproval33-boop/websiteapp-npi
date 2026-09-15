@@ -612,7 +612,17 @@ export default function ColourMatchingPage({
                   <TankSelect bare id="colour-matching-tank" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
                 </ExcelField>
                 <ExcelField label="Types of Products" widthPx={colWidths.typesOfProducts} onResizeStart={beginResize("typesOfProducts")} {...gridNav("typesOfProducts")}>
-                  <input value={form.typesOfProducts} onChange={(e) => setForm({ ...form, typesOfProducts: e.target.value })} required />
+                  <select value={form.typesOfProducts} onChange={(e) => setForm({ ...form, typesOfProducts: e.target.value })} required>
+                    <option value="">-</option>
+                    <option value="CLEAR">CLEAR</option>
+                    <option value="CLEAR MATT">CLEAR MATT</option>
+                    <option value="METALLIC">METALLIC</option>
+                    <option value="METALLIC MATT">METALLIC MATT</option>
+                    <option value="SILVER">SILVER</option>
+                    <option value="SILVER MATT">SILVER MATT</option>
+                    <option value="SOLID">SOLID</option>
+                    <option value="SOLID MATT">SOLID MATT</option>
+                  </select>
                 </ExcelField>
                 <ExcelField label="Base Color" widthPx={colWidths.baseColor} onResizeStart={beginResize("baseColor")} {...gridNav("baseColor")}>
                   <input value={form.baseColor} onChange={(e) => setForm({ ...form, baseColor: e.target.value })} required />

@@ -41,6 +41,7 @@ const saveSchema = z
     codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
     typesOfProducts: z.string().trim().min(1, "Types of Products wajib diisi."),
     baseColor: z.string().trim().min(1, "Base Color wajib diisi."),
+    custSegmen: z.string().optional(),
     formPerMan: z.string().optional(),
     formReceived: notFutureDate(requiredDate, "Form Received"),
     start: notFutureDate(optionalDate, "Start"),

@@ -2697,6 +2697,7 @@ dashboardRouter.get(
         codeTanki: true,
         typesOfProducts: true,
         baseColor: true,
+        custSegmen: true,
         formPerMan: true,
         formReceived: true,
         start: true,
@@ -2725,18 +2726,33 @@ dashboardRouter.get(
       leaderOptions: sortedUnique(allRows.map((r) => r.leaderName)),
       typesOfProductsOptions: sortedUnique(allRows.map((r) => r.typesOfProducts)),
       baseColorOptions: sortedUnique(allRows.map((r) => r.baseColor)),
+      custSegmenOptions: sortedUnique(allRows.map((r) => r.custSegmen)),
     };
 
-    const spvFilter = req.query.spv ? String(req.query.spv).trim() : "";
-    const leaderFilter = req.query.leader ? String(req.query.leader).trim() : "";
-    const typesOfProductsFilter = req.query.typesOfProducts ? String(req.query.typesOfProducts).trim() : "";
-    const baseColorFilter = req.query.baseColor ? String(req.query.baseColor).trim() : "";
+    // Tiap filter sekarang bisa berisi lebih dari 1 nilai sekaligus
+    // (2026-09-15, instruksi eksplisit user: mis. Leader "Moh Soleh" DAN
+    // "Rojalih" bareng) -- dikirim dari frontend sbg satu query param
+    // comma-separated, baris cocok kalau nilainya ADA di salah satu pilihan
+    // (OR), bukan harus persis 1 nilai lagi.
+    const parseMultiFilter = (raw: unknown): string[] =>
+      raw
+        ? String(raw)
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : [];
+    const spvFilter = parseMultiFilter(req.query.spv);
+    const leaderFilter = parseMultiFilter(req.query.leader);
+    const typesOfProductsFilter = parseMultiFilter(req.query.typesOfProducts);
+    const baseColorFilter = parseMultiFilter(req.query.baseColor);
+    const custSegmenFilter = parseMultiFilter(req.query.custSegmen);
     const rows = allRows.filter(
       (r) =>
-        (!spvFilter || (r.spvColourMatching ?? "").trim() === spvFilter) &&
-        (!leaderFilter || (r.leaderName ?? "").trim() === leaderFilter) &&
-        (!typesOfProductsFilter || (r.typesOfProducts ?? "").trim() === typesOfProductsFilter) &&
-        (!baseColorFilter || (r.baseColor ?? "").trim() === baseColorFilter)
+        (spvFilter.length === 0 || spvFilter.includes((r.spvColourMatching ?? "").trim())) &&
+        (leaderFilter.length === 0 || leaderFilter.includes((r.leaderName ?? "").trim())) &&
+        (typesOfProductsFilter.length === 0 || typesOfProductsFilter.includes((r.typesOfProducts ?? "").trim())) &&
+        (baseColorFilter.length === 0 || baseColorFilter.includes((r.baseColor ?? "").trim())) &&
+        (custSegmenFilter.length === 0 || custSegmenFilter.includes((r.custSegmen ?? "").trim()))
     );
 
     // "Total Order" / "Oke Colour Matching" / "Wait Colour Matching" (2026-09-11,
@@ -2784,12 +2800,41 @@ dashboardRouter.get(
       }
     }
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    const members = Array.from(memberMap.values())
-      .map((agg) => ({
+
+    // "Jumlah Order (Spray Man)" (2026-09-15, instruksi eksplisit user) --
+    // digabung ke tabel member Colour Matching yg SUDAH ADA, TAPI datanya
+    // dari modul lain (ApprovalSchedule.sprayMan, tabel beda sama sekali dari
+    // ColourMatchingLog). Dicocokkan ke member yg sama lewat key yg SAMA
+    // (nik kalau ada, else nama lowercase-trim) spt `memberMap` di atas --
+    // HANYA nambah kolom ke member yg SUDAH ada di tabel Colour Matching,
+    // BUKAN nambah baris baru utk orang yg cuma jadi Spray Man tapi tidak
+    // pernah masuk Colour Matching. Discope tanggal yg SAMA (Dari/Sampai)
+    // dgn histori Colour Matching di atas, supaya konsisten dgn kolom lain.
+    const approvalRows = await prisma.approvalSchedule.findMany({
+      where: {
+        ...(fromInstant || toInstant
+          ? { timestamp: { ...(fromInstant ? { gte: fromInstant } : {}), ...(toInstant ? { lte: toInstant } : {}) } }
+          : {}),
+      },
+      select: { order: true, sprayMan: true, sprayManNik: true },
+    });
+    const sprayManOrdersMap = new Map<string, Set<string>>();
+    for (const r of approvalRows) {
+      const name = (r.sprayMan ?? "").trim();
+      if (!name || name === "-") continue;
+      const key = r.sprayManNik ? `nik:${r.sprayManNik}` : `name:${name.toLowerCase()}`;
+      const set = sprayManOrdersMap.get(key) ?? new Set<string>();
+      set.add(r.order);
+      sprayManOrdersMap.set(key, set);
+    }
+
+    const members = Array.from(memberMap.entries())
+      .map(([key, agg]) => ({
         name: agg.name,
         nik: agg.nik,
         orderCount: agg.orders.size,
         totalOutputKgLtr: round2(agg.totalOutputKgLtr),
+        sprayManOrderCount: sprayManOrdersMap.get(key)?.size ?? 0,
       }))
       .sort((a, b) => b.totalOutputKgLtr - a.totalOutputKgLtr);
 

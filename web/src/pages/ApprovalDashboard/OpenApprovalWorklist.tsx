@@ -34,6 +34,10 @@ interface WorklistItem {
    * tier2/belum di-submit ke customer), SAMA PERSIS dgn `start` yg dipakai hitung
    * `days`/bucket, supaya konsisten. */
   submitCustDate: string;
+  /** Spray Man (2026-09-15, instruksi eksplisit user: mau tau member yg
+   * bertugas Spray Man & total order yg disemprot tiap orang) -- pola SAMA
+   * PERSIS dgn `tech`/`sales` (grouping "☰ Kelompokkan" + kartu PIC di bawah). */
+  sprayMan: string;
 }
 
 // Filter kartu KPI utama (2026-09-03, instruksi eksplisit user) -- "Improve"
@@ -83,16 +87,22 @@ function fmt(n: number) {
   return n.toLocaleString("en-US");
 }
 
-type ViewMode = "tech" | "sales" | "customer" | "segment";
+type ViewMode = "tech" | "sales" | "customer" | "segment" | "sprayMan";
 // "noown" DIGANTI jadi "notech" (2026-09-01, instruksi eksplisit user) --
 // filter Sales PIC kosong TIDAK terpakai (di data real sekarang ini SELALU
 // 0, lihat komentar di kartu "No Tech PIC"/"No Sales PIC" di atas), Tech PIC
 // kosong yg justru sering kejadian (144 item) makanya filter ini diarahkan
 // ke situ.
 type ReadyFilter = "ALL" | "ready" | "wip" | "notech";
-type OwnerFilter = { role: "tech" | "sales"; name: string } | null;
+type OwnerFilter = { role: "tech" | "sales" | "sprayMan"; name: string } | null;
 
-const VIEW_LABEL: Record<ViewMode, string> = { tech: "Tech PIC", sales: "Sales PIC", customer: "Customer", segment: "Cust Segmen" };
+const VIEW_LABEL: Record<ViewMode, string> = {
+  tech: "Tech PIC",
+  sales: "Sales PIC",
+  customer: "Customer",
+  segment: "Cust Segmen",
+  sprayMan: "Spray Man",
+};
 
 /** Kolom tabel "Item explorer" (2026-09-04, instruksi eksplisit user: isi &
  * formatnya disamakan dgn tabel "Approval — Lot History" di
@@ -266,6 +276,7 @@ export default function OpenApprovalWorklist() {
         qty,
         tech: isBlankValue(r.techName) ? UNASSIGNED : r.techName!.trim(),
         sales: isBlankValue(r.salesPic) ? UNASSIGNED : r.salesPic!.trim(),
+        sprayMan: isBlankValue(r.sprayMan) ? UNASSIGNED : r.sprayMan!.trim(),
         days,
         bucket: bucketOf(days),
         ready: !!r.submitToCustomer,

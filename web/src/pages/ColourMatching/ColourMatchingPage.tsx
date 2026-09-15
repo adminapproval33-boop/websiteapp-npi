@@ -36,6 +36,7 @@ const COLOUR_MATCHING_COL_DEFAULT_WIDTHS: Record<string, number> = {
   codeTanki: 150,
   typesOfProducts: 220,
   baseColor: 200,
+  custSegmen: 150,
   spvName: 170,
   spvColourMatching: 170,
   leaderName: 170,
@@ -51,7 +52,7 @@ const COLOUR_MATCHING_COL_DEFAULT_WIDTHS: Record<string, number> = {
 const COLOUR_MATCHING_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription"],
   ["batch", "orderQty", "plant"],
-  ["iuPlant", "codeTanki", "typesOfProducts", "baseColor"],
+  ["iuPlant", "codeTanki", "typesOfProducts", "baseColor", "custSegmen"],
   ["spvName", "spvColourMatching", "leaderName", "formReceived", "start", "finish", "formPerMan"],
   ["member"],
 ];
@@ -90,6 +91,7 @@ interface HistoryRow {
   codeTanki: string;
   typesOfProducts: string | null;
   baseColor: string | null;
+  custSegmen: string | null;
   formPerMan: string | null;
   formReceived: string | null;
   start: string | null;
@@ -124,6 +126,7 @@ export type ColourMatchingEditRecord = Pick<
   | "codeTanki"
   | "typesOfProducts"
   | "baseColor"
+  | "custSegmen"
   | "formPerMan"
   | "formReceived"
   | "start"
@@ -149,6 +152,7 @@ const emptyForm = {
   codeTanki: "",
   typesOfProducts: "",
   baseColor: "",
+  custSegmen: "",
   formPerMan: "",
   formReceived: "",
   start: "",
@@ -331,6 +335,7 @@ export default function ColourMatchingPage({
             members,
             typesOfProducts: f.typesOfProducts || latest.typesOfProducts || "",
             baseColor: f.baseColor || latest.baseColor || "",
+            custSegmen: f.custSegmen || latest.custSegmen || "",
             formReceived: f.formReceived || latest.formReceived || "",
             start: f.start || latest.start || "",
             finish: f.finish || latest.finish || "",
@@ -433,6 +438,7 @@ export default function ColourMatchingPage({
       codeTanki: row.codeTanki,
       typesOfProducts: row.typesOfProducts ?? "",
       baseColor: row.baseColor ?? "",
+      custSegmen: row.custSegmen ?? "",
       formPerMan: row.formPerMan ?? "",
       formReceived: row.formReceived ?? "",
       start: row.start ?? "",
@@ -626,6 +632,15 @@ export default function ColourMatchingPage({
                 </ExcelField>
                 <ExcelField label="Base Color" widthPx={colWidths.baseColor} onResizeStart={beginResize("baseColor")} {...gridNav("baseColor")}>
                   <input value={form.baseColor} onChange={(e) => setForm({ ...form, baseColor: e.target.value })} required />
+                </ExcelField>
+                <ExcelField label="Cust Segmen" widthPx={colWidths.custSegmen} onResizeStart={beginResize("custSegmen")} {...gridNav("custSegmen")}>
+                  <select value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })}>
+                    <option value="">-</option>
+                    <option value="AUTOMOTIVE">AUTOMOTIVE</option>
+                    <option value="MOTORCYCLE">MOTORCYCLE</option>
+                    <option value="GIU">GIU</option>
+                    <option value="CCL">CCL</option>
+                  </select>
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -836,6 +851,7 @@ export default function ColourMatchingPage({
                 { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
                 { key: "typesOfProducts", label: "Types of Products", render: (r) => r.typesOfProducts },
                 { key: "baseColor", label: "Base Color", render: (r) => r.baseColor },
+                { key: "custSegmen", label: "Cust Segmen", render: (r) => r.custSegmen },
                 {
                   key: "formReceived",
                   label: "Form Received",

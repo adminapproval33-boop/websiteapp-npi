@@ -56,6 +56,7 @@ export default function DataTable<T>({
   freezeFirstColumn = false,
   toolbarExtra,
   toolbarExtraLeft,
+  toolbarSecondRow,
   footer,
   onVisibleRowsChange,
 }: {
@@ -82,6 +83,15 @@ export default function DataTable<T>({
    * baris toolbar yg SAMA, di depan tombol bawaan). Default undefined supaya
    * tabel lain yg tidak pakai ini tidak berubah tampilannya. */
   toolbarExtraLeft?: ReactNode;
+  /** Baris toolbar KEDUA, dirender DI BAWAH baris "Kolom"/"Filter"/"Reset
+   * Kolom"/"Export CSV" (2026-09-15, instruksi eksplisit user: Dashboard
+   * Colour Matching -- filter tanggal/SPV/Leader/dkk yg jumlahnya banyak
+   * dipindah ke baris sendiri supaya baris tombol bawaan tidak ikut
+   * terdorong/berantakan). BEDA dari `toolbarExtraLeft` (yg tetap di baris
+   * PERTAMA yg sama dgn Kolom/Filter/dkk, dipakai Tank Monitoring/Quality
+   * Check Review) -- keduanya independen, boleh dipakai salah satu atau
+   * tidak dua2nya. Default undefined supaya tabel lain tidak berubah. */
+  toolbarSecondRow?: ReactNode;
   /** Baris "Total" di BAWAH tabel (bukan kolom tambahan di samping) -- 2026-08-21,
    * instruksi eksplisit user (Dashboard Produktivitas: Okupansi Tanki/Produktivitas
    * IU Plant). Key = `key` kolom (lihat `DataTableColumn.key`), value = isi sel footer-nya
@@ -273,8 +283,8 @@ export default function DataTable<T>({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           {toolbarExtraLeft}
           <div style={{ position: "relative" }}>
             <button className={`btn ${showColumnPanel ? "" : "btn-outline"}`} type="button" onClick={() => setShowColumnPanel((s) => !s)}>
@@ -310,7 +320,7 @@ export default function DataTable<T>({
             ↺ Reset Kolom
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2">
           {toolbarExtra}
           {exportFileName && (
             <button className="btn btn-outline" onClick={() => exportToCsv(exportFileName, csvColumns, rows)} disabled={rows.length === 0}>
@@ -319,6 +329,8 @@ export default function DataTable<T>({
           )}
         </div>
       </div>
+
+      {toolbarSecondRow && <div className="mb-3 flex flex-wrap items-end gap-2">{toolbarSecondRow}</div>}
 
       {/*
         Scroll container dibatasi tinggi (max-h) supaya scrollbar horizontal

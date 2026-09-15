@@ -36,6 +36,7 @@ interface HistoryRow {
   codeTanki: string;
   typesOfProducts: string | null;
   baseColor: string | null;
+  custSegmen: string | null;
   formPerMan: string | null;
   formReceived: string | null;
   start: string | null;
@@ -61,6 +62,11 @@ interface MemberRow {
   nik: string | null;
   orderCount: number;
   totalOutputKgLtr: number;
+  /** Jumlah Order yg pernah ditangani member ini sbg Spray Man (2026-09-15,
+   * instruksi eksplisit user) -- data dari modul Approval, bukan Colour
+   * Matching sendiri, dicocokkan lewat NIK/nama yg sama (lihat komentar di
+   * dashboard.routes.ts). 0 kalau member ini tidak pernah jadi Spray Man. */
+  sprayManOrderCount: number;
 }
 
 interface ColourMatchingDashboardData {
@@ -71,6 +77,7 @@ interface ColourMatchingDashboardData {
     leaderOptions: string[];
     typesOfProductsOptions: string[];
     baseColorOptions: string[];
+    custSegmenOptions: string[];
   };
   summary: {
     totalOrderCount: number;
@@ -93,28 +100,110 @@ function KpiCard({ label, value, color }: { label: string; value: string; color:
 }
 
 /** Dropdown filter "Semua <label>" + opsi (2026-09-11, instruksi eksplisit
- * user: filter by SPV Colour Matching/Leader/Types of Products/Base Color). */
+ * user: filter by SPV Colour Matching/Leader/Types of Products/Base Color).
+ * Bisa pilih lebih dari 1 nilai sekaligus (2026-09-15, instruksi eksplisit
+ * user, mis. Leader "Moh Soleh" DAN "Rojalih" bareng) -- nilai yg sudah
+ * dipilih tampil sbg tag di bawah kotak ketik, kotak ketiknya sendiri tetap
+ * bisa dipakai cari/pilih nilai berikutnya (datalist, pola sama dgn
+ * TankSelect/CustomerSelect di komponen lain). */
 function FilterSelect({
   label,
-  value,
+  values,
   onChange,
   options,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
+  values: string[];
+  onChange: (v: string[]) => void;
   options: string[];
 }) {
+  const [inputValue, setInputValue] = useState("");
+  const inputId = `filter-select-${label.replace(/\s+/g, "-").toLowerCase()}`;
+  const listId = `${inputId}-options`;
+  const availableOptions = options.filter((o) => !values.includes(o));
+
+  function addValue(raw: string) {
+    const trimmed = raw.trim();
+    if (!trimmed || values.includes(trimmed)) return;
+    onChange([...values, trimmed]);
+    setInputValue("");
+  }
+
   return (
-    <div className="field">
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Semua {label}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, position: "relative" }}>
+      <label htmlFor={inputId} style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)" }}>
+        {label}
+      </label>
+      <input
+        id={inputId}
+        list={listId}
+        className="btn btn-outline"
+        value={inputValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          // Cocok persis salah satu opsi (dipilih dari datalist, atau
+          // diketik pas) -- langsung jadi tag & kotak dikosongkan lagi
+          // supaya siap pilih nilai berikutnya.
+          if (options.includes(v)) addValue(v);
+          else setInputValue(v);
+        }}
+        placeholder={values.length > 0 ? "+ Tambah lagi..." : `Semua ${label}`}
+        autoComplete="off"
+      />
+      <datalist id={listId}>
+        {availableOptions.map((o) => (
+          <option key={o} value={o} />
         ))}
-      </select>
+      </datalist>
+      {values.length > 0 && (
+        // position: absolute (2026-09-15, instruksi eksplisit user: baris
+        // toolbar jangan berantakan saat filter aktif) -- tag2 SENGAJA tidak
+        // ikut dihitung tinggi oleh flex row toolbar (DataTable.tsx), supaya
+        // tombol Kolom/Filter/Reset di sebelahnya tidak ikut terdorong turun
+        // cuma krn 1 filter ini py banyak pilihan.
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            marginTop: 4,
+            zIndex: 5,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 4,
+            maxWidth: 220,
+            background: "var(--panel-bg, #fff)",
+            padding: 2,
+            borderRadius: 6,
+          }}
+        >
+          {values.map((v) => (
+            <span
+              key={v}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "#f1f5f9",
+                border: "1px solid #cbd5e1",
+                borderRadius: 999,
+                padding: "1px 6px 1px 8px",
+                fontSize: "0.72rem",
+              }}
+            >
+              {v}
+              <button
+                type="button"
+                onClick={() => onChange(values.filter((x) => x !== v))}
+                aria-label={`Hapus ${v}`}
+                style={{ border: "none", background: "none", cursor: "pointer", padding: 0, lineHeight: 1, color: "var(--text-muted)" }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -143,10 +232,11 @@ export default function ColourMatchingDashboardPage() {
   const [tab, setTab] = useState<"member" | "review">("member");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [spv, setSpv] = useState("");
-  const [leader, setLeader] = useState("");
-  const [typesOfProducts, setTypesOfProducts] = useState("");
-  const [baseColor, setBaseColor] = useState("");
+  const [spv, setSpv] = useState<string[]>([]);
+  const [leader, setLeader] = useState<string[]>([]);
+  const [typesOfProducts, setTypesOfProducts] = useState<string[]>([]);
+  const [baseColor, setBaseColor] = useState<string[]>([]);
+  const [custSegmen, setCustSegmen] = useState<string[]>([]);
   // Baris yg sedang di-Edit (2026-09-11, instruksi eksplisit user: tombol
   // Edit langsung dari Dashboard) -- di-snapshot ke state saat tombol Edit
   // diklik (BUKAN diturunkan langsung dari `historyRows` tiap render), supaya
@@ -155,15 +245,25 @@ export default function ColourMatchingDashboardPage() {
   const [editRow, setEditRow] = useState<HistoryRow | null>(null);
 
   const query = useQuery({
-    queryKey: ["dashboard-colour-matching", customFrom, customTo, spv, leader, typesOfProducts, baseColor],
+    queryKey: [
+      "dashboard-colour-matching",
+      customFrom,
+      customTo,
+      spv.join(","),
+      leader.join(","),
+      typesOfProducts.join(","),
+      baseColor.join(","),
+      custSegmen.join(","),
+    ],
     queryFn: () => {
       const params = new URLSearchParams();
       if (customFrom) params.set("from", customFrom);
       if (customTo) params.set("to", customTo);
-      if (spv) params.set("spv", spv);
-      if (leader) params.set("leader", leader);
-      if (typesOfProducts) params.set("typesOfProducts", typesOfProducts);
-      if (baseColor) params.set("baseColor", baseColor);
+      if (spv.length) params.set("spv", spv.join(","));
+      if (leader.length) params.set("leader", leader.join(","));
+      if (typesOfProducts.length) params.set("typesOfProducts", typesOfProducts.join(","));
+      if (baseColor.length) params.set("baseColor", baseColor.join(","));
+      if (custSegmen.length) params.set("custSegmen", custSegmen.join(","));
       return api
         .get<{ success: boolean; data: ColourMatchingDashboardData }>(`/dashboard/colour-matching?${params.toString()}`)
         .then((r) => r.data);
@@ -183,7 +283,15 @@ export default function ColourMatchingDashboardPage() {
   const members = query.data?.members ?? [];
   const historyRows = query.data?.historyRows ?? [];
   const filterOptions = query.data?.filterOptions;
-  const hasActiveFilter = !!(customFrom || customTo || spv || leader || typesOfProducts || baseColor);
+  const hasActiveFilter = !!(
+    customFrom ||
+    customTo ||
+    spv.length ||
+    leader.length ||
+    typesOfProducts.length ||
+    baseColor.length ||
+    custSegmen.length
+  );
 
   // Toolbar filter (2026-09-11, instruksi eksplisit user) -- dipakai di KEDUA
   // tab (Dashboard Colour Matching & Colour Matching Review) krn keduanya
@@ -191,17 +299,28 @@ export default function ColourMatchingDashboardPage() {
   // manapun otomatis kepakai juga di tab satunya.
   const filterToolbar = (
     <>
-      <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-      <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-      <FilterSelect label="SPV Colour Matching" value={spv} onChange={setSpv} options={filterOptions?.spvOptions ?? []} />
-      <FilterSelect label="Leader" value={leader} onChange={setLeader} options={filterOptions?.leaderOptions ?? []} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label htmlFor="colour-matching-dashboard-start" style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)" }}>
+          Start
+        </label>
+        <input id="colour-matching-dashboard-start" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label htmlFor="colour-matching-dashboard-finish" style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)" }}>
+          Finish
+        </label>
+        <input id="colour-matching-dashboard-finish" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+      </div>
+      <FilterSelect label="SPV Colour Matching" values={spv} onChange={setSpv} options={filterOptions?.spvOptions ?? []} />
+      <FilterSelect label="Leader" values={leader} onChange={setLeader} options={filterOptions?.leaderOptions ?? []} />
       <FilterSelect
         label="Types of Products"
-        value={typesOfProducts}
+        values={typesOfProducts}
         onChange={setTypesOfProducts}
         options={filterOptions?.typesOfProductsOptions ?? []}
       />
-      <FilterSelect label="Base Color" value={baseColor} onChange={setBaseColor} options={filterOptions?.baseColorOptions ?? []} />
+      <FilterSelect label="Base Color" values={baseColor} onChange={setBaseColor} options={filterOptions?.baseColorOptions ?? []} />
+      <FilterSelect label="Cust Segmen" values={custSegmen} onChange={setCustSegmen} options={filterOptions?.custSegmenOptions ?? []} />
       {hasActiveFilter && (
         <button
           type="button"
@@ -209,10 +328,11 @@ export default function ColourMatchingDashboardPage() {
           onClick={() => {
             setCustomFrom("");
             setCustomTo("");
-            setSpv("");
-            setLeader("");
-            setTypesOfProducts("");
-            setBaseColor("");
+            setSpv([]);
+            setLeader([]);
+            setTypesOfProducts([]);
+            setBaseColor([]);
+            setCustSegmen([]);
           }}
         >
           Reset (Semua Histori)
@@ -238,17 +358,12 @@ export default function ColourMatchingDashboardPage() {
         <KpiCard label="Total Order" value={String(summary?.totalOrderCount ?? 0)} color="var(--navy-light)" />
         <KpiCard label="Oke Colour Matching" value={String(summary?.okeCount ?? 0)} color="var(--success)" />
         <KpiCard label="Wait Colour Matching" value={String(summary?.waitCount ?? 0)} color="#E74C3C" />
+        <KpiCard label="Member" value={String(members.length)} color="var(--info)" />
       </div>
 
         <div className="panel">
           <div className="panel-header">Dashboard Colour Matching</div>
           <div className="panel-body">
-            <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              "Total Output (KG/Ltr)" = Order Qty dibagi rata ke semua member yang mengerjakan tiap proses, lalu
-              dijumlah per orang (sama pola dengan Qty/Man di Premix/Aftermix). "Jumlah Order" = berapa Order (No
-              Order) berbeda yang pernah ditangani member tsb. Diurutkan dari Total Output tertinggi. Filter di
-              toolbar tabel juga berlaku ke tab "Colour Matching Review".
-            </p>
             <DataTable
               rowKey={(r: MemberRow) => r.nik ?? r.name}
               exportFileName="dashboard-colour-matching-member"
@@ -256,7 +371,7 @@ export default function ColourMatchingDashboardPage() {
               rows={members}
               freezeFirstColumn
               emptyMessage="Belum ada data Colour Matching pada rentang tanggal ini."
-              toolbarExtraLeft={filterToolbar}
+              toolbarSecondRow={filterToolbar}
               columns={[
                 { key: "name", label: "Nama Member", render: (r) => r.name },
                 { key: "nik", label: "NIK", render: (r) => r.nik ?? "-" },
@@ -266,6 +381,12 @@ export default function ColourMatchingDashboardPage() {
                   label: "Total Output (KG/Ltr)",
                   render: (r) => numberFmt.format(r.totalOutputKgLtr),
                   csvValue: (r) => r.totalOutputKgLtr,
+                },
+                {
+                  key: "sprayManOrderCount",
+                  label: "Jumlah Order (Spray Man)",
+                  render: (r) => numberFmt.format(r.sprayManOrderCount),
+                  csvValue: (r) => r.sprayManOrderCount,
                 },
               ]}
             />
@@ -280,6 +401,7 @@ export default function ColourMatchingDashboardPage() {
         <KpiCard label="Total Order" value={String(summary?.totalOrderCount ?? 0)} color="var(--navy-light)" />
         <KpiCard label="Oke Colour Matching" value={String(summary?.okeCount ?? 0)} color="var(--success)" />
         <KpiCard label="Wait Colour Matching" value={String(summary?.waitCount ?? 0)} color="#E74C3C" />
+        <KpiCard label="Member" value={String(members.length)} color="var(--info)" />
       </div>
 
       <div className="panel">
@@ -292,7 +414,7 @@ export default function ColourMatchingDashboardPage() {
             rows={historyRows}
             freezeFirstColumn
             emptyMessage="Belum ada data Colour Matching pada rentang tanggal ini."
-            toolbarExtraLeft={filterToolbar}
+            toolbarSecondRow={filterToolbar}
             columns={[
               {
                 key: "timestamp",
@@ -333,6 +455,7 @@ export default function ColourMatchingDashboardPage() {
               { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki },
               { key: "typesOfProducts", label: "Types of Products", render: (r) => r.typesOfProducts },
               { key: "baseColor", label: "Base Color", render: (r) => r.baseColor },
+              { key: "custSegmen", label: "Cust Segmen", render: (r) => r.custSegmen },
               {
                 key: "formReceived",
                 label: "Form Received",

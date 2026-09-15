@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MenuNode, menuTree, filterHiddenMenus } from "./menu";
@@ -25,10 +26,11 @@ const GROUP_ICONS: Record<string, string> = {
 };
 
 function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => void }) {
+  const { t } = useTranslation();
   if (node.type === "leaf") {
     return (
       <NavLink to={node.path} onClick={onNavigate} className={({ isActive }) => "sidebar-link" + (isActive ? " active" : "")}>
-        {node.label}
+        {t(node.label)}
       </NavLink>
     );
   }
@@ -36,7 +38,7 @@ function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => v
     <details className="sidebar-group">
       <summary>
         {GROUP_ICONS[node.label] ? `${GROUP_ICONS[node.label]} ` : ""}
-        {node.label}
+        {t(node.label)}
       </summary>
       {node.children.map((child) => (
         <SidebarNode key={child.label} node={child} onNavigate={onNavigate} />
@@ -48,6 +50,7 @@ function SidebarNode({ node, onNavigate }: { node: MenuNode; onNavigate: () => v
 /** `open` cuma berpengaruh di layar < lg (drawer overlay) -- di layar lg ke atas
  * sidebar selalu tampil sbg rail statis (lihat class `.sidebar` di app.css). */
 export default function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const visibleNodes = filterHiddenMenus(
     menuTree.filter((node) => !(node.type === "group" && node.fullAccessOnly) || user?.access === "FULL_ACCESS"),
@@ -70,10 +73,10 @@ export default function Sidebar({ open, onNavigate }: { open: boolean; onNavigat
         className={({ isActive }) => "sidebar-link !ml-2 font-bold" + (isActive ? " active" : "")}
         style={{ display: "flex", alignItems: "center", gap: 6 }}
       >
-        🏠 Beranda
+        🏠 {t("Beranda")}
         {postsUnreadCount > 0 && (
           <span
-            title={`${postsUnreadCount} postingan baru di Papan Info`}
+            title={t("{{count}} postingan baru di Papan Info", { count: postsUnreadCount })}
             style={{
               display: "inline-flex",
               alignItems: "center",

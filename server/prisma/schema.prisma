@@ -397,6 +397,7 @@ model ColourMatchingLog {
   codeTanki            String
   typesOfProducts      String?
   baseColor            String?
+  custSegmen           String?
   /// 1 No Order (form ini) dibagi jumlah member (otomatis) -- bukan dari Order Qty
   formPerMan           String?
   formReceived         DateTime?

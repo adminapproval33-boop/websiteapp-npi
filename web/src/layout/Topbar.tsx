@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { fileUrl } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { getStoredLanguage, setStoredLanguage, AppLanguage } from "../i18n";
 
 const ACCESS_LABEL: Record<string, string> = {
   FULL_ACCESS: "Full Access",
@@ -9,9 +11,34 @@ const ACCESS_LABEL: Record<string, string> = {
   VIEW: "View",
 };
 
+/** Tombol toggle bahasa Indonesia/Inggris (2026-09-15, instruksi eksplisit
+ * user: bisa translate semua bahasa di website sesuai kemauan user) --
+ * ditaruh di Topbar krn selalu terpasang di semua halaman (lihat
+ * AppLayout.tsx), sama pola dgn tombol "Pengaturan" di sebelahnya. Pilihan
+ * bahasa disimpan di localStorage (lihat i18n/index.ts) supaya tidak reset
+ * tiap buka halaman/refresh. */
+function LanguageToggle() {
+  const { i18n } = useTranslation();
+  const [lang, setLang] = useState<AppLanguage>(getStoredLanguage());
+
+  function toggle() {
+    const next: AppLanguage = lang === "id" ? "en" : "id";
+    setLang(next);
+    setStoredLanguage(next);
+    i18n.changeLanguage(next);
+  }
+
+  return (
+    <button className="btn topbar-settings-btn" type="button" onClick={toggle} title="Ganti Bahasa / Change Language">
+      🌐 {lang === "id" ? "ID" : "EN"}
+    </button>
+  );
+}
+
 export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -44,7 +71,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         <button
           type="button"
           onClick={onMenuClick}
-          aria-label="Buka menu"
+          aria-label={t("Buka menu")}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg text-white hover:bg-white/10 lg:hidden"
         >
           ☰
@@ -55,7 +82,7 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
         </div>
       </div>
       <div className="topbar-right">
-        <span className="hidden sm:inline">{now.toLocaleString("id-ID")}</span>
+        <span className="hidden sm:inline">{now.toLocaleString(i18n.language === "en" ? "en-US" : "id-ID")}</span>
 
         <div className="topbar-user-card">
           {user?.avatarPath ? (
@@ -77,8 +104,10 @@ export default function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           </div>
         </div>
 
-        <button className="btn topbar-settings-btn" onClick={() => navigate("/settings")} title="Pengaturan">
-          ⚙️ Pengaturan
+        <LanguageToggle />
+
+        <button className="btn topbar-settings-btn" onClick={() => navigate("/settings")} title={t("Pengaturan")}>
+          ⚙️ {t("Pengaturan")}
         </button>
       </div>
     </header>

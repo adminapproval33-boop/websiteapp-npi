@@ -1489,29 +1489,15 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     });
   }
 
-  // Per kode Tank, ambil touch PALING BARU (lintas Order manapun) -- itulah
-  // Order yg diasumsikan sedang memegang tank itu sekarang.
-  const latestByTank = new Map<string, TankTouch>();
-  for (const t of touches) {
-    const existing = latestByTank.get(t.code);
-    if (!existing || t.moment.getTime() > existing.moment.getTime()) latestByTank.set(t.code, t);
-  }
-
-  // Sama spt latestByTank, tapi di-dedupe PER ORDER (bukan per Code Tanki) --
-  // dipakai KHUSUS utk baris "Input Manual" (2026-07-31, instruksi eksplisit
-  // user): kolom "Proses"/"Production Actions" tetap harus pakai logika
-  // OTOMATIS (dari histori proses Order itu sendiri), BUKAN label "Manual" --
-  // "Manual" cuma dipindah ke kolom baru terpisah ("Sumber Data").
-  const latestTouchByOrder = new Map<string, TankTouch>();
-  for (const t of touches) {
-    const existing = latestTouchByOrder.get(t.order);
-    if (!existing || t.moment.getTime() > existing.moment.getTime()) latestTouchByOrder.set(t.order, t);
-  }
-
-  // Material Description SENGAJA di-lookup ulang dari Master Data Cooispi
-  // (bukan snapshot History) -- sama alasannya dgn /production-orders.
+  // Material Description/%GR SENGAJA di-lookup ulang dari Master Data Cooispi
+  // (bukan snapshot History) -- sama alasannya dgn /production-orders. Query
+  // ini dilakukan SEBELUM memilih pemenang per-tank (lihat
+  // `isOrderDone`/`activeTouches` di bawah) -- %GR dipakai jadi FILTER dulu,
+  // bukan cuma buat enrich hasil akhir, jadi orderNumbers-nya perlu
+  // mencakup SEMUA order yg pernah menyentuh tank manapun (bukan cuma
+  // pemenang tanggal), supaya %GR-nya tersedia lebih awal.
   const orderNumbers = Array.from(
-    new Set([...Array.from(latestByTank.values()).map((t) => t.order), ...Array.from(latestManualByTank.values()).map((m) => m.order)])
+    new Set([...touches.map((t) => t.order), ...Array.from(latestManualByTank.values()).map((m) => m.order)])
   );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
@@ -1521,6 +1507,48 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
   const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
+
+  // Order yg SUDAH SELESAI (%GR>95%, TERMASUK sentinel Teco 9999%, ATAU
+  // sudah py histori Packing) -- 2026-09-17, instruksi eksplisit user
+  // (laporan berulang: Order yg masih aktif di sebuah tank ke-hidden krn
+  // Order LAIN di tank yg SAMA kebetulan py tanggal proses lebih baru,
+  // padahal Order lain itu sendiri sudah selesai). Root cause LAMA: aturan
+  // "Order selesai -> tank otomatis kosong" cuma diterapkan ke Order
+  // PEMENANG `latestByTank` (dipilih semata2 dari tanggal proses paling
+  // baru, TANPA peduli Order itu sendiri sudah selesai atau belum).
+  // Sekarang penyaringan "sudah selesai" dipindah ke SINI -- SEBELUM
+  // pemilihan pemenang per-tank -- supaya Order yg sudah selesai tidak lagi
+  // ikut jadi kandidat sama sekali, bukan cuma "menang dulu baru dianggap
+  // kosong belakangan".
+  function isOrderDone(order: string): boolean {
+    if (packingOrders.has(order)) return true;
+    const pctGRValue = parsePctGR(pctGRByOrder.get(order));
+    return pctGRValue !== null && pctGRValue > 95;
+  }
+  const activeTouches = touches.filter((t) => !isOrderDone(t.order));
+
+  // Per kode Tank, ambil touch PALING BARU DI ANTARA Order yg MASIH AKTIF
+  // saja (`activeTouches`, lihat komentar `isOrderDone` di atas) -- itulah
+  // Order yg diasumsikan sedang memegang tank itu sekarang.
+  const latestByTank = new Map<string, TankTouch>();
+  for (const t of activeTouches) {
+    const existing = latestByTank.get(t.code);
+    if (!existing || t.moment.getTime() > existing.moment.getTime()) latestByTank.set(t.code, t);
+  }
+
+  // Sama spt latestByTank, tapi di-dedupe PER ORDER (bukan per Code Tanki),
+  // dan SENGAJA tetap dari `touches` PENUH (bukan `activeTouches`) -- dipakai
+  // KHUSUS utk baris "Input Manual" (2026-07-31, instruksi eksplisit user):
+  // kolom "Proses"/"Production Actions" tetap harus pakai logika OTOMATIS
+  // (dari histori proses Order itu sendiri) APA ADANYA, termasuk kalau Order
+  // itu ternyata memang sudah selesai -- "Manual" cuma dipindah ke kolom
+  // baru terpisah ("Sumber Data"), bukan brarti histori proses aslinya boleh
+  // disaring/disembunyikan juga.
+  const latestTouchByOrder = new Map<string, TankTouch>();
+  for (const t of touches) {
+    const existing = latestTouchByOrder.get(t.order);
+    if (!existing || t.moment.getTime() > existing.moment.getTime()) latestTouchByOrder.set(t.order, t);
+  }
 
   // Dipakai BERSAMA oleh baris otomatis & baris "Input Manual" -- supaya
   // kolom "Production Actions" konsisten sama logikanya (%GR sentinel TECO /
@@ -1572,19 +1600,14 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       continue;
     }
 
+    // Order yg sudah selesai (%GR>95%/Teco/Packing) sudah tersaring lebih
+    // awal (lihat `isOrderDone`/`activeTouches` di atas) -- `touch` di sini
+    // TIDAK PERNAH lagi berasal dari Order yg sudah selesai, jadi cukup "ada
+    // touch atau tidak" (tidak perlu cek %GR/Packing ulang di sini). Baris
+    // "Input Manual" di atas TETAP menang mutlak terlepas dari %GR-nya, krn
+    // justru itu fungsinya (lihat komentar di branch `manual`).
     const touch = latestByTank.get(tank.code);
-    const pctGRValue = touch ? parsePctGR(pctGRByOrder.get(touch.order)) : null;
-    // %GR>95% (TERMASUK sentinel TECO 9999%, lihat komentar panjang di
-    // /production-orders di atas) -> tank otomatis "Kosong" (data occupant
-    // dikosongkan). DIREVISI 2026-07-31 (instruksi eksplisit user): Teco
-    // SEBELUMNYA sengaja dikecualikan dari aturan ini supaya tetap tampil,
-    // tapi sekarang instruksinya dibalik -- Production Actions = "Teco" HARUS
-    // langsung bikin tank kosong juga, sama spt >95% biasa. Ini CUMA berlaku
-    // di baris otomatis (branch ini) -- baris "Input Manual" di atas TETAP
-    // menang mutlak terlepas dari %GR-nya, krn justru itu fungsinya (lihat
-    // komentar di branch `manual`).
-    const orderDone = touch ? packingOrders.has(touch.order) || (pctGRValue !== null && pctGRValue > 95) : true;
-    const occupied = Boolean(touch) && !orderDone;
+    const occupied = Boolean(touch);
     map.set(tank.code, {
       code: tank.code,
       taTb: tank.taTb,

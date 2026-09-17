@@ -382,13 +382,27 @@
      state React (lihat AppLayout.tsx). Mulai `lg:` kembali ke rail statis
      yang selalu tampil seperti sebelumnya -- perilaku desktop TIDAK berubah. */
   .sidebar {
-    @apply absolute inset-y-0 left-0 z-40 w-[280px] shrink-0 -translate-x-full overflow-y-auto
+    @apply absolute inset-y-0 left-0 z-40 w-[280px] shrink-0 -translate-x-full overflow-visible
       bg-red-900 py-3 shadow-xl transition-transform duration-200 ease-in-out
-      lg:static lg:z-auto lg:translate-x-0 lg:shadow-none;
+      lg:relative lg:z-auto lg:translate-x-0 lg:shadow-none;
   }
 
   .sidebar.open {
     @apply translate-x-0;
+  }
+
+  /* Konten menu yg sebenarnya scroll (2026-09-16, instruksi eksplisit user:
+     tombol collapse jadi tab tepi spt aplikasi trading saham) -- SENGAJA
+     dipisah dari `.sidebar` sendiri (yg sekarang `overflow-visible`, lihat di
+     atas), supaya tab tepi di bawah (`.sidebar-collapse-toggle`, sibling dari
+     div ini, BUKAN child-nya) tidak ikut ke-clip walau separuh badannya
+     "nongol" keluar dari lebar sidebar. `.sidebar` sendiri jadi `lg:relative`
+     (bukan `lg:static` spt sebelumnya) supaya tab & flyout (posisinya absolute)
+     py acuan posisi yg benar juga di layar lg ke atas -- perilaku layout flex
+     lain TIDAK berubah krn `relative` sama netral dgn `static` selama tidak
+     dikasih top/left/dst di elemen `.sidebar`-nya sendiri. */
+  .sidebar-scroll {
+    @apply h-full overflow-y-auto;
   }
 
   .sidebar-backdrop {
@@ -419,6 +433,56 @@
 
   .sidebar-link.active {
     @apply bg-rose-600 text-white shadow-sm hover:bg-rose-600;
+  }
+
+  /* Mode "collapsed" (2026-09-16, instruksi eksplisit user: sidebar bisa
+     expand/collapse) -- rail menyempit jadi cuma ikon. Lebar disempitkan di
+     SEMUA ukuran layar (bukan cuma lg: ke atas) supaya konsisten dgn konten
+     yg dirender Sidebar.tsx (JSX-nya ikut cabang icon-only tanpa syarat
+     ukuran layar juga -- kalau CSS-nya cuma disempitkan di lg:, drawer
+     mobile jadi lebar penuh tapi isinya cuma ikon, nanggung/salah lihat). */
+  .sidebar.collapsed {
+    @apply w-[64px];
+  }
+
+  /* Tab kecil menempel di tepi kanan sidebar, melayang di tengah tinggi
+     layar (2026-09-16, instruksi eksplisit user: gaya disamakan dgn tombol
+     collapse aplikasi trading saham yg dicontohkan) -- separuh badannya
+     "nongol" ke area konten (`right: -14px`) supaya kelihatan spt tab yg
+     bisa ditarik, bukan tombol bulat terpisah di baris menu spt sebelumnya. */
+  .sidebar-collapse-toggle {
+    @apply absolute right-[-14px] top-1/2 z-10 flex h-12 w-[18px] -translate-y-1/2 items-center justify-center
+      rounded-r-md bg-rose-950 text-xs font-bold text-rose-100 shadow-md transition hover:bg-rose-800;
+  }
+
+  .sidebar-collapsed-icon-wrapper {
+    position: relative;
+  }
+
+  .sidebar-collapsed-icon {
+    @apply mx-auto my-0.5 flex h-10 w-10 items-center justify-center rounded-lg text-lg text-rose-50/90 no-underline transition-colors hover:bg-white/10;
+    position: relative;
+  }
+
+  .sidebar-collapsed-icon.active {
+    @apply bg-rose-600 text-white hover:bg-rose-600;
+  }
+
+  .sidebar-collapsed-badge {
+    @apply absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white;
+  }
+
+  /* Posisi (top/left) sengaja TIDAK di sini -- dihitung & di-set inline lewat
+     JS (lihat CollapsedGroupIcon di Sidebar.tsx) krn elemen ini di-portal ke
+     `document.body`, bukan lagi bersarang di dalam `.sidebar`. z-50 di sini
+     tetap relevan (dibandingkan konten body lain, mis. kalau ada overlay lain
+     yg juga anak langsung body). */
+  .sidebar-flyout {
+    @apply z-50 min-w-[220px] rounded-lg bg-red-900 py-2 shadow-xl;
+  }
+
+  .sidebar-flyout-title {
+    @apply mx-2 mb-1 px-3 text-[0.75rem] font-bold uppercase tracking-wide text-rose-300/70;
   }
 
   /* Watermark molekul "kimia" + siluet palet lukis besar di latar area kerja

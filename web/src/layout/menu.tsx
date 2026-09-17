@@ -65,7 +65,7 @@ export const menuTree: MenuNode[] = [
     leaf("Production Order Monitoring", "/dashboard/production-order", <ProductionOrderDashboardPage />),
     leaf("Tank Monitoring", "/dashboard/tank", <TankDashboardPage />),
     leaf("Mesin Monitoring", "/dashboard/mesin", <MesinDashboardPage />),
-    leaf("Quality Check Review", "/dashboard/quality-check-review", <QualityCheckReviewPage />),
+    leaf("Dashboard Quality", "/dashboard/quality-check-review", <QualityCheckReviewPage />),
   ]),
   group("Production & MRP Schedule", [
     leaf("Premix", "/planning/premix", <PremixAftermixPage section="PREMIX" title="Premix" />),

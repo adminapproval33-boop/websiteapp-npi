@@ -645,7 +645,7 @@ export default function QualityCheckReviewPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
         <button className={`btn ${tab === "ringkasan" ? "" : "btn-outline"}`} onClick={() => setTab("ringkasan")}>
-          Ringkasan
+          Dashboard
         </button>
         <button className={`btn ${tab === "trend" ? "" : "btn-outline"}`} onClick={() => setTab("trend")}>
           Quality Check / Material Number
@@ -657,7 +657,7 @@ export default function QualityCheckReviewPage() {
 
       {tab === "ringkasan" && (
         <div className="panel">
-          <div className="panel-header">Quality Check Review</div>
+          <div className="panel-header">Dashboard Quality</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit
                 user) -- filter berdasar "Tanggal Masuk QC", berlaku ke SEMUA

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
+import FilterCheckboxSelect from "../../components/FilterCheckboxSelect";
 import Modal from "../../components/Modal";
 import CheckResultsPage from "../CheckResults/CheckResultsPage";
 import AdminQcPage from "../AdminQc/AdminQcPage";
@@ -338,6 +339,14 @@ export default function QualityCheckReviewPage() {
   // batas.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  // Filter "Start"/"Finish"/"Cust Segmen" (2026-09-20, instruksi eksplisit user,
+  // komponen & gaya SAMA dgn toolbar filter Dashboard Colour Matching) --
+  // HANYA utk panel "RFT (Right First Time)" tab Dashboard (kartu KPI-nya),
+  // TIDAK mempengaruhi tab/panel lain. Terpisah dari `dateFrom`/`dateTo`
+  // ("Range waktu" tab Quality Check Review) di atas.
+  const [rftStart, setRftStart] = useState("");
+  const [rftFinish, setRftFinish] = useState("");
+  const [custSegmenFilter, setCustSegmenFilter] = useState<string[]>([]);
   // Pop-up Edit (2026-09-11, instruksi eksplisit user) -- `editOrder` dulu
   // diisi begitu tombol Edit diklik (buka layar pilihan), `editTarget` diisi
   // setelah user pilih Check Results/Admin QC (baru form-nya muncul). Reset
@@ -587,6 +596,62 @@ export default function QualityCheckReviewPage() {
       if (dateTo && d > dateTo) return false;
       return true;
     });
+  // Nama Cust Segmen sebuah Order utk filter/pengelompokan -- yg kosong jadi
+  // "(Tanpa Cust Segmen)" (2026-09-20: pengecualian SEMI HALB/"-"/HARDENER/
+  // tanpa segmen DICABUT atas instruksi eksplisit user, semuanya dihitung lagi;
+  // yg mau disaring pakai dropdown filter Cust Segmen).
+  const segmentOf = (r: QualityReviewRow) => r.custSegmen?.trim() || "(Tanpa Cust Segmen)";
+  // Pilihan filter Cust Segmen = nilai unik yg ADA di Order OK (bukan daftar
+  // tetap, supaya nilai baru otomatis ikut muncul).
+  const custSegmenOptions = Array.from(
+    new Set((query.data?.rows ?? []).filter((r) => r.status === "OK").map(segmentOf))
+  ).sort();
+  const hasActiveFilter = !!(rftStart || rftFinish || custSegmenFilter.length);
+  // Toolbar filter panel RFT (2026-09-20, instruksi eksplisit user: samakan dgn
+  // menu Dashboard Colour Matching, HANYA utk RFT) -- "Start"/"Finish" = rentang
+  // "Tanggal Masuk QC".
+  const filterToolbar = (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label htmlFor="rft-filter-start" style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)" }}>
+          Start
+        </label>
+        <input
+          id="rft-filter-start"
+          type="date"
+          title="Tanggal Masuk QC dari"
+          value={rftStart}
+          onChange={(e) => setRftStart(e.target.value)}
+        />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <label htmlFor="rft-filter-finish" style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)" }}>
+          Finish
+        </label>
+        <input
+          id="rft-filter-finish"
+          type="date"
+          title="Tanggal Masuk QC sampai"
+          value={rftFinish}
+          onChange={(e) => setRftFinish(e.target.value)}
+        />
+      </div>
+      <FilterCheckboxSelect label="Cust Segmen" values={custSegmenFilter} onChange={setCustSegmenFilter} options={custSegmenOptions} />
+      {hasActiveFilter && (
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => {
+            setRftStart("");
+            setRftFinish("");
+            setCustSegmenFilter([]);
+          }}
+        >
+          Reset (Semua Data)
+        </button>
+      )}
+    </>
+  );
   // RFT (Right First Time) -- Order berstatus OK ditelusuri lagi ke histori Spec
   // Parameter-nya (`checkHistoryQuery`, endpoint sama dgn "History Input Check
   // Results") lewat `evaluateSpec`: ADA SATU SAJA parameter yg verdict-nya "ng"
@@ -667,15 +732,26 @@ export default function QualityCheckReviewPage() {
   // DIKELUARKAN -- instruksi eksplisit user, dianggap belum relevan utk kartu
   // KPI ini -- jadi TIDAK dihitung sama sekali). Dipakai `rows` (bukan
   // `filteredRows`) supaya independen dari filter "☰ Status"/"☰ Lama Proses"
-  // punya tab Dashboard -- cuma ikut Range waktu. Cust Segmen tertentu (lihat
-  // `EXCLUDED_CUST_SEGMENTS` di bawah) DIBUANG juga dari sini (2026-09-17,
-  // instruksi eksplisit user) -- jadi TIDAK ikut ke kartu KPI RFT SAMA SEKALI
-  // (bukan cuma disembunyikan di tabel breakdown per Cust Segmen).
-  const EXCLUDED_CUST_SEGMENTS = new Set(["SEMI HALB", "-", "(Tanpa Cust Segmen)", "HARDENER"]);
-  const rftFinished = rows.filter((r) => r.status === "OK" && !EXCLUDED_CUST_SEGMENTS.has(r.custSegmen?.trim() || "(Tanpa Cust Segmen)"));
+  // punya tab Dashboard -- cuma ikut Range waktu. SEMUA Cust Segmen dihitung
+  // (pengecualian SEMI HALB/"-"/HARDENER/tanpa segmen dicabut 2026-09-20).
+  const rftFinished = rows.filter((r) => r.status === "OK");
+  // Filter Start/Finish/Cust Segmen toolbar panel RFT (2026-09-20, instruksi
+  // eksplisit user: HANYA utk RFT) -- diterapkan cuma ke kartu KPI RFT di
+  // bawah; `rftFinished` di atas SENGAJA tidak difilter krn masih dipakai
+  // Dashboard FLC (hitungan & Item Explorer) yg tidak ikut filter ini.
+  const rftFiltered = rftFinished.filter((r) => {
+    if (custSegmenFilter.length > 0 && !custSegmenFilter.includes(segmentOf(r))) return false;
+    if (rftStart || rftFinish) {
+      if (!r.sinceQcEntry) return false;
+      const d = r.sinceQcEntry.slice(0, 10);
+      if (rftStart && d < rftStart) return false;
+      if (rftFinish && d > rftFinish) return false;
+    }
+    return true;
+  });
   const rftPass = { count: 0, qty: 0 };
   const rftFail = { count: 0, qty: 0 };
-  for (const r of rftFinished) {
+  for (const r of rftFiltered) {
     const bucket = isRftRow(r) ? rftPass : rftFail;
     bucket.count++;
     bucket.qty += parseQtyLocal(r.orderQty);
@@ -710,23 +786,34 @@ export default function QualityCheckReviewPage() {
 
   // Grafik tahunan "RFT Rate per Bulan" (2026-09-17, instruksi eksplisit user:
   // "buatkan grafik tahunan untuk data RFT per Cust Segmen dan total RFT Rate
-  // ... dibagi menjadi 12 bulan"). SENGAJA dari `query.data.rows` mentah
-  // (bukan `rftFinished`/`rows`) supaya independen dari filter "Range waktu"
-  // panel RFT di atas -- grafik ini py pemilih tahun sendiri (`rftYear`),
-  // selalu 12 bulan penuh (Jan-Des) tahun itu. Cust Segmen yg dibuang
-  // (`EXCLUDED_CUST_SEGMENTS`) tetap dikeluarkan juga di sini, konsisten dgn
-  // kartu KPI & tabel breakdown di atas.
-  const rftYearBaseRows = (query.data?.rows ?? []).filter(
-    (r) => r.status === "OK" && !EXCLUDED_CUST_SEGMENTS.has(r.custSegmen?.trim() || "(Tanpa Cust Segmen)")
-  );
+  // ... dibagi menjadi 12 bulan"). Dari `query.data.rows` mentah (bukan
+  // `rftFinished`/`rows`, jadi TIDAK ikut "Range waktu" tab Quality Check
+  // Review) -- py pemilih tahun sendiri (`rftYear`), selalu 12 bulan penuh
+  // (Jan-Des) tahun itu. IKUT filter Start/Finish/Cust Segmen toolbar panel RFT
+  // (2026-09-20, instruksi eksplisit user: "ketiganya") -- bulan di luar
+  // rentang Start/Finish jadi 0%, & garis Cust Segmen yg tidak dipilih hilang
+  // (garis Total dihitung dari segmen terpilih saja, sama dgn kartu KPI).
+  const rftYearAllOkRows = (query.data?.rows ?? []).filter((r) => r.status === "OK");
+  const rftYearBaseRows = rftYearAllOkRows.filter((r) => {
+    if (custSegmenFilter.length > 0 && !custSegmenFilter.includes(segmentOf(r))) return false;
+    if (rftStart || rftFinish) {
+      if (!r.sinceQcEntry) return false;
+      const d = r.sinceQcEntry.slice(0, 10);
+      if (rftStart && d < rftStart) return false;
+      if (rftFinish && d > rftFinish) return false;
+    }
+    return true;
+  });
+  // Pilihan tahun dari SEMUA Order OK (bukan yg sudah difilter) supaya
+  // dropdown tahun tidak ikut menyusut saat filter dipakai.
   const rftYearOptions = Array.from(
-    new Set(rftYearBaseRows.filter((r) => r.sinceQcEntry).map((r) => new Date(r.sinceQcEntry!).getFullYear()))
+    new Set(rftYearAllOkRows.filter((r) => r.sinceQcEntry).map((r) => new Date(r.sinceQcEntry!).getFullYear()))
   ).sort((a, b) => b - a);
   if (!rftYearOptions.includes(rftYear)) rftYearOptions.unshift(rftYear);
   const RFT_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
   const rftYearRows = rftYearBaseRows.filter((r) => r.sinceQcEntry && new Date(r.sinceQcEntry).getFullYear() === rftYear);
-  const rftYearSegments = Array.from(new Set(rftYearRows.map((r) => r.custSegmen?.trim() || "(Tanpa Cust Segmen)"))).sort();
-  const RFT_SEGMENT_COLORS = ["#3498DB", "#E67E22", "#9B59B6", "#16A085", "#C0392B", "#2ECC71", "#F1C40F"];
+  const rftYearSegments = Array.from(new Set(rftYearRows.map(segmentOf))).sort();
+  const RFT_SEGMENT_COLORS = ["#3498DB", "#E67E22", "#9B59B6", "#16A085", "#C0392B", "#2ECC71", "#F1C40F", "#7F8C8D", "#D35400", "#8E44AD"];
   const rftYearSeries: TrendSeries[] = [
     { key: "total", label: "Total (Semua Segmen)", color: "#1e293b" },
     ...rftYearSegments.map((seg, i) => ({ key: seg, label: seg, color: RFT_SEGMENT_COLORS[i % RFT_SEGMENT_COLORS.length] })),
@@ -737,7 +824,7 @@ export default function QualityCheckReviewPage() {
       total: monthRows.length > 0 ? (monthRows.filter(isRftRow).length / monthRows.length) * 100 : 0,
     };
     for (const seg of rftYearSegments) {
-      const segRows = monthRows.filter((r) => (r.custSegmen?.trim() || "(Tanpa Cust Segmen)") === seg);
+      const segRows = monthRows.filter((r) => segmentOf(r) === seg);
       values[seg] = segRows.length > 0 ? (segRows.filter(isRftRow).length / segRows.length) * 100 : 0;
     }
     return { bucketKey: `${rftYear}-${String(monthIdx + 1).padStart(2, "0")}`, label, values };
@@ -832,15 +919,10 @@ export default function QualityCheckReviewPage() {
           <div className="panel-header">Dashboard Quality Check</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div>
-              <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>RFT (Right First Time)</div>
-              <p style={{ margin: "0 0 8px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                Note: "Total Selesai" = jumlah Order berstatus "OK (QC Passed)" SAJA ("On Check", "Improve", & "Assorted
-                (NG)" tidak dihitung di kartu ini), DIKURANGI Order yang Cust Segmen-nya "SEMI HALB", "-", "(Tanpa Cust
-                Segmen)", atau "HARDENER" (dibuang total, tidak ikut ke kartu KPI ini maupun tabel breakdown di
-                bawah). Dari Order yang tersisa: "Direct Passed" = yang SEMUA parameter Spec-nya lolos sejak
-                pengecekan pertama (dicek ulang ke histori "History Input Check Results"). "Not Direct Passed" = Order
-                OK yang ternyata pernah py minimal 1 parameter Spec ber-hasil NG di histori check-nya.
-              </p>
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>RFT (Right First Time)</div>
+              {/* Toolbar filter Start/Finish/Cust Segmen (2026-09-20, instruksi eksplisit
+                  user) -- HANYA utk kartu RFT di bawahnya. */}
+              <div className="flex flex-wrap items-end gap-2" style={{ paddingBottom: 14 }}>{filterToolbar}</div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                 <KpiCard label="Total Selesai" count={rftFinishedTotal.count} qty={rftFinishedTotal.qty} color="#3498DB" />
                 <KpiCard label="Direct Passed" count={rftPass.count} qty={rftPass.qty} color="#2ECC71" />
@@ -864,8 +946,9 @@ export default function QualityCheckReviewPage() {
                 </select>
               </div>
               <p style={{ margin: "0 0 8px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                Note: grafik ini SELALU menampilkan 12 bulan penuh (Jan-Des) tahun yang dipilih, terlepas dari filter
-                "Range waktu" di atas -- tiap titik = RFT Rate Order yang "Tanggal Masuk QC"-nya jatuh di bulan itu.
+                Note: grafik ini menampilkan 12 bulan (Jan-Des) tahun yang dipilih dan ikut filter Start/Finish & Cust
+                Segmen di atas (bulan di luar rentang Start/Finish jadi 0%) -- tiap titik = RFT Rate Order yang "Tanggal
+                Masuk QC"-nya jatuh di bulan itu.
               </p>
               <TrendLineChart
                 points={rftYearPoints}
@@ -994,8 +1077,8 @@ export default function QualityCheckReviewPage() {
               Packing" & belum pernah masuk Check Results juga tidak dihitung sama sekali). Kartu "OK (QC Passed)"
               dipecah jadi "Direct Passed" (SEMUA parameter Spec-nya lolos sejak pengecekan pertama, dicek ke histori
               "History Input Check Results") & "Not Direct Passed" (pernah py minimal 1 parameter Spec ber-hasil NG di
-              histori check-nya, walau status akhirnya OK). Ikut berubah kalau filter "☰ Status"/"☰ Lama Proses" di
-              bawah dipakai, atau Range waktu (Tanggal Masuk QC) di bawah ini diisi.
+              histori check-nya, walau status akhirnya OK). Ikut berubah kalau filter "☰ Status"/"☰ Lama Proses"
+              dipakai, atau Range waktu (Tanggal Masuk QC) di bawah ini diisi.
             </p>
 
             {/* Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit
@@ -1402,8 +1485,8 @@ export default function QualityCheckReviewPage() {
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>
               Note: sumber & cakupan Order-nya SAMA dengan panel "RFT (Right First Time)" di tab Dashboard (Order
-              berstatus "OK (QC Passed)" saja, Cust Segmen "SEMI HALB"/"-"/"(Tanpa Cust Segmen)"/"HARDENER" dibuang) --
-              cuma dihitung per "FLC" (kolom di Input Check Results). Order berstatus "Reguler" tidak dihitung di sini.
+              berstatus "OK (QC Passed)" saja) -- cuma dihitung per "FLC" (kolom di Input Check Results). Order
+              berstatus "Reguler" tidak dihitung di sini.
             </p>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               <KpiCard label="FLC 1" count={flcCounts["FLC 1"].count} qty={flcCounts["FLC 1"].qty} color="#3498DB" />

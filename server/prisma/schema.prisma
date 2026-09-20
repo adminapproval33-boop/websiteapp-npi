@@ -199,6 +199,10 @@ model TankManualInput {
   batch               String?
   orderQty            String?
   remark              String?
+  /// Rencana mulai pemakaian tanki (2026-09-20, instruksi eksplisit user) --
+  /// HANYA diisi utk entri "Booking Tanki" (lihat lib/tankBooking.ts); Input
+  /// Manual biasa selalu null.
+  plannedStart        DateTime?
   inputBy             String
 
   @@index([codeTanki])

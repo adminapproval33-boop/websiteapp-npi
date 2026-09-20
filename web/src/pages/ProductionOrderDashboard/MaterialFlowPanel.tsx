@@ -1,7 +1,39 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Modal from "../../components/Modal";
+import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
+import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
+import { formatDateTime } from "../../lib/datetime";
+import { useResizableColWidths } from "../../lib/useResizableColWidths";
+
+/** Lebar default kolom pop-up Booking Tanki (px) -- bisa di-drag user, sama
+ * seperti form Input Premix/Aftermix (lihat lib/useResizableColWidths). */
+const BOOKING_COL_DEFAULT_WIDTHS: Record<string, number> = {
+  order: 220,
+  materialNumber: 220,
+  materialDescription: 320,
+  batch: 180,
+  orderQty: 140,
+  plant: 120,
+  codeTanki: 220,
+  plannedStart: 240,
+  bookedBy: 300,
+  catatan: 760,
+};
+
+/** Urutan kolom per baris visual (utk snap-to-align saat drag) -- harus cocok
+ * dgn urutan ExcelField di pop-up Booking Tanki di bawah. */
+const BOOKING_COL_ROWS: string[][] = [
+  ["order", "materialNumber", "materialDescription"],
+  ["batch", "orderQty", "plant"],
+  ["codeTanki", "plannedStart", "bookedBy"],
+  ["catatan"],
+];
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
+import type { OrderRefData } from "../../components/OrderLookup";
 
 interface MaterialFlowRow {
   materialNumber: string;
@@ -54,6 +86,7 @@ export default function MaterialFlowPanel({
   order,
   onFlowSaved,
   onOpenStage,
+  onCloseAll,
 }: {
   materialNumber: string | null;
   /** Dari `r.stages` baris Dashboard -- HANYA berisi tahap yg SAAT INI
@@ -82,6 +115,10 @@ export default function MaterialFlowPanel({
    * form Input di bawah panel ini langsung ganti ke tahap tsb, TANPA nutup
    * pop-up. Dipakai utk pindah-pindah antar tahap dari 1 pop-up yg sama. */
   onOpenStage?: (stageName: string) => void;
+  /** Tombol "Tutup" pop-up Booking Tanki menutup SEMUANYA (termasuk pop-up Info
+   * Proses induknya), sama pola dgn pop-up "Input <Tahap>"; "Kembali" cuma
+   * menutup pop-up Booking. */
+  onCloseAll?: () => void;
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -94,6 +131,36 @@ export default function MaterialFlowPanel({
   const [checked, setChecked] = useState<Record<FlowField, boolean> | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  // Tombol "Booking" tanki (2026-09-20, instruksi eksplisit user) di baris
+  // Premix & Aftermix -- memesan Code Tanki utk Order ini SEBELUM proses
+  // dimulai. Disimpan lewat POST /tank-manual-input (Input Manual Tank
+  // Monitoring): tanki langsung tampil "Terisi" (sumber "Manual") dgn Order
+  // ini, TANPA membuat baris Premix/Aftermix (Start/Finish/Member belum ada).
+  const [bookingStage, setBookingStage] = useState<"Premix" | "Aftermix" | null>(null);
+  const [bookingTank, setBookingTank] = useState("");
+  const [bookingRemark, setBookingRemark] = useState("");
+  // Rencana Mulai pemakaian tanki (datetime-local, opsional) -- 2026-09-20,
+  // instruksi eksplisit user.
+  const [bookingPlannedStart, setBookingPlannedStart] = useState("");
+  const [bookingMessage, setBookingMessage] = useState("");
+  const [bookingError, setBookingError] = useState("");
+  const { data: tankOptions } = useTankOptions();
+  const { data: employees } = useEmployeeOptions();
+  const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
+    BOOKING_COL_DEFAULT_WIDTHS,
+    "booking-tanki-col-widths",
+    BOOKING_COL_ROWS
+  );
+  /** "Booked by" pop-up = user yg sedang login ("Nama (NIK)", sama format kolom
+   * Input By di menu History) -- fallback ke nama sesi kalau NIK-nya tidak ada
+   * di Data Karyawan (mis. akun admin). */
+  const bookedByLabel = user
+    ? (() => {
+        const formatted = formatInputBy(employees, user.nik);
+        return formatted === user.nik ? `${user.name} (${user.nik})` : formatted;
+      })()
+    : "-";
 
   const flowQuery = useQuery({
     queryKey: ["material-flow-single", materialNumber],
@@ -159,6 +226,112 @@ export default function MaterialFlowPanel({
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan Material Flow."),
   });
+
+  // Data Order utk ditampilkan (read-only) di pop-up Booking & ikut disimpan --
+  // dari Referensi Order/PO. Kalau Order tidak ketemu di sana, form tetap bisa
+  // dipakai (cuma Order + Code Tanki yg wajib).
+  const orderRefQuery = useQuery({
+    queryKey: ["order-ref-booking", order],
+    queryFn: () => api.get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(order!)}`).then((r) => r.data),
+    enabled: !!bookingStage && !!order,
+    retry: false,
+  });
+  const ref: OrderRefData | null = orderRefQuery.data ?? null;
+
+  const bookingMutation = useMutation({
+    mutationFn: async () => {
+      return api.post("/tank-manual-input/booking", {
+        section: bookingStage === "Premix" ? "PREMIX" : "AFTERMIX",
+        codeTanki: bookingTank.trim(),
+        order: order!,
+        materialNumber: ref?.materialNumber ?? materialNumber ?? undefined,
+        materialDescription: ref?.materialDescription ?? undefined,
+        batch: ref?.batch ?? undefined,
+        orderQty: ref?.orderQty ?? undefined,
+        note: bookingRemark.trim() || undefined,
+        plannedStart: bookingPlannedStart || undefined,
+      });
+    },
+    onSuccess: () => {
+      setBookingMessage(`Booking tanki ${bookingTank.trim()} utk Order ${order} (${bookingStage}) tersimpan -- tanki tampil "Terisi" di Tank Monitoring.`);
+      setBookingError("");
+      setBookingStage(null);
+      setBookingTank("");
+      setBookingRemark("");
+      setBookingPlannedStart("");
+      queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list", order] });
+    },
+    onError: (err) => setBookingError(err instanceof ApiError ? err.message : "Gagal menyimpan booking tanki."),
+  });
+
+  // Booking yg MASIH AKTIF utk Order ini -- diambil dari Tank Monitoring
+  // (query key sama dgn TankDashboardPage), jadi otomatis sudah menyaring
+  // booking yg gugur (Order sudah di-input di tahapnya / tanki dipakai Order
+  // lain, lihat isBookingReleased di server dashboard.routes.ts).
+  const tankStatusQuery = useQuery({
+    queryKey: ["tank-status"],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { code: string; occupant: { order: string; source: string; remark: string | null } | null }[] }>(
+          "/dashboard/tank-status"
+        )
+        .then((r) => r.data),
+    enabled: !!order,
+  });
+  const activeBookings = (tankStatusQuery.data ?? []).filter(
+    (t) => t.occupant?.source === "Manual" && t.occupant.order === order && /^Booking (Premix|Aftermix)\b/.test(t.occupant.remark ?? "")
+  );
+  // Detail booking (Rencana Mulai & pemesan) -- dicocokkan ke `activeBookings`
+  // lewat Code Tanki (entri TERBARU per tanki, sama aturan "yg terbaru menang"
+  // di Tank Monitoring).
+  const bookingListQuery = useQuery({
+    queryKey: ["tank-booking-list", order],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { id: string; codeTanki: string; plannedStart: string | null; inputBy: string; inputByName: string | null }[] }>(
+          `/tank-manual-input/booking?order=${encodeURIComponent(order!)}`
+        )
+        .then((r) => r.data),
+    enabled: !!order,
+  });
+  const bookingDetailByTank = new Map<string, { plannedStart: string | null; inputBy: string; inputByName: string | null }>();
+  for (const b of bookingListQuery.data ?? []) {
+    if (!bookingDetailByTank.has(b.codeTanki)) bookingDetailByTank.set(b.codeTanki, b);
+  }
+
+  const cancelBookingMutation = useMutation({
+    mutationFn: (codeTanki: string) => api.post("/tank-manual-input/booking/cancel", { order: order!, codeTanki }),
+    onSuccess: (_d, codeTanki) => {
+      setBookingMessage(`Booking tanki ${codeTanki} utk Order ${order} dibatalkan.`);
+      setBookingError("");
+      queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list", order] });
+    },
+    onError: (err) => setBookingError(err instanceof ApiError ? err.message : "Gagal membatalkan booking tanki."),
+  });
+
+  function closeBookingModal() {
+    setBookingStage(null);
+    setBookingTank("");
+    setBookingRemark("");
+    setBookingPlannedStart("");
+    setBookingError("");
+  }
+
+  function submitBooking() {
+    setBookingMessage("");
+    setBookingError("");
+    if (!bookingTank.trim()) {
+      setBookingError("Code Tanki wajib diisi.");
+      return;
+    }
+    if (!isKnownTankCode(tankOptions, bookingTank)) {
+      setBookingError("Code Tanki tidak ada di Master Data Tanki. Pilih dari daftar saran.");
+      return;
+    }
+    bookingMutation.mutate();
+  }
 
   const statusByName = new Map(stages.map((s) => [s.name, s.done]));
 
@@ -239,28 +412,46 @@ export default function MaterialFlowPanel({
           )}
         </td>
         <td>
-          {onOpenStage && (
-            <button
-              type="button"
-              className="btn btn-outline"
-              style={{ padding: "3px 10px", fontSize: "0.78rem" }}
-              title={`Buka Input ${s.name}`}
-              onClick={() => {
-                if (STAGES_WITH_APPLICABILITY_GATE.has(s.name) && !isRequired) {
-                  window.alert(`Material ini tidak memakai proses ${s.name}.`);
-                  return;
-                }
-                const blocking = findBlockingStage(s.name);
-                if (blocking) {
-                  window.alert(`Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa input ${s.name}.`);
-                  return;
-                }
-                onOpenStage(s.name);
-              }}
-            >
-              Buka Input ➜
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {onOpenStage && (
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                title={`Buka Input ${s.name}`}
+                onClick={() => {
+                  if (STAGES_WITH_APPLICABILITY_GATE.has(s.name) && !isRequired) {
+                    window.alert(`Material ini tidak memakai proses ${s.name}.`);
+                    return;
+                  }
+                  const blocking = findBlockingStage(s.name);
+                  if (blocking) {
+                    window.alert(`Order ini belum menyelesaikan ${blocking} -- harus diinput dulu sebelum bisa input ${s.name}.`);
+                    return;
+                  }
+                  onOpenStage(s.name);
+                }}
+              >
+                Buka Input ➜
+              </button>
+            )}
+            {order && canEdit && (s.name === "Premix" || s.name === "Aftermix") && (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "3px 10px", fontSize: "0.78rem" }}
+                disabled={!isRequired}
+                title={isRequired ? `Booking tanki utk ${s.name}` : `Material ini tidak memakai proses ${s.name}.`}
+                onClick={() => {
+                  setBookingStage(s.name as "Premix" | "Aftermix");
+                  setBookingMessage("");
+                  setBookingError("");
+                }}
+              >
+                Booking
+              </button>
+            )}
+          </div>
         </td>
       </tr>
     );
@@ -411,6 +602,117 @@ export default function MaterialFlowPanel({
                 </tbody>
               </table>
             </div>
+            {activeBookings.length > 0 && (
+              <div style={{ marginTop: 10, fontSize: "0.82rem" }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Booking tanki aktif Order ini</div>
+                {activeBookings.map((b) => {
+                  const detail = bookingDetailByTank.get(b.code);
+                  return (
+                  <div key={b.code} style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
+                    <span style={{ flex: 1 }}>
+                      {b.code} — {b.occupant?.remark}
+                      {detail?.plannedStart ? ` — Rencana mulai ${formatDateTime(detail.plannedStart)}` : ""}
+                      {detail ? ` — oleh ${detail.inputByName ? `${detail.inputByName} (${detail.inputBy})` : detail.inputBy}` : ""}
+                    </span>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: "2px 10px", fontSize: "0.75rem" }}
+                        disabled={cancelBookingMutation.isPending}
+                        onClick={() => cancelBookingMutation.mutate(b.code)}
+                      >
+                        Batalkan
+                      </button>
+                    )}
+                  </div>
+                  );
+                })}
+                <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginTop: 2 }}>
+                  Booking gugur otomatis begitu Order ini di-input di tahap yang di-booking, atau tanki dipakai Order lain.
+                </div>
+              </div>
+            )}
+            {bookingMessage && <p className="status-text" style={{ marginTop: 8, marginBottom: 0 }}>{bookingMessage}</p>}
+            {!bookingStage && bookingError && <p className="error-text" style={{ marginTop: 8, marginBottom: 0 }}>{bookingError}</p>}
+            {/* Form Booking Tanki = pop-up TERPISAH dari Info Proses Material
+                (2026-09-20, instruksi eksplisit user) -- lewat portal ke body
+                spy tidak ikut ke-scroll/ke-clip di dalam pop-up Info Proses. */}
+            {bookingStage &&
+              createPortal(
+                <Modal
+                  title={`Booking Tanki ${bookingStage} — Order ${order}`}
+                  onClose={() => {
+                    closeBookingModal();
+                    onCloseAll?.();
+                  }}
+                  onBack={closeBookingModal}
+                  width={860}
+                  closeOnBackdropClick={false}
+                >
+                  <div className="panel">
+                    <div className="panel-body">
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                        <button type="button" className="btn btn-outline" style={{ padding: "3px 10px", fontSize: "0.78rem" }} onClick={resetColWidths}>
+                          ↺ Reset Lebar Kolom
+                        </button>
+                      </div>
+                      <ExcelBlock title={`Production & MRP Schedule » ${bookingStage}, Booking Tanki`}>
+                        {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
+                        <ExcelRow>
+                          <ExcelField label="Order" widthPx={colWidths.order} onResizeStart={beginResize("order")}>
+                            <input value={order ?? ""} readOnly />
+                          </ExcelField>
+                          <ExcelField label="Material Number" widthPx={colWidths.materialNumber} onResizeStart={beginResize("materialNumber")}>
+                            <input value={ref?.materialNumber ?? materialNumber ?? ""} readOnly />
+                          </ExcelField>
+                          <ExcelField label="Material Description" widthPx={colWidths.materialDescription} onResizeStart={beginResize("materialDescription")}>
+                            <input value={ref?.materialDescription ?? ""} readOnly />
+                          </ExcelField>
+                        </ExcelRow>
+                        <ExcelRow>
+                          <ExcelField label="Batch" widthPx={colWidths.batch} onResizeStart={beginResize("batch")}>
+                            <input value={ref?.batch ?? ""} readOnly />
+                          </ExcelField>
+                          <ExcelField label="Order Qty" widthPx={colWidths.orderQty} onResizeStart={beginResize("orderQty")}>
+                            <input value={ref?.orderQty ?? ""} readOnly />
+                          </ExcelField>
+                          <ExcelField label="Plant" widthPx={colWidths.plant} onResizeStart={beginResize("plant")}>
+                            <input value={ref?.plant ?? ""} readOnly />
+                          </ExcelField>
+                        </ExcelRow>
+                        <ExcelRow>
+                          <ExcelField label="Code Tanki *" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")}>
+                            <TankSelect bare id="mf-booking-tank" value={bookingTank} onChange={setBookingTank} />
+                          </ExcelField>
+                          <ExcelField label="Rencana Mulai" widthPx={colWidths.plannedStart} onResizeStart={beginResize("plannedStart")}>
+                            <input type="datetime-local" value={bookingPlannedStart} onChange={(e) => setBookingPlannedStart(e.target.value)} />
+                          </ExcelField>
+                          <ExcelField label="Booked By" widthPx={colWidths.bookedBy} onResizeStart={beginResize("bookedBy")}>
+                            <input value={bookedByLabel} readOnly />
+                          </ExcelField>
+                        </ExcelRow>
+                        <ExcelRow>
+                          <ExcelField label="Catatan" widthPx={colWidths.catatan} onResizeStart={beginResize("catatan")}>
+                            <input value={bookingRemark} onChange={(e) => setBookingRemark(e.target.value)} />
+                          </ExcelField>
+                        </ExcelRow>
+                      </ExcelBlock>
+                      <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Manual) di Tank Monitoring dengan Order ini, dan
+                        gugur otomatis begitu Order ini di-input di tahap {bookingStage} atau tanki dipakai Order lain.
+                      </p>
+                      {bookingError && <p className="error-text" style={{ margin: "8px 0 0" }}>{bookingError}</p>}
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                        <button type="button" className="btn" disabled={bookingMutation.isPending} onClick={submitBooking}>
+                          {bookingMutation.isPending ? "Menyimpan..." : "Simpan Booking"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </Modal>,
+                document.body
+              )}
             {isRfOrder ? (
               <p style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--text-muted)" }}>
                 Simpan Perubahan Wajib/Tidak dikunci utk Order Type {orderType} -- pengaturan Wajib/Tidak baku utk

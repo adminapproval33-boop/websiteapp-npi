@@ -4,6 +4,7 @@ import { asyncRoute } from "../../middleware/errorHandler";
 import { requireAuth } from "../../middleware/auth";
 import { evaluateSpec } from "../../lib/specEval";
 import { parseQtyNumber } from "../../lib/qty";
+import { parseBookingSection } from "../../lib/tankBooking";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -1391,10 +1392,6 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     })),
   ];
   unifiedManualEntries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  const latestManualByTank = new Map<string, ManualTankEntry>();
-  for (const m of unifiedManualEntries) {
-    if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
-  }
 
   const touches: TankTouch[] = [];
   for (const r of premixAftermix) {
@@ -1487,6 +1484,30 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       finish: rep?.finish ?? null,
       moment: rep?.start ?? r.timestamp,
     });
+  }
+
+  // Booking tanki (2026-09-20, instruksi eksplisit user, lihat lib/tankBooking.ts)
+  // -- BEDA dari Input Manual biasa: booking otomatis GUGUR (tidak lagi "menang
+  // mutlak") begitu (a) Order yg sama SUDAH di-input di tahap yg di-booking
+  // (Premix/Aftermix) SESUDAH booking dibuat -- artinya tanki aslinya sudah
+  // tercatat lewat input proses itu sendiri, di tanki manapun -- atau (b) tanki
+  // itu dipakai Order LAIN (Premix/Aftermix/Milling/Colour Matching) sesudah
+  // booking. Dibandingkan pakai `timestamp` (kapan baris DISIMPAN), BUKAN
+  // Start/Finish yg diketik user, krn jam Start bisa lebih lampau drpd booking.
+  function isBookingReleased(b: ManualTankEntry): boolean {
+    const section = parseBookingSection(b.remark);
+    if (!section) return false;
+    const t = b.timestamp.getTime();
+    if (premixAftermix.some((r) => r.order === b.order && r.section === section && r.timestamp.getTime() > t)) return true;
+    if (premixAftermix.some((r) => r.codeTanki === b.codeTanki && r.order !== b.order && r.timestamp.getTime() > t)) return true;
+    if (milling.some((r) => r.order !== b.order && (r.codeTanki1 === b.codeTanki || r.codeTanki2 === b.codeTanki) && r.timestamp.getTime() > t)) return true;
+    if (colourMatching.some((r) => r.codeTanki === b.codeTanki && r.order !== b.order && r.timestamp.getTime() > t)) return true;
+    return false;
+  }
+  const latestManualByTank = new Map<string, ManualTankEntry>();
+  for (const m of unifiedManualEntries) {
+    if (isBookingReleased(m)) continue;
+    if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
   }
 
   // Material Description/%GR SENGAJA di-lookup ulang dari Master Data Cooispi

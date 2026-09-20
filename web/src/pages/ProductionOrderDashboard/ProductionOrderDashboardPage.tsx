@@ -846,6 +846,7 @@ export default function ProductionOrderDashboardPage() {
             orderType={infoTarget.orderType}
             order={infoTarget.order || null}
             onFlowSaved={() => rowsQuery.refetch()}
+            onCloseAll={() => setInfoTarget(null)}
             onOpenStage={(stage) => {
               if (!infoTarget.order) {
                 window.alert("Cari & pilih Order dulu di atas sebelum bisa buka Input tahap.");

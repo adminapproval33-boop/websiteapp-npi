@@ -60,12 +60,12 @@ const OUT_OF_SCOPE =
 export const menuTree: MenuNode[] = [
   group("Dashboard", [
     leaf("Dashboard Produktivitas", "/dashboard/produktivitas", <ProduktivitasDashboardPage />),
-    leaf("Dashboard Approval", "/dashboard/approval", <ApprovalDashboardPage />),
-    leaf("Dashboard Colour Matching", "/dashboard/colour-matching", <ColourMatchingDashboardPage />),
     leaf("Production Order Monitoring", "/dashboard/production-order", <ProductionOrderDashboardPage />),
+    leaf("Dashboard Colour Matching", "/dashboard/colour-matching", <ColourMatchingDashboardPage />),
+    leaf("Dashboard Quality", "/dashboard/quality-check-review", <QualityCheckReviewPage />),
+    leaf("Dashboard Approval", "/dashboard/approval", <ApprovalDashboardPage />),
     leaf("Tank Monitoring", "/dashboard/tank", <TankDashboardPage />),
     leaf("Mesin Monitoring", "/dashboard/mesin", <MesinDashboardPage />),
-    leaf("Dashboard Quality", "/dashboard/quality-check-review", <QualityCheckReviewPage />),
   ]),
   group("Production & MRP Schedule", [
     leaf("Premix", "/planning/premix", <PremixAftermixPage section="PREMIX" title="Premix" />),

@@ -29,6 +29,8 @@ interface QualityReviewRow {
   batch: string | null;
   plant: string | null;
   customer: string | null;
+  custSegmen: string | null;
+  flc: string | null;
   status: OrderQcStatus;
   adminQcStage: string | null;
   qcTimestamp: string | null;
@@ -45,6 +47,20 @@ interface QualityReviewData {
 interface MaterialOption {
   materialNumber: string;
   materialDescription: string | null;
+}
+
+/** Subset field `/check-results` yg dipakai RFT -- sama endpoint dgn "History
+ * Input Check Results" di CheckResultsPage.tsx, 1 Order bisa py LEBIH dari 1
+ * baris (re-input/re-check) makanya di sini digabung per Order (lihat
+ * `ngOrderSet` di komponen). */
+interface CheckHistoryParamRow {
+  parameter: string;
+  standard: string | null;
+  result: string | null;
+}
+interface CheckHistoryRow {
+  order: string;
+  parameters: CheckHistoryParamRow[];
 }
 
 interface MaterialTrendRawRow {
@@ -295,7 +311,7 @@ function KpiCard({
  * diminta eksplisit, bukan bug.
  */
 export default function QualityCheckReviewPage() {
-  const [tab, setTab] = useState<"ringkasan" | "trend" | "ok-trend">("ringkasan");
+  const [tab, setTab] = useState<"ringkasan" | "qcReview" | "trend" | "flc">("ringkasan");
   const [statusFilter, setStatusFilter] = useState<Set<OrderQcStatus>>(new Set());
   const [showStatusPanel, setShowStatusPanel] = useState(false);
   // Filter "Lama Menunggu" (2026-08-23, instruksi eksplisit user) -- tombol
@@ -305,6 +321,18 @@ export default function QualityCheckReviewPage() {
   // jadi tidak pernah cocok bucket manapun begitu filter ini aktif).
   const [ageFilter, setAgeFilter] = useState<Set<string>>(new Set());
   const [showAgePanel, setShowAgePanel] = useState(false);
+  // Filter kartu "Direct Passed"/"Not Direct Passed" tab "Quality Check Review"
+  // (2026-09-17, instruksi eksplisit user: sebelumnya 2 kartu itu toggle
+  // `statusFilter` "OK" yg SAMA, jadi klik salah satu efeknya identik/tidak
+  // bisa pilih salah satu saja) -- filter TERPISAH, AND dgn `statusFilter`/
+  // `ageFilter` (pola sama), lihat `filteredRows`.
+  const [rftSplitFilter, setRftSplitFilter] = useState<Set<"direct" | "notDirect">>(new Set());
+  // Grafik tahunan "RFT Rate per Bulan" (2026-09-17, instruksi eksplisit user:
+  // "buatkan grafik tahunan ... dibagi jadi 12 bulan") -- tahun yg dipilih utk
+  // grafik ini, independen dari filter "Range waktu" panel RFT di atasnya
+  // (grafik ini SELALU menampilkan Jan-Des penuh utk 1 tahun, bukan potongan
+  // range tanggal).
+  const [rftYear, setRftYear] = useState(() => new Date().getFullYear());
   // Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit user) --
   // filter berdasar "Tanggal Masuk QC" (sinceQcEntry). String kosong = tanpa
   // batas.
@@ -358,6 +386,20 @@ export default function QualityCheckReviewPage() {
   const query = useQuery({
     queryKey: ["quality-check-review"],
     queryFn: () => api.get<{ success: boolean; data: QualityReviewData }>("/dashboard/quality-check-review").then((r) => r.data),
+  });
+
+  // RFT (Right First Time) -- histori lengkap Spec Parameter tiap Order, sumber
+  // SAMA dgn "History Input Check Results" (endpoint `/check-results`, 2026-09-17
+  // instruksi eksplisit user: definisi RFT harus lihat histori Check Results,
+  // bukan cuma status kerja QC terkini). Dipakai tab "Dashboard" (panel RFT),
+  // "Quality Check Review" (split kartu "OK (QC Passed)" jadi Direct/Not Direct
+  // Passed), & "Dashboard FLC" (breakdown per FLC) -- cuma di-fetch pas salah
+  // satu dari tab2 itu aktif (payload-nya berat -- SEMUA Check Results, bukan
+  // per-Order).
+  const checkHistoryQuery = useQuery({
+    queryKey: ["quality-check-review-check-history"],
+    queryFn: () => api.get<{ success: boolean; data: CheckHistoryRow[] }>("/check-results").then((r) => r.data),
+    enabled: tab === "ringkasan" || tab === "qcReview" || tab === "flc",
   });
 
   // Tab "Quality Check / Material Number" (2026-08-23, instruksi eksplisit
@@ -430,7 +472,7 @@ export default function QualityCheckReviewPage() {
       }
       return api.get<{ success: boolean; data: QcOkTrendData }>(`/dashboard/quality-check-review/ok-trend?${params.toString()}`).then((r) => r.data);
     },
-    enabled: tab === "ok-trend",
+    enabled: tab === "ringkasan",
   });
 
   const okTrendEffectiveDayScope = okTrendGranularity === "day" ? okTrendDayScope : "all";
@@ -545,9 +587,35 @@ export default function QualityCheckReviewPage() {
       if (dateTo && d > dateTo) return false;
       return true;
     });
+  // RFT (Right First Time) -- Order berstatus OK ditelusuri lagi ke histori Spec
+  // Parameter-nya (`checkHistoryQuery`, endpoint sama dgn "History Input Check
+  // Results") lewat `evaluateSpec`: ADA SATU SAJA parameter yg verdict-nya "ng"
+  // -> Order itu "Not Direct Passed" (pernah gagal di percobaan sebelumnya)
+  // walau status akhirnya OK; SEMUA parameter historinya OK -> "Direct Passed".
+  // Didefinisikan SEBELUM `filteredRows` (bukan di bawah bareng kartu RFT tab
+  // Dashboard) krn dipakai jadi filter kartu "Direct Passed"/"Not Direct
+  // Passed" tab Quality Check Review juga (`rftSplitFilter` di bawah).
+  const ngOrderSet = new Set<string>();
+  for (const cr of checkHistoryQuery.data ?? []) {
+    for (const p of cr.parameters) {
+      if (evaluateSpec(p.standard, p.result, p.parameter) === "ng") {
+        ngOrderSet.add(cr.order);
+        break;
+      }
+    }
+  }
+  const isRftRow = (r: QualityReviewRow) => r.status === "OK" && !ngOrderSet.has(r.order);
+
   const filteredRows = rows
     .filter((r) => statusFilter.size === 0 || statusFilter.has(r.status))
-    .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""));
+    .filter((r) => ageFilter.size === 0 || ageFilter.has(rowAgeBucket(r) ?? ""))
+    // Filter kartu "Direct Passed"/"Not Direct Passed" (2026-09-17, instruksi
+    // eksplisit user: kartu ini sebelumnya cuma toggle status "OK" yg SAMA utk
+    // keduanya, jadi tidak bisa klik salah satu saja -- sekarang py filter
+    // SENDIRI, independen dari `statusFilter`/`ageFilter` (AND, sama pola dgn
+    // 2 filter itu) -- Order NON-OK otomatis tersaring habis begitu salah satu
+    // dipilih, krn split ini cuma berlaku utk Order OK.
+    .filter((r) => rftSplitFilter.size === 0 || (r.status === "OK" && rftSplitFilter.has(isRftRow(r) ? "direct" : "notDirect")));
 
   // Tiap kartu KPI skrg py 2 metrik (2026-08-23, instruksi eksplisit user):
   // "Jumlah Formula (Order)" (jumlah baris, spt sebelumnya) & "Total Qty
@@ -588,6 +656,107 @@ export default function QualityCheckReviewPage() {
     (acc, b) => ({ count: acc.count + b.count, qty: acc.qty + b.qty }),
     zeroMetric()
   );
+
+  // --- RFT (Right First Time) tab "Dashboard" (2026-09-17, DIREVISI sesuai
+  // instruksi eksplisit user -- versi awal cuma baca status kerja QC terkini,
+  // SEKARANG harus lihat lagi histori Spec Parameter). `ngOrderSet`/`isRftRow`
+  // sendiri sudah didefinisikan lebih awal (dekat `filteredRows`) krn dipakai
+  // bareng oleh filter kartu "Direct Passed"/"Not Direct Passed" tab "Quality
+  // Check Review" juga. Definisi: Order dianggap "selesai" HANYA kalau status
+  // kerja QC-nya "OK" ("On Check", "Improve", DAN "Assorted (NG)" semuanya
+  // DIKELUARKAN -- instruksi eksplisit user, dianggap belum relevan utk kartu
+  // KPI ini -- jadi TIDAK dihitung sama sekali). Dipakai `rows` (bukan
+  // `filteredRows`) supaya independen dari filter "☰ Status"/"☰ Lama Proses"
+  // punya tab Dashboard -- cuma ikut Range waktu. Cust Segmen tertentu (lihat
+  // `EXCLUDED_CUST_SEGMENTS` di bawah) DIBUANG juga dari sini (2026-09-17,
+  // instruksi eksplisit user) -- jadi TIDAK ikut ke kartu KPI RFT SAMA SEKALI
+  // (bukan cuma disembunyikan di tabel breakdown per Cust Segmen).
+  const EXCLUDED_CUST_SEGMENTS = new Set(["SEMI HALB", "-", "(Tanpa Cust Segmen)", "HARDENER"]);
+  const rftFinished = rows.filter((r) => r.status === "OK" && !EXCLUDED_CUST_SEGMENTS.has(r.custSegmen?.trim() || "(Tanpa Cust Segmen)"));
+  const rftPass = { count: 0, qty: 0 };
+  const rftFail = { count: 0, qty: 0 };
+  for (const r of rftFinished) {
+    const bucket = isRftRow(r) ? rftPass : rftFail;
+    bucket.count++;
+    bucket.qty += parseQtyLocal(r.orderQty);
+  }
+  const rftFinishedTotal = { count: rftPass.count + rftFail.count, qty: rftPass.qty + rftFail.qty };
+  const rftRate = rftFinishedTotal.count > 0 ? (rftPass.count / rftFinishedTotal.count) * 100 : 0;
+
+  // Dashboard FLC (First Lot Control) (2026-09-18, DIREVISI sesuai instruksi
+  // eksplisit user -- disederhanakan jadi cuma hitung jumlah Order per FLC
+  // 1/2/3 + totalnya, TANPA breakdown RFT/tabel lagi). Sumber SAMA dgn kartu
+  // RFT di atas (`rftFinished`: Order OK, Cust Segmen yg dikecualikan sudah
+  // dibuang) -- "Reguler" SENGAJA tidak dihitung di sini (bukan First Lot).
+  const flcCounts: Record<"FLC 1" | "FLC 2" | "FLC 3", { count: number; qty: number }> = {
+    "FLC 1": { count: 0, qty: 0 },
+    "FLC 2": { count: 0, qty: 0 },
+    "FLC 3": { count: 0, qty: 0 },
+  };
+  for (const r of rftFinished) {
+    const flc = r.flc?.trim();
+    if (flc === "FLC 1" || flc === "FLC 2" || flc === "FLC 3") {
+      flcCounts[flc].count++;
+      flcCounts[flc].qty += parseQtyLocal(r.orderQty);
+    }
+  }
+  const flcTotal = {
+    count: flcCounts["FLC 1"].count + flcCounts["FLC 2"].count + flcCounts["FLC 3"].count,
+    qty: flcCounts["FLC 1"].qty + flcCounts["FLC 2"].qty + flcCounts["FLC 3"].qty,
+  };
+  // "Item Explorer" tab Dashboard FLC (2026-09-18, instruksi eksplisit user) --
+  // Order yg masuk hitungan kartu di atas (FLC 1/2/3 saja, "Reguler" dibuang).
+  const flcRows = rftFinished.filter((r) => r.flc === "FLC 1" || r.flc === "FLC 2" || r.flc === "FLC 3");
+
+  // Grafik tahunan "RFT Rate per Bulan" (2026-09-17, instruksi eksplisit user:
+  // "buatkan grafik tahunan untuk data RFT per Cust Segmen dan total RFT Rate
+  // ... dibagi menjadi 12 bulan"). SENGAJA dari `query.data.rows` mentah
+  // (bukan `rftFinished`/`rows`) supaya independen dari filter "Range waktu"
+  // panel RFT di atas -- grafik ini py pemilih tahun sendiri (`rftYear`),
+  // selalu 12 bulan penuh (Jan-Des) tahun itu. Cust Segmen yg dibuang
+  // (`EXCLUDED_CUST_SEGMENTS`) tetap dikeluarkan juga di sini, konsisten dgn
+  // kartu KPI & tabel breakdown di atas.
+  const rftYearBaseRows = (query.data?.rows ?? []).filter(
+    (r) => r.status === "OK" && !EXCLUDED_CUST_SEGMENTS.has(r.custSegmen?.trim() || "(Tanpa Cust Segmen)")
+  );
+  const rftYearOptions = Array.from(
+    new Set(rftYearBaseRows.filter((r) => r.sinceQcEntry).map((r) => new Date(r.sinceQcEntry!).getFullYear()))
+  ).sort((a, b) => b - a);
+  if (!rftYearOptions.includes(rftYear)) rftYearOptions.unshift(rftYear);
+  const RFT_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  const rftYearRows = rftYearBaseRows.filter((r) => r.sinceQcEntry && new Date(r.sinceQcEntry).getFullYear() === rftYear);
+  const rftYearSegments = Array.from(new Set(rftYearRows.map((r) => r.custSegmen?.trim() || "(Tanpa Cust Segmen)"))).sort();
+  const RFT_SEGMENT_COLORS = ["#3498DB", "#E67E22", "#9B59B6", "#16A085", "#C0392B", "#2ECC71", "#F1C40F"];
+  const rftYearSeries: TrendSeries[] = [
+    { key: "total", label: "Total (Semua Segmen)", color: "#1e293b" },
+    ...rftYearSegments.map((seg, i) => ({ key: seg, label: seg, color: RFT_SEGMENT_COLORS[i % RFT_SEGMENT_COLORS.length] })),
+  ];
+  const rftYearPoints: TrendChartPoint[] = RFT_MONTH_LABELS.map((label, monthIdx) => {
+    const monthRows = rftYearRows.filter((r) => new Date(r.sinceQcEntry!).getMonth() === monthIdx);
+    const values: Record<string, number> = {
+      total: monthRows.length > 0 ? (monthRows.filter(isRftRow).length / monthRows.length) * 100 : 0,
+    };
+    for (const seg of rftYearSegments) {
+      const segRows = monthRows.filter((r) => (r.custSegmen?.trim() || "(Tanpa Cust Segmen)") === seg);
+      values[seg] = segRows.length > 0 ? (segRows.filter(isRftRow).length / segRows.length) * 100 : 0;
+    }
+    return { bucketKey: `${rftYear}-${String(monthIdx + 1).padStart(2, "0")}`, label, values };
+  });
+
+  // Kartu "OK (QC Passed)" tab "Quality Check Review" DIPECAH juga jadi Direct
+  // Passed/Not Direct Passed (2026-09-17, instruksi eksplisit user, pakai
+  // `ngOrderSet` yg sama dgn RFT di atas) -- SENGAJA dari `filteredRows` (bukan
+  // `rows`) supaya tetap reaktif thd filter "☰ Status"/"☰ Lama Proses" spt
+  // kartu2 lain di tab ini (beda dgn kartu RFT tab Dashboard yg independen dari
+  // filter itu).
+  const okDirectPassed = zeroMetric();
+  const okNotDirectPassed = zeroMetric();
+  for (const r of filteredRows) {
+    if (r.status !== "OK") continue;
+    const bucket = ngOrderSet.has(r.order) ? okNotDirectPassed : okDirectPassed;
+    bucket.count++;
+    bucket.qty += parseQtyLocal(r.orderQty);
+  }
 
   const statusFilterButton = (
     <div style={{ position: "relative" }}>
@@ -647,18 +816,188 @@ export default function QualityCheckReviewPage() {
         <button className={`btn ${tab === "ringkasan" ? "" : "btn-outline"}`} onClick={() => setTab("ringkasan")}>
           Dashboard
         </button>
+        <button className={`btn ${tab === "qcReview" ? "" : "btn-outline"}`} onClick={() => setTab("qcReview")}>
+          Quality Check Review
+        </button>
         <button className={`btn ${tab === "trend" ? "" : "btn-outline"}`} onClick={() => setTab("trend")}>
           Quality Check / Material Number
         </button>
-        <button className={`btn ${tab === "ok-trend" ? "" : "btn-outline"}`} onClick={() => setTab("ok-trend")}>
-          OK (QC Passed) - Tren
+        <button className={`btn ${tab === "flc" ? "" : "btn-outline"}`} onClick={() => setTab("flc")}>
+          Dashboard FLC
         </button>
       </div>
 
       {tab === "ringkasan" && (
         <div className="panel">
-          <div className="panel-header">Dashboard Quality</div>
+          <div className="panel-header">Dashboard Quality Check</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 4 }}>RFT (Right First Time)</div>
+              <p style={{ margin: "0 0 8px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                Note: "Total Selesai" = jumlah Order berstatus "OK (QC Passed)" SAJA ("On Check", "Improve", & "Assorted
+                (NG)" tidak dihitung di kartu ini), DIKURANGI Order yang Cust Segmen-nya "SEMI HALB", "-", "(Tanpa Cust
+                Segmen)", atau "HARDENER" (dibuang total, tidak ikut ke kartu KPI ini maupun tabel breakdown di
+                bawah). Dari Order yang tersisa: "Direct Passed" = yang SEMUA parameter Spec-nya lolos sejak
+                pengecekan pertama (dicek ulang ke histori "History Input Check Results"). "Not Direct Passed" = Order
+                OK yang ternyata pernah py minimal 1 parameter Spec ber-hasil NG di histori check-nya.
+              </p>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <KpiCard label="Total Selesai" count={rftFinishedTotal.count} qty={rftFinishedTotal.qty} color="#3498DB" />
+                <KpiCard label="Direct Passed" count={rftPass.count} qty={rftPass.qty} color="#2ECC71" />
+                <KpiCard label="Not Direct Passed" count={rftFail.count} qty={rftFail.qty} color="#F1C40F" />
+                <div className="panel" style={{ flex: "1 1 160px", padding: 16, borderTop: "4px solid #9B59B6" }}>
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 600 }}>RFT Rate</div>
+                  <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{rftRate.toFixed(1)}%</div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>RFT Rate per Bulan (Tahunan)</div>
+                <select value={rftYear} onChange={(e) => setRftYear(Number(e.target.value))} style={{ width: 100 }}>
+                  {rftYearOptions.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p style={{ margin: "0 0 8px", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                Note: grafik ini SELALU menampilkan 12 bulan penuh (Jan-Des) tahun yang dipilih, terlepas dari filter
+                "Range waktu" di atas -- tiap titik = RFT Rate Order yang "Tanggal Masuk QC"-nya jatuh di bulan itu.
+              </p>
+              <TrendLineChart
+                points={rftYearPoints}
+                series={rftYearSeries}
+                yAxisLabel="RFT Rate (%)"
+                valueFormatter={(n) => `${n.toFixed(1)}%`}
+              />
+            </div>
+
+            <div>
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>OK (QC Passed) - Tren</div>
+              <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
+                    disabled={okTrendGranularity !== "day"}
+                    onClick={() => setShowDayScopePanel((s) => !s)}
+                  >
+                    ☰ Cakupan Hari
+                  </button>
+                  {showDayScopePanel && (
+                    <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
+                      {DAY_SCOPE_OPTIONS.map((opt) => (
+                        <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
+                          <input
+                            type="radio"
+                            name="ok-trend-day-scope"
+                            checked={okTrendDayScope === opt.value}
+                            onChange={() => setOkTrendDayScope(opt.value)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {GRANULARITY_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`btn ${okTrendGranularity === opt.value ? "" : "btn-outline"}`}
+                      onClick={() => setOkTrendGranularity(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="field" style={{ maxWidth: 180 }}>
+                  <input type="date" aria-label="Dari Tanggal" value={okTrendFrom} onChange={(e) => setOkTrendFrom(e.target.value)} />
+                </div>
+                <div className="field" style={{ maxWidth: 180 }}>
+                  <input type="date" aria-label="Sampai Tanggal" value={okTrendTo} onChange={(e) => setOkTrendTo(e.target.value)} />
+                </div>
+                {okTrendUsingCustomRange && (
+                  <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
+                )}
+                {okTrendUsingCustomRange && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => {
+                      setOkTrendFrom("");
+                      setOkTrendTo("");
+                    }}
+                  >
+                    Reset Tanggal
+                  </button>
+                )}
+              </div>
+
+              {okTrendGranularity !== "day" && (
+                <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "0.72rem" }}>
+                  Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
+                  hari kerja & Sabtu/Minggu jadi 1 angka.
+                </p>
+              )}
+
+              {okTrendQuery.isLoading && (
+                <p style={{ margin: "8px 0 0", fontSize: "0.85rem", color: "var(--text-muted)" }}>Memuat...</p>
+              )}
+              {!okTrendQuery.isLoading && okTrendBuckets.length === 0 && (
+                <p style={{ margin: "8px 0 0", fontSize: "0.85rem", color: "var(--text-muted)" }}>Belum ada Order yang OK (QC Passed).</p>
+              )}
+
+              {okTrendBuckets.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 12 }}>
+                  <div className="panel" style={{ padding: 16 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah Formula (Order) OK (QC Passed)</div>
+                    <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+                      Garis putus-putus = rata-rata jumlah Order OK per {GRANULARITY_OPTIONS.find((o) => o.value === okTrendGranularity)?.label.toLowerCase()}.
+                    </p>
+                    <TrendLineChart points={okTrendPointsCount} series={[OK_TREND_SERIES]} yAxisLabel="Jumlah Order" granularity={okTrendGranularity} showAverage />
+                  </div>
+
+                  <div className="panel" style={{ padding: 16 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Total Qty (KG/Ltr) OK (QC Passed)</div>
+                    <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+                      Garis putus-putus = rata-rata Qty (KG/Ltr) OK per {GRANULARITY_OPTIONS.find((o) => o.value === okTrendGranularity)?.label.toLowerCase()}.
+                    </p>
+                    <TrendLineChart
+                      points={okTrendPointsQty}
+                      series={[OK_TREND_SERIES]}
+                      yAxisLabel="KG/Ltr"
+                      valueFormatter={(n) => n.toLocaleString("id-ID")}
+                      granularity={okTrendGranularity}
+                      showAverage
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "qcReview" && (
+        <div className="panel">
+          <div className="panel-header">Quality Check Review</div>
+          <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              Note: "Total" = jumlah Order yang sudah pernah diinput ke Check Results dan/atau Admin QC, dgn status
+              kerja QC "OK (QC Passed)", "On Check", "Improve", atau "Assorted (NG)" ("Approval" dikeluarkan krn sudah
+              py Dashboard Approval sendiri; Order yang Admin QC Stage-nya masih tahap awal seperti "Joint Lot"/"Lot
+              Packing" & belum pernah masuk Check Results juga tidak dihitung sama sekali). Kartu "OK (QC Passed)"
+              dipecah jadi "Direct Passed" (SEMUA parameter Spec-nya lolos sejak pengecekan pertama, dicek ke histori
+              "History Input Check Results") & "Not Direct Passed" (pernah py minimal 1 parameter Spec ber-hasil NG di
+              histori check-nya, walau status akhirnya OK). Ikut berubah kalau filter "☰ Status"/"☰ Lama Proses" di
+              bawah dipakai, atau Range waktu (Tanggal Masuk QC) di bawah ini diisi.
+            </p>
+
             {/* Range waktu "Dari - Sampai" (2026-09-03, instruksi eksplisit
                 user) -- filter berdasar "Tanggal Masuk QC", berlaku ke SEMUA
                 kartu KPI/tabel/Export CSV di bawah (bagian dari `rows`). */}
@@ -693,31 +1032,47 @@ export default function QualityCheckReviewPage() {
                 kartu ini dirasa mubazir) -- status "Approval" sendiri TETAP
                 ada (masih dihitung ke "Total", masih bisa difilter lewat
                 "☰ Status", masih tampil di tabel detail & badge Status),
-                cuma kartu KPI dedicated-nya yg hilang. */}
+                cuma kartu KPI dedicated-nya yg hilang.
+                "Direct Passed"/"Not Direct Passed" (2026-09-17, DIREVISI --
+                awalnya keduanya toggle `statusFilter` "OK" yg SAMA, jadi klik
+                salah satu efeknya identik/tidak bisa pilih satu saja) sekarang
+                toggle `rftSplitFilter` sendiri, terpisah dari `statusFilter`. */}
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <KpiCard
             label="Total"
             count={total.count}
             qty={total.qty}
             color="#3498DB"
-            onClick={() => setStatusFilter(new Set())}
-            active={statusFilter.size === 0}
-            dimmed={statusFilter.size > 0}
+            onClick={() => {
+              setStatusFilter(new Set());
+              setRftSplitFilter(new Set());
+            }}
+            active={statusFilter.size === 0 && rftSplitFilter.size === 0}
+            dimmed={statusFilter.size > 0 || rftSplitFilter.size > 0}
           />
           <KpiCard
-            label="OK (QC Passed)"
-            count={summary.ok.count}
-            qty={summary.ok.qty}
+            label="Direct Passed"
+            count={okDirectPassed.count}
+            qty={okDirectPassed.qty}
             color="#2ECC71"
-            onClick={() => setStatusFilter((s) => toggleInSet(s, "OK"))}
-            active={statusFilter.has("OK")}
-            dimmed={statusFilter.size > 0 && !statusFilter.has("OK")}
+            onClick={() => setRftSplitFilter((s) => toggleInSet(s, "direct"))}
+            active={rftSplitFilter.has("direct")}
+            dimmed={rftSplitFilter.size > 0 && !rftSplitFilter.has("direct")}
+          />
+          <KpiCard
+            label="Not Direct Passed"
+            count={okNotDirectPassed.count}
+            qty={okNotDirectPassed.qty}
+            color="#F1C40F"
+            onClick={() => setRftSplitFilter((s) => toggleInSet(s, "notDirect"))}
+            active={rftSplitFilter.has("notDirect")}
+            dimmed={rftSplitFilter.size > 0 && !rftSplitFilter.has("notDirect")}
           />
           <KpiCard
             label="On Check"
             count={summary.onCheck.count}
             qty={summary.onCheck.qty}
-            color="#F1C40F"
+            color="#E67E22"
             onClick={() => setStatusFilter((s) => toggleInSet(s, "On Check"))}
             active={statusFilter.has("On Check")}
             dimmed={statusFilter.size > 0 && !statusFilter.has("On Check")}
@@ -773,6 +1128,8 @@ export default function QualityCheckReviewPage() {
           </div>
         </div>
 
+        <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Item Explorer</div>
+
         <DataTable
             rowKey={(r: QualityReviewRow) => r.order}
             exportFileName="quality-check-review"
@@ -793,6 +1150,7 @@ export default function QualityCheckReviewPage() {
               { key: "batch", label: "Batch", render: (r) => r.batch ?? "-" },
               { key: "plant", label: "Plant", render: (r) => r.plant ?? "-" },
               { key: "customer", label: "Customer", render: (r) => r.customer ?? "-" },
+              { key: "flc", label: "FLC", render: (r) => r.flc || "Reguler" },
               {
                 key: "status",
                 label: "Status",
@@ -840,6 +1198,33 @@ export default function QualityCheckReviewPage() {
                 csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
               },
               { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
+              {
+                // Kolom "RFT" (2026-09-17, instruksi eksplisit user, setelah "%
+                // GR") -- pakai `isRftRow` yg sama dgn panel RFT tab Dashboard.
+                // "-" utk Order yg BUKAN status OK (On Check/Improve/Assorted
+                // (NG) belum/tidak relevan dinilai RFT, bukan berarti "Tidak").
+                key: "rft",
+                label: "RFT",
+                render: (r) =>
+                  r.status !== "OK" ? (
+                    "-"
+                  ) : (
+                    <span
+                      style={{
+                        background: isRftRow(r) ? "#2ECC71" : "#E67E22",
+                        color: "#fff",
+                        padding: "2px 10px",
+                        borderRadius: 999,
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        display: "inline-block",
+                      }}
+                    >
+                      {isRftRow(r) ? "Ya" : "Tidak"}
+                    </span>
+                  ),
+                csvValue: (r) => (r.status !== "OK" ? "" : isRftRow(r) ? "Ya" : "Tidak"),
+              },
               {
                 key: "actions",
                 label: "Aksi",
@@ -1011,111 +1396,141 @@ export default function QualityCheckReviewPage() {
         </div>
       )}
 
-      {tab === "ok-trend" && (
+      {tab === "flc" && (
         <div className="panel">
-          <div className="panel-header">OK (QC Passed) - Tren</div>
+          <div className="panel-header">Dashboard FLC (First Lot Control)</div>
           <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div style={{ position: "relative" }}>
-                <button
-                  type="button"
-                  className={`btn ${showDayScopePanel ? "" : "btn-outline"}`}
-                  disabled={okTrendGranularity !== "day"}
-                  onClick={() => setShowDayScopePanel((s) => !s)}
-                >
-                  ☰ Cakupan Hari
-                </button>
-                {showDayScopePanel && (
-                  <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 220, padding: 10 }}>
-                    {DAY_SCOPE_OPTIONS.map((opt) => (
-                      <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: "0.85rem" }}>
-                        <input
-                          type="radio"
-                          name="ok-trend-day-scope"
-                          checked={okTrendDayScope === opt.value}
-                          onChange={() => setOkTrendDayScope(opt.value)}
-                        />
-                        {opt.label}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {GRANULARITY_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`btn ${okTrendGranularity === opt.value ? "" : "btn-outline"}`}
-                    onClick={() => setOkTrendGranularity(opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-              <div className="field" style={{ maxWidth: 180 }}>
-                <input type="date" aria-label="Dari Tanggal" value={okTrendFrom} onChange={(e) => setOkTrendFrom(e.target.value)} />
-              </div>
-              <div className="field" style={{ maxWidth: 180 }}>
-                <input type="date" aria-label="Sampai Tanggal" value={okTrendTo} onChange={(e) => setOkTrendTo(e.target.value)} />
-              </div>
-              {okTrendUsingCustomRange && (
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
-              )}
-              {okTrendUsingCustomRange && (
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => {
-                    setOkTrendFrom("");
-                    setOkTrendTo("");
-                  }}
-                >
-                  Reset Tanggal
-                </button>
-              )}
+            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              Note: sumber & cakupan Order-nya SAMA dengan panel "RFT (Right First Time)" di tab Dashboard (Order
+              berstatus "OK (QC Passed)" saja, Cust Segmen "SEMI HALB"/"-"/"(Tanpa Cust Segmen)"/"HARDENER" dibuang) --
+              cuma dihitung per "FLC" (kolom di Input Check Results). Order berstatus "Reguler" tidak dihitung di sini.
+            </p>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <KpiCard label="FLC 1" count={flcCounts["FLC 1"].count} qty={flcCounts["FLC 1"].qty} color="#3498DB" />
+              <KpiCard label="FLC 2" count={flcCounts["FLC 2"].count} qty={flcCounts["FLC 2"].qty} color="#9B59B6" />
+              <KpiCard label="FLC 3" count={flcCounts["FLC 3"].count} qty={flcCounts["FLC 3"].qty} color="#16A085" />
+              <KpiCard label="Total Formula FLC" count={flcTotal.count} qty={flcTotal.qty} color="#E67E22" />
             </div>
 
-            {okTrendGranularity !== "day" && (
-              <p style={{ margin: 0, marginTop: -12, color: "var(--text-muted)", fontSize: "0.72rem" }}>
-                Filter Cakupan Hari cuma berlaku di granularitas Harian -- bucket Mingguan/Bulanan sudah menggabungkan
-                hari kerja & Sabtu/Minggu jadi 1 angka.
-              </p>
-            )}
+            <div style={{ fontSize: "0.85rem", fontWeight: 600 }}>Item Explorer</div>
 
-            {okTrendQuery.isLoading && (
-              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>Memuat...</p>
-            )}
-            {!okTrendQuery.isLoading && okTrendBuckets.length === 0 && (
-              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>Belum ada Order yang OK (QC Passed).</p>
-            )}
-
-            {okTrendBuckets.length > 0 && (
-              <>
-                <div className="panel" style={{ padding: 16 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Jumlah Formula (Order) OK (QC Passed)</div>
-                  <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
-                    Garis putus-putus = rata-rata jumlah Order OK per {GRANULARITY_OPTIONS.find((o) => o.value === okTrendGranularity)?.label.toLowerCase()}.
-                  </p>
-                  <TrendLineChart points={okTrendPointsCount} series={[OK_TREND_SERIES]} yAxisLabel="Jumlah Order" granularity={okTrendGranularity} showAverage />
-                </div>
-
-                <div className="panel" style={{ padding: 16 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Total Qty (KG/Ltr) OK (QC Passed)</div>
-                  <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
-                    Garis putus-putus = rata-rata Qty (KG/Ltr) OK per {GRANULARITY_OPTIONS.find((o) => o.value === okTrendGranularity)?.label.toLowerCase()}.
-                  </p>
-                  <TrendLineChart
-                    points={okTrendPointsQty}
-                    series={[OK_TREND_SERIES]}
-                    yAxisLabel="KG/Ltr"
-                    valueFormatter={(n) => n.toLocaleString("id-ID")}
-                    granularity={okTrendGranularity}
-                    showAverage
-                  />
-                </div>
-              </>
-            )}
+            <DataTable
+              rowKey={(r: QualityReviewRow) => r.order}
+              exportFileName="dashboard-flc-item-explorer"
+              storageKey="dashboard-flc-item-explorer"
+              rows={flcRows}
+              freezeFirstColumn
+              emptyMessage={query.isLoading ? "Memuat..." : "Belum ada Order dengan FLC 1/2/3."}
+              columns={[
+                { key: "order", label: "Order", render: (r) => r.order },
+                { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber ?? "-" },
+                { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription ?? "-" },
+                { key: "batch", label: "Batch", render: (r) => r.batch ?? "-" },
+                { key: "plant", label: "Plant", render: (r) => r.plant ?? "-" },
+                { key: "customer", label: "Customer", render: (r) => r.customer ?? "-" },
+                { key: "flc", label: "FLC", render: (r) => r.flc || "Reguler" },
+                {
+                  key: "status",
+                  label: "Status",
+                  render: (r) => (
+                    <span
+                      style={{
+                        background: STATUS_COLOR[r.status],
+                        color: "#fff",
+                        padding: "2px 10px",
+                        borderRadius: 999,
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        display: "inline-block",
+                      }}
+                    >
+                      {r.status}
+                    </span>
+                  ),
+                  csvValue: (r) => r.status,
+                },
+                { key: "adminQcStage", label: "Admin QC Stage", render: (r) => r.adminQcStage ?? "-" },
+                {
+                  key: "qcTimestamp",
+                  label: "Tanggal Masuk QC",
+                  render: (r) => (r.qcTimestamp ? formatDateTime(r.qcTimestamp) : "-"),
+                  csvValue: (r) => (r.qcTimestamp ? toExcelDateTimeString(r.qcTimestamp) : ""),
+                },
+                {
+                  key: "qcPassed",
+                  label: "QC Passed",
+                  render: (r) => (r.qcPassed ? formatDateTime(r.qcPassed) : "-"),
+                  csvValue: (r) => (r.qcPassed ? toExcelDateTimeString(r.qcPassed) : ""),
+                },
+                {
+                  key: "ageDays",
+                  label: "Lama Proses (Hari)",
+                  render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
+                  csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
+                },
+                { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
+                {
+                  key: "rft",
+                  label: "RFT",
+                  render: (r) =>
+                    r.status !== "OK" ? (
+                      "-"
+                    ) : (
+                      <span
+                        style={{
+                          background: isRftRow(r) ? "#2ECC71" : "#E67E22",
+                          color: "#fff",
+                          padding: "2px 10px",
+                          borderRadius: 999,
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          display: "inline-block",
+                        }}
+                      >
+                        {isRftRow(r) ? "Ya" : "Tidak"}
+                      </span>
+                    ),
+                  csvValue: (r) => (r.status !== "OK" ? "" : isRftRow(r) ? "Ya" : "Tidak"),
+                },
+                {
+                  key: "actions",
+                  label: "Aksi",
+                  render: (r) => (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        className="btn btn-outline"
+                        type="button"
+                        title="Edit"
+                        aria-label="Edit"
+                        style={{ padding: "6px 10px" }}
+                        onClick={() => {
+                          setEditOrder(r.order);
+                          setEditTarget(null);
+                        }}
+                      >
+                        ✏️
+                      </button>
+                      {(canDeleteCheckResults || canDeleteAdminQc) && (
+                        <button
+                          className="btn btn-danger"
+                          type="button"
+                          title="Hapus"
+                          aria-label="Hapus"
+                          style={{ padding: "6px 10px" }}
+                          onClick={() => {
+                            setDeleteError("");
+                            setDeleteOrder(r.order);
+                          }}
+                        >
+                          🗑️
+                        </button>
+                      )}
+                    </div>
+                  ),
+                  csvValue: () => "",
+                },
+              ]}
+            />
           </div>
         </div>
       )}

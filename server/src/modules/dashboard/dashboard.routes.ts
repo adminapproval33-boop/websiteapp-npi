@@ -2364,6 +2364,15 @@ interface QualityReviewRow {
   batch: string | null;
   plant: string | null;
   customer: string | null;
+  /** Kolom "Cust Segmen" (2026-09-17, instruksi eksplisit user: breakdown RFT
+   * per Cust Segment) -- murni dari `CheckResult.custSegmen` (AdminQc/
+   * MasterOrder TIDAK py field ini sama sekali), jadi Order yg statusnya cuma
+   * dari AdminQc (belum pernah py baris CheckResult) selalu null di sini. */
+  custSegmen: string | null;
+  /** "Reguler"/"FLC 1"/"FLC 2"/"FLC 3" (2026-09-18, instruksi eksplisit user:
+   * Dashboard FLC) -- murni dari `CheckResult.flc` (AdminQc/MasterOrder TIDAK
+   * py field ini), sama pola sumbernya dgn `custSegmen`. */
+  flc: string | null;
   status: OrderQcStatus;
   adminQcStage: string | null;
   qcTimestamp: Date | null;
@@ -2423,7 +2432,17 @@ dashboardRouter.get(
   asyncRoute(async (_req, res) => {
     const [checkResults, adminQcRows] = await Promise.all([
       prisma.checkResult.findMany({
-        select: { order: true, materialNumber: true, materialDescription: true, batch: true, plant: true, customer: true, timestamp: true },
+        select: {
+          order: true,
+          materialNumber: true,
+          materialDescription: true,
+          batch: true,
+          plant: true,
+          customer: true,
+          custSegmen: true,
+          flc: true,
+          timestamp: true,
+        },
         orderBy: { timestamp: "desc" },
       }),
       prisma.adminQc.findMany({
@@ -2482,6 +2501,8 @@ dashboardRouter.get(
         batch: master?.batch ?? source.batch,
         plant: master?.plant ?? source.plant,
         customer: check?.customer ?? null,
+        custSegmen: check?.custSegmen ?? null,
+        flc: check?.flc ?? null,
         status,
         adminQcStage: typeLot,
         qcTimestamp: check?.timestamp ?? null,

@@ -14,16 +14,24 @@ filesRouter.get("/*", async (req, res) => {
     res.status(400).json({ success: false, message: "Path file tidak valid." });
     return;
   }
-  const token = await issueSignedToken({
-    pathname,
-    operations: ["get"],
-    validUntil: Date.now() + 5 * 60 * 1000,
-    token: env.blobReadWriteToken,
-  });
-  const { presignedUrl } = await presignUrl(token, {
-    operation: "get",
-    pathname,
-    access: "private",
-  });
-  res.redirect(302, presignedUrl);
+  // try/catch WAJIB di sini: Express 4 tidak menangkap rejection handler async,
+  // dan Node 24 mematikan seluruh proses kalau ada unhandled rejection --
+  // mis. saat store Vercel Blob suspended, tiap request gambar bikin backend mati.
+  try {
+    const token = await issueSignedToken({
+      pathname,
+      operations: ["get"],
+      validUntil: Date.now() + 5 * 60 * 1000,
+      token: env.blobReadWriteToken,
+    });
+    const { presignedUrl } = await presignUrl(token, {
+      operation: "get",
+      pathname,
+      access: "private",
+    });
+    res.redirect(302, presignedUrl);
+  } catch (err) {
+    console.error("[files] Gagal membuat signed URL Vercel Blob:", err instanceof Error ? err.message : err);
+    res.status(502).json({ success: false, message: "File tidak dapat diambil dari penyimpanan saat ini." });
+  }
 });

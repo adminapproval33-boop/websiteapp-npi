@@ -72,6 +72,7 @@ const saveSchema = z.object({
   batch2: z.string().optional(),
   customer: z.string().optional(),
   custSegmen: z.string().optional(),
+  flc: z.string().optional(),
   orderQty: z.string().optional(),
   plant: z.string().optional(),
   iuPlant: z.string().optional(),

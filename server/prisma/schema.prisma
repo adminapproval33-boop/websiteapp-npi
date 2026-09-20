@@ -651,6 +651,11 @@ model CheckResult {
   batch2              String?
   customer            String?
   custSegmen          String?
+  /// "Reguler" atau "FLC 1"/"FLC 2"/"FLC 3" (First Lot Control), 2026-09-18
+  /// instruksi eksplisit user -- indikasi Order ini lot pertama/percobaan
+  /// keberapa, bukan produksi reguler biasa. Dropdown bebas (bukan enum DB)
+  /// spy konsisten dgn pola field pilihan lain di model ini (mis. `custSegmen`).
+  flc                 String?
   orderQty            String?
   plant               String?
   iuPlant             String?

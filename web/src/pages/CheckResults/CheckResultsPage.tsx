@@ -57,6 +57,7 @@ interface CheckRow {
   batch2: string | null;
   customer: string | null;
   custSegmen: string | null;
+  flc: string | null;
   orderQty: string | null;
   plant: string | null;
   iuPlant: string | null;
@@ -101,6 +102,7 @@ interface HistoryFlatRow {
   materialDescription: string | null;
   customer: string | null;
   custSegmen: string | null;
+  flc: string | null;
   iuPlant: string | null;
   lotCoa: string | null;
   itemCheck: string;
@@ -134,6 +136,7 @@ function flattenHistoryRows(checks: CheckRow[]): HistoryFlatRow[] {
         materialDescription: r.materialDescription,
         customer: r.customer,
         custSegmen: r.custSegmen,
+        flc: r.flc,
         iuPlant: r.iuPlant,
         lotCoa: r.lotCoa,
         itemCheck: p ? p.parameter : "-",
@@ -272,6 +275,7 @@ const emptyForm = {
   lotCoa: "",
   customer: "",
   custSegmen: "",
+  flc: "Reguler",
   remark: "",
   appearanceNotes: "",
 };
@@ -304,6 +308,7 @@ const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
   codeTanki: 140,
   customer: 280,
   custSegmen: 180,
+  flc: 130,
   lotCoa: 180,
   remark: 320,
 };
@@ -311,7 +316,7 @@ const HEADER_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
 /** Urutan kolom per baris visual (utk snap-to-align saat drag-resize -- lihat
  * lib/useResizableColWidths). Harus cocok dgn urutan ExcelField di JSX di bawah. */
 const HEADER_TABLE_COL_ROWS: string[][] = [
-  ["tanggalMasukQc"],
+  ["tanggalMasukQc", "flc"],
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["order2", "materialNumber2", "batch2"],
   ["iuPlant", "codeTanki", "customer", "custSegmen", "lotCoa"],
@@ -634,6 +639,10 @@ export default function CheckResultsPage({
       lotCoa: row.lotCoa ?? "",
       customer: row.customer ?? "",
       custSegmen: row.custSegmen ?? "",
+      // Record LAMA (sebelum field ini ada) dianggap "Reguler" -- konsisten dgn
+      // default form kosong (`emptyForm.flc`), supaya field ini tidak pernah
+      // kosong/blank begitu dibuka utk Edit.
+      flc: row.flc || "Reguler",
       remark: row.remark ?? "",
       appearanceNotes: row.appearanceNotes ?? "",
     });
@@ -783,6 +792,14 @@ export default function CheckResultsPage({
                     onChange={(e) => setForm({ ...form, tanggalMasukQc: e.target.value })}
                     required
                   />
+                </ExcelField>
+                <ExcelField label="FLC" widthPx={headerColWidths.flc} onResizeStart={beginHeaderColResize("flc")} {...gridNav("flc")}>
+                  <select value={form.flc} onChange={(e) => setForm({ ...form, flc: e.target.value })}>
+                    <option value="Reguler">Reguler</option>
+                    <option value="FLC 1">FLC 1</option>
+                    <option value="FLC 2">FLC 2</option>
+                    <option value="FLC 3">FLC 3</option>
+                  </select>
                 </ExcelField>
               </ExcelRow>
               <ExcelRow>
@@ -1075,6 +1092,7 @@ export default function CheckResultsPage({
                 { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
                 { key: "customer", label: "Customer", render: (r) => r.customer },
                 { key: "custSegmen", label: "Cust Segmen", render: (r) => r.custSegmen || "-" },
+                { key: "flc", label: "FLC", render: (r) => r.flc || "Reguler" },
                 { key: "iuPlant", label: "IU Plant", render: (r) => r.iuPlant },
                 { key: "itemCheck", label: "Item Check", render: (r) => r.itemCheck },
                 { key: "spec", label: "Spec", render: (r) => r.spec || "-" },

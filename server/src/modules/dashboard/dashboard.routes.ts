@@ -1348,7 +1348,15 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     prisma.productionOrderManualInput.findMany({ where: { codeTanki: { not: null } }, orderBy: { timestamp: "desc" } }),
   ]);
 
-  const packingOrders = new Set(packing.map((r) => r.order));
+  // HANYA Packing yg "Finish"-nya SUDAH DIISI (2026-09-22, instruksi eksplisit
+  // user -- laporan nyata: Order 1020055309 py Packing 48 Pcs / 888.91 Ltr dari
+  // Order Qty 1851.9 TANPA Finish diisi, %GR baru 48%, tapi tanki TA.01800.016
+  // sudah otomatis "Kosong" krn SEBELUM ini `packingOrders` mengikutkan Packing
+  // apa pun, termasuk yg baru packing SEBAGIAN/belum ditandai selesai). Dengan
+  // Finish kosong berarti packing itu sendiri masih berjalan -- tanki
+  // kemungkinan besar masih dipakai fisiknya, jadi TIDAK boleh ikut membebaskan
+  // tank di `isOrderDone` di bawah.
+  const packingOrders = new Set(packing.filter((r) => r.finish != null).map((r) => r.order));
 
   interface ManualTankEntry {
     codeTanki: string;
@@ -1522,16 +1530,59 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
-    select: { order: true, materialDescription: true, pctGR: true, orderType: true },
+    select: { order: true, materialDescription: true, pctGR: true, orderType: true, materialNumber: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
   const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
   const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
 
-  // Order yg SUDAH SELESAI (%GR>95%, TERMASUK sentinel Teco 9999%, ATAU
-  // sudah py histori Packing) -- 2026-09-17, instruksi eksplisit user
-  // (laporan berulang: Order yg masih aktif di sebuah tank ke-hidden krn
+  // Gerbang Milling/Aftermix utk isOrderDone (2026-09-22, instruksi eksplisit
+  // user: produk yg melalui Milling masih "setengah jadi" sampai
+  // Milling.Finish-nya SENDIRI terisi -- Packing yg terjadi sebelum itu cuma
+  // "packing sementara" utk lanjut proses, BUKAN tanda Order selesai. Kalau
+  // rute Material (MaterialFlow.aftermixRequired) masih lanjut ke Aftermix
+  // setelah Milling, Packing sementara itu jg belum boleh dipercaya SAMPAI
+  // Aftermix sendiri py histori yg Finish-nya terisi -- baru setelah kedua
+  // gerbang ini lewat, cek Packing/%GR di bawah berlaku spt biasa).
+  const materialNumberByOrder = new Map(masterOrders.map((m) => [m.order, m.materialNumber]));
+  const materialNumbersForFlow = Array.from(
+    new Set(masterOrders.map((m) => m.materialNumber).filter((x): x is string => Boolean(x)))
+  );
+  const materialFlows = materialNumbersForFlow.length
+    ? await prisma.materialFlow.findMany({ where: { materialNumber: { in: materialNumbersForFlow } } })
+    : [];
+  const materialFlowByNumber = new Map(materialFlows.map((f) => [f.materialNumber, f]));
+  const millingUnfinishedOrders = new Set(milling.filter((r) => !r.finish).map((r) => r.order));
+  const millingTouchedOrders = new Set(milling.map((r) => r.order));
+  const aftermixFinishedOrders = new Set(
+    premixAftermix.filter((r) => r.section === "AFTERMIX" && r.finish != null).map((r) => r.order)
+  );
+
+  // Khusus rute Material Premix+Milling+QC+Packing SAJA (tanpa Aftermix/
+  // Colour Matching/Approval) -- 2026-09-22, instruksi eksplisit user: utk
+  // rute ini material SECARA FISIK sudah terpacking ke packaging sementara
+  // pas di proses Milling itu sendiri, dan di lapangan kolom Finish di
+  // Packing HAMPIR TIDAK PERNAH diisi sama sekali -- jadi utk rute ini
+  // Milling.Finish SENDIRI sudah cukup jadi tanda Order selesai, Packing.
+  // Finish diabaikan total (beda dari rute lain yg py Aftermix, di mana
+  // Packing yg sebenarnya baru terjadi belakangan & masih bisa diisi benar).
+  function isMillingOnlyRoute(flow: (typeof materialFlows)[number] | undefined): boolean {
+    return Boolean(
+      flow?.premixRequired &&
+        flow.millingRequired &&
+        flow.qcRequired &&
+        flow.packingRequired &&
+        !flow.aftermixRequired &&
+        !flow.colourMatchingRequired &&
+        !flow.approvalRequired
+    );
+  }
+
+  // Order yg SUDAH SELESAI (%GR>95%, TERMASUK sentinel Teco 9999%, ATAU sudah
+  // py histori Packing yg FINISH-nya terisi -- lihat syarat "Finish != null"
+  // di `packingOrders` di atas, 2026-09-22) -- 2026-09-17, instruksi eksplisit
+  // user (laporan berulang: Order yg masih aktif di sebuah tank ke-hidden krn
   // Order LAIN di tank yg SAMA kebetulan py tanggal proses lebih baru,
   // padahal Order lain itu sendiri sudah selesai). Root cause LAMA: aturan
   // "Order selesai -> tank otomatis kosong" cuma diterapkan ke Order
@@ -1542,9 +1593,17 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   // ikut jadi kandidat sama sekali, bukan cuma "menang dulu baru dianggap
   // kosong belakangan".
   function isOrderDone(order: string): boolean {
-    if (packingOrders.has(order)) return true;
     const pctGRValue = parsePctGR(pctGRByOrder.get(order));
-    return pctGRValue !== null && pctGRValue > 95;
+    if (pctGRValue !== null && pctGRValue > 95) return true;
+
+    if (millingTouchedOrders.has(order)) {
+      if (millingUnfinishedOrders.has(order)) return false;
+      const flow = materialFlowByNumber.get(materialNumberByOrder.get(order) ?? "");
+      if (isMillingOnlyRoute(flow)) return true;
+      if (flow?.aftermixRequired && !aftermixFinishedOrders.has(order)) return false;
+    }
+
+    return packingOrders.has(order);
   }
   const activeTouches = touches.filter((t) => !isOrderDone(t.order));
 
@@ -1690,13 +1749,24 @@ export interface MesinStatusInfo {
  * Status okupansi tiap Code Mesin (Dashboard > Mesin Monitoring, 2026-08-02,
  * instruksi eksplisit user) -- sumbernya `codeMesin` di MillingLog (SATU2NYA
  * modul yg py field ini), beda dari buildTankStatusMap yg lintas banyak
- * modul. Per Code Mesin, ambil baris MillingLog PALING BARU (moment =
- * finish ?? start ?? timestamp) -- mesin dianggap "occupied" SELAMA baris
- * itu belum py Finish (masih berjalan), "idle" kalau Finish sudah terisi
- * atau mesin itu belum pernah tersentuh sama sekali. Versi pertama sengaja
- * disederhanakan (tidak ikut aturan %GR/Packing-freeing spt Tank) krn siklus
- * pakai 1 mesin Milling jauh lebih pendek/lokal drpd siklus 1 Order lintas
- * banyak tahap.
+ * modul. Per Code Mesin, ambil baris MillingLog PALING BARU DI ANTARA Order
+ * yg MASIH AKTIF saja (lihat `isOrderDone` di bawah) -- itulah Order yg
+ * diasumsikan sedang memegang mesin itu sekarang; kalau tidak ada baris
+ * aktif, mesin dianggap "idle".
+ *
+ * 2026-09-22, instruksi eksplisit user (laporan: Order 1020053300 yg masih
+ * aktif milling di DYNO MILL 07, Finish kosong, tidak muncul sama sekali di
+ * Mesin Monitoring). Root cause: versi lama memilih pemenang per-mesin
+ * SEMATA dari moment (finish ?? start) paling besar, BARU SETELAH itu
+ * mengecek Finish-nya -- jadi Order lain di mesin yg SAMA yg kebetulan py
+ * moment lebih besar (walau sudah Finish) bisa "menang" & menyembunyikan
+ * Order yg masih aktif tapi moment-nya lebih kecil. Sekarang penyaringan
+ * "sudah selesai" dipindah SEBELUM pemilihan pemenang, sama seperti
+ * `isOrderDone`/`activeTouches` di buildTankStatusMap. %GR>95 (dari Master
+ * Data Cooispi) ikut jadi penanda "order ini pasti sudah selesai total"
+ * SEKALIPUN Finish di baris Milling lupa diisi -- instruksi eksplisit user:
+ * kultur administrasi di perusahaan ini tidak tertib, kolom Finish
+ * kemungkinan besar akan sering lupa diisi.
  */
 async function buildMesinStatusMap(): Promise<Map<string, MesinStatusInfo>> {
   const [mesinList, millingRows] = await Promise.all([
@@ -1716,9 +1786,22 @@ async function buildMesinStatusMap(): Promise<Map<string, MesinStatusInfo>> {
     }),
   ]);
 
+  const orderNumbers = Array.from(new Set(millingRows.map((r) => r.order)));
+  const masterOrders = await prisma.masterOrder.findMany({
+    where: { order: { in: orderNumbers } },
+    select: { order: true, pctGR: true },
+  });
+  const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
+
+  function isOrderDone(order: string): boolean {
+    const pctGRValue = parsePctGR(pctGRByOrder.get(order));
+    return pctGRValue !== null && pctGRValue > 95;
+  }
+
   const latestByMesin = new Map<string, (typeof millingRows)[number] & { moment: Date }>();
   for (const r of millingRows) {
     if (!r.codeMesin) continue;
+    if (r.finish || isOrderDone(r.order)) continue;
     const moment = latestMoment(r.start, r.finish, r.timestamp);
     const existing = latestByMesin.get(r.codeMesin);
     if (!existing || moment.getTime() > existing.moment.getTime()) latestByMesin.set(r.codeMesin, { ...r, moment });
@@ -1727,24 +1810,22 @@ async function buildMesinStatusMap(): Promise<Map<string, MesinStatusInfo>> {
   const map = new Map<string, MesinStatusInfo>();
   for (const mesin of mesinList) {
     const touch = latestByMesin.get(mesin.code);
-    const occupied = Boolean(touch) && !touch!.finish;
     map.set(mesin.code, {
       code: mesin.code,
       lokasi: mesin.lokasi,
-      status: occupied ? "occupied" : "idle",
-      occupant:
-        occupied && touch
-          ? {
-              order: touch.order,
-              materialNumber: touch.materialNumber,
-              materialDescription: touch.materialDescription,
-              batch: touch.batch,
-              orderQty: touch.orderQty,
-              start: touch.start,
-              finish: touch.finish,
-              since: touch.moment,
-            }
-          : null,
+      status: touch ? "occupied" : "idle",
+      occupant: touch
+        ? {
+            order: touch.order,
+            materialNumber: touch.materialNumber,
+            materialDescription: touch.materialDescription,
+            batch: touch.batch,
+            orderQty: touch.orderQty,
+            start: touch.start,
+            finish: touch.finish,
+            since: touch.moment,
+          }
+        : null,
     });
   }
   return map;

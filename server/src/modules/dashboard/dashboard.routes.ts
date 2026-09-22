@@ -408,7 +408,7 @@ dashboardRouter.get(
     // menganggap tahap itu "Belum" utk Order ybs. Dihapus total krn volume
     // data tiap tabel masih ratusan baris (bukan puluhan ribu), jadi query
     // penuh masih murah -- downstream sudah dedupe ke 1 baris PALING TERAKHIR
-    // per Order sendiri (lihat komentar "rows" & firstSeenByOrder di bawah).
+    // per Order sendiri (lihat komentar "rows" di bawah).
     const [premixAftermix, milling, colourMatching, bongkaran, packing, checkResults, approvals] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         select: {
@@ -997,23 +997,6 @@ dashboardRouter.get(
       }),
     ];
 
-    // "Pertama kali Order ini dibuat" (utk Lead Time Proses) = baris TERCEPAT
-    // yg pernah ter-Save utk Order ini, lintas SEMUA modul (bukan cuma yg
-    // "menang" jadi Proses terakhir) -- pakai timestamp Save asli (BUKAN
-    // latestMoment/Start yg sudah ditimpa di atas utk keperluan Proses).
-    const createdAtEntries: { order: string; createdAt: Date }[] = [
-      ...premixAftermix.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-      ...milling.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-      ...colourMatching.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-      ...bongkaran.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-      ...packing.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-      ...checkResults.map((r) => ({ order: r.order, createdAt: r.timestamp })),
-    ];
-    const firstSeenByOrder = new Map<string, Date>();
-    for (const e of createdAtEntries) {
-      const existing = firstSeenByOrder.get(e.order);
-      if (!existing || e.createdAt.getTime() < existing.getTime()) firstSeenByOrder.set(e.order, e.createdAt);
-    }
 
     // Urutkan berdasarkan waktu input paling baru, lalu ambil HANYA 1 baris per
     // Order -- inputan terakhirnya saja. Utk QC field ini isinya kolom Start
@@ -1103,6 +1086,138 @@ dashboardRouter.get(
     const materialFlowByNumber = new Map(materialFlows.map((f) => [f.materialNumber, f]));
 
     const now = new Date();
+
+    /**
+     * Lead Time Proses (2026-09-22, instruksi eksplisit user, REVISI TOTAL):
+     * START = Finish tahap PERTAMA (menurut urutan proses resmi Material ini,
+     * PERSIS urutan & syarat "required" yg sama dgn `computeStages`) yg sudah
+     * selesai -- BUKAN lagi "kapan Order ini pertama disentuh/disimpan di
+     * sistem" (firstSeen/timestamp Save, root cause laporan user: baris QC
+     * Order 1020054153 sempat ke-Save admin lebih awal drpd baris Aftermix/
+     * Colour Matching, padahal Aftermix/Colour Matching itu sendiri Finish-
+     * nya -- tanggal kerja aslinya -- lebih dulu, bikin Lead Time nongol
+     * kegedean & membingungkan).
+     * END = Finish Packing (tahap terakhir biasa), KECUALI utk Material yg
+     * rutenya PERSIS Premix+Milling+QC+Packing saja (tanpa Aftermix/Colour
+     * Matching/Approval, lihat `isMillingOnlyRouteFlow`) -- utk rute ini
+     * END = Finish Milling, krn Packing-nya sendiri jarang/nyaris tidak
+     * pernah diisi Finish di lapangan (instruksi sama & konsisten dgn fix
+     * isOrderDone Tank Monitoring, 2026-09-22). Kalau END belum ada (Order
+     * masih berjalan), dihitung sampai HARI INI (`now`) spt sebelumnya.
+     * Kalau START belum ada (belum ada 1 tahap pun yg selesai), Lead Time = 0.
+     */
+    const CANONICAL_STAGES = ["Premix", "Milling", "Aftermix", "Colour Matching", "QC", "Approval", "Packing"] as const;
+    type StageName = (typeof CANONICAL_STAGES)[number];
+
+    const premixFinishByOrder = new Map(
+      Array.from(latestRowByOrder(premixAftermix.filter((r) => r.section === "PREMIX")).values())
+        .filter((r) => premixDoneOrders.has(r.order))
+        .map((r) => [r.order, r.finish as Date])
+    );
+    const aftermixFinishByOrder = new Map(
+      Array.from(latestRowByOrder(premixAftermix.filter((r) => r.section === "AFTERMIX")).values())
+        .filter((r) => aftermixDoneOrders.has(r.order))
+        .map((r) => [r.order, r.finish as Date])
+    );
+    const colourMatchingFinishByOrder = new Map(
+      Array.from(latestRowByOrder(colourMatching).values())
+        .filter((r) => colourMatchingDoneOrders.has(r.order))
+        .map((r) => [r.order, r.finish as Date])
+    );
+    const millingFinishByOrder = new Map<string, Date>();
+    for (const [order, orderRows] of millingRowsByOrder) {
+      if (!millingDoneOrders.has(order)) continue;
+      const finishedRows = orderRows.filter(isDnRow);
+      if (finishedRows.length === 0) continue;
+      const latestFinish = finishedRows.reduce(
+        (max, r) => (r.finish!.getTime() > max.getTime() ? r.finish! : max),
+        finishedRows[0].finish!
+      );
+      millingFinishByOrder.set(order, latestFinish);
+    }
+    const qcFinishByOrder = new Map<string, Date>();
+    for (const r of latestRowByOrder(checkResults).values()) {
+      const rep = qcRepresentativeParam(r.parameters);
+      if (rep?.finish) qcFinishByOrder.set(r.order, rep.finish);
+    }
+    const approvalFinishByOrder = new Map<string, Date>();
+    for (const r of latestRowByOrder(approvals).values()) {
+      if (r.finishApp) approvalFinishByOrder.set(r.order, r.finishApp);
+    }
+    const packingFinishByOrder = new Map<string, Date>();
+    for (const r of latestRowByOrder(packing).values()) {
+      if (r.finish) packingFinishByOrder.set(r.order, r.finish);
+    }
+    const stageFinishMaps: Record<StageName, Map<string, Date>> = {
+      Premix: premixFinishByOrder,
+      Milling: millingFinishByOrder,
+      Aftermix: aftermixFinishByOrder,
+      "Colour Matching": colourMatchingFinishByOrder,
+      QC: qcFinishByOrder,
+      Approval: approvalFinishByOrder,
+      Packing: packingFinishByOrder,
+    };
+
+    function isMillingOnlyRouteFlow(flow: (typeof materialFlows)[number] | undefined): boolean {
+      return Boolean(
+        flow?.premixRequired &&
+          flow.millingRequired &&
+          flow.qcRequired &&
+          flow.packingRequired &&
+          !flow.aftermixRequired &&
+          !flow.colourMatchingRequired &&
+          !flow.approvalRequired
+      );
+    }
+
+    /** Urutan tahap yg BERLAKU utk Material ini -- PERSIS logika `computeStages`
+     * (required=true dari MaterialFlow, fallback heuristik histori log kalau
+     * Material blm terdaftar), supaya "proses pertama" konsisten dgn urutan
+     * yg ditampilkan di popup Info Proses. */
+    function applicableStagesInOrder(materialNumber: string | null): StageName[] {
+      const flow = materialNumber ? materialFlowByNumber.get(materialNumber) : undefined;
+      if (flow) {
+        const requiredByStage: Record<StageName, boolean> = {
+          Premix: flow.premixRequired,
+          Milling: flow.millingRequired,
+          Aftermix: flow.aftermixRequired,
+          "Colour Matching": flow.colourMatchingRequired,
+          QC: flow.qcRequired,
+          Approval: flow.approvalRequired,
+          Packing: flow.packingRequired,
+        };
+        return CANONICAL_STAGES.filter((s) => requiredByStage[s]);
+      }
+      if (!materialNumber) return [...CANONICAL_STAGES];
+      const materialSetByStage: Record<StageName, Set<string>> = {
+        Premix: premixMaterials,
+        Milling: millingMaterials,
+        Aftermix: aftermixMaterials,
+        "Colour Matching": colourMatchingMaterials,
+        QC: checkResultMaterials,
+        Approval: approvalMaterials,
+        Packing: packingMaterials,
+      };
+      return CANONICAL_STAGES.filter((s) => materialSetByStage[s].has(materialNumber));
+    }
+
+    function computeLeadTimeProses(order: string, materialNumber: string | null): number {
+      let startDate: Date | null = null;
+      for (const stage of applicableStagesInOrder(materialNumber)) {
+        const d = stageFinishMaps[stage].get(order);
+        if (d) {
+          startDate = d;
+          break;
+        }
+      }
+      if (!startDate) return 0;
+
+      const flow = materialNumber ? materialFlowByNumber.get(materialNumber) : undefined;
+      const endDate = isMillingOnlyRouteFlow(flow) ? millingFinishByOrder.get(order) ?? null : packingFinishByOrder.get(order) ?? null;
+
+      return countBusinessDaysElapsed(startDate, endDate ?? now);
+    }
+
     // Filter teks pencarian (dulu di query, dipindah ke sini) diterapkan ke
     // Order yg DITAMPILKAN saja -- data lintas Order lainnya (Set per Material
     // Number di atas) tetap dihitung dari histori LENGKAP tanpa filter ini.
@@ -1134,14 +1249,6 @@ dashboardRouter.get(
       })
       .map((r) => {
       const master = masterByOrder.get(r.order);
-      // `firstSeenByOrder` cuma keisi dari histori NYATA (Premix/Milling/dst,
-      // lihat createdAtEntries) -- Order yg baru sekedar "PWO Schedule &
-      // Queue" (queuePremixRows dkk, belum PERNAH disentuh modul manapun)
-      // tidak py entri di sana, jadi SENGAJA tidak fallback ke `r.timestamp`
-      // (dulu bisa jadi epoch 1970 utk queuePremixRows -> Lead Time nongol
-      // puluhan ribu hari kerja, nonsense krn prosesnya memang belum mulai
-      // sama sekali) -- Lead Time utk kasus ini = 0.
-      const firstSeen = firstSeenByOrder.get(r.order);
       const stages = computeStages(r.order, master?.materialNumber ?? null);
       const progressPercent = stages.length === 0 ? 0 : Math.round((stages.filter((s) => s.done).length / stages.length) * 100);
       // Begitu Order ybs SUDAH py baris nyata di History Packing, kolom Start
@@ -1163,7 +1270,7 @@ dashboardRouter.get(
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
         codeTanki: packingRow ? packingRow.codeTanki : r.codeTanki,
-        leadTimeProses: firstSeen ? countBusinessDaysElapsed(firstSeen, now) : 0,
+        leadTimeProses: computeLeadTimeProses(r.order, master?.materialNumber ?? null),
         stages,
         progressPercent,
         // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
@@ -1270,7 +1377,8 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
     }),
     prisma.millingLog.findMany({
-      select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki1: true, codeTanki2: true, formReceived: true, start: true, finish: true, timestamp: true },
+      select: { order: true, materialNumber: true, batch: true, orderQty: true, qtyAct: true, remark: true, codeTanki1: true, codeTanki2: true, formReceived: true, start: true, finish: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
     }),
     prisma.colourMatchingLog.findMany({
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
@@ -1530,12 +1638,42 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
-    select: { order: true, materialDescription: true, pctGR: true, orderType: true, materialNumber: true },
+    select: { order: true, materialDescription: true, pctGR: true, orderType: true, materialNumber: true, orderQty: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
   const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
   const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
+  const masterOrderQtyByOrder = new Map(masterOrders.map((m) => [m.order, m.orderQty]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
+
+  // Milling "beneran selesai" scr kuantitas (2026-09-22, instruksi eksplisit
+  // user -- laporan: Order dgn beberapa tanki turunan, baru turunan 1 yg
+  // Finish/qty-nya belum cukupi Order Qty, turunan 2/3 malah BELUM PERNAH
+  // diinput sama sekali jadi tidak py baris utk ketangkep `millingUnfinishedOrders`
+  // di bawah -- gerbang isMillingOnlyRoute lama SALAH menganggap Order ini
+  // "selesai Milling" & tanki turunan 1 langsung dibebaskan, padahal fisiknya
+  // masih nunggu turunan 2/3). SUM Qty Act SEMUA baris Milling yg sudah
+  // Finish (lintas tanki turunan) harus >= Order Qty -- PERSIS logika
+  // `millingDoneOrders`/isMillingDone (stageGate.ts) yg sudah dipakai di
+  // /production-orders & jadi gerbang Save-lanjut yg sebenarnya.
+  const millingRowsByOrderForQty = new Map<string, typeof milling>();
+  for (const r of milling) {
+    const list = millingRowsByOrderForQty.get(r.order);
+    if (list) list.push(r);
+    else millingRowsByOrderForQty.set(r.order, [r]);
+  }
+  const millingQtyDoneOrders = new Set<string>();
+  for (const [order, orderRows] of millingRowsByOrderForQty) {
+    const finishedRows = orderRows.filter((r) => r.finish != null);
+    if (finishedRows.length === 0) continue;
+    const targetQty = parseQtyNumber(orderRows[0].orderQty ?? masterOrderQtyByOrder.get(order));
+    if (targetQty <= 0) {
+      millingQtyDoneOrders.add(order); // fallback: qty tidak diketahui -- any 1 baris Finish sudah cukup
+      continue;
+    }
+    const sumQtyAct = finishedRows.reduce((sum, r) => sum + parseQtyNumber(r.qtyAct), 0);
+    if (sumQtyAct >= targetQty) millingQtyDoneOrders.add(order);
+  }
 
   // Gerbang Milling/Aftermix utk isOrderDone (2026-09-22, instruksi eksplisit
   // user: produk yg melalui Milling masih "setengah jadi" sampai
@@ -1599,7 +1737,13 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     if (millingTouchedOrders.has(order)) {
       if (millingUnfinishedOrders.has(order)) return false;
       const flow = materialFlowByNumber.get(materialNumberByOrder.get(order) ?? "");
-      if (isMillingOnlyRoute(flow)) return true;
+      // Rute Milling-only: "selesai" HARUS lewat cek kuantitas
+      // (millingQtyDoneOrders), BUKAN cuma "tidak ada baris yg lagi Finish"
+      // -- kalau tanki turunan lain (2, 3, dst) belum PERNAH diinput sama
+      // sekali, `millingUnfinishedOrders` di atas tidak akan menangkapnya
+      // (tidak ada baris = tidak ada yg "belum Finish"), jadi wajib dicek
+      // eksplisit di sini juga.
+      if (isMillingOnlyRoute(flow)) return millingQtyDoneOrders.has(order);
       if (flow?.aftermixRequired && !aftermixFinishedOrders.has(order)) return false;
     }
 

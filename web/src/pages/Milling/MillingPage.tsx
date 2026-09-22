@@ -360,6 +360,13 @@ function TankBranchPanel({
 }) {
   const finishedQty = tanks.filter((t) => t.finish).reduce((sum, t) => sum + parseQtyLocal(t.qtyAct), 0);
   const targetQty = parseQtyLocal(orderQty);
+  // Baris "Total" di bawah daftar Tanki (2026-09-22, instruksi eksplisit
+  // user) -- SUM Qty Act dari SEMUA tanki turunan yg tampil di sini (Selesai
+  // MAUPUN belum), supaya admin bisa langsung cocokkan running total dgn
+  // Order Qty tanpa jumlah manual satu-satu. Beda dari `finishedQty` di
+  // header (yg cuma menghitung tanki BERSTATUS Selesai, dipakai penentuan
+  // resmi "Milling selesai") -- baris ini murni bantu-hitung tampilan.
+  const totalQtyAct = tanks.reduce((sum, t) => sum + parseQtyLocal(t.qtyAct), 0);
 
   return (
     <div className="excel-block" style={{ marginBottom: 14, border: GRID_BORDER }}>
@@ -455,6 +462,27 @@ function TankBranchPanel({
             </div>
           );
         })}
+        {tanks.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              gap: 12,
+              padding: "6px 8px",
+              marginTop: 2,
+              borderTop: "2px solid var(--navy)",
+              fontSize: "0.85rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontWeight: 700, minWidth: 70 }}>Total</span>
+            <span style={{ fontWeight: 700 }}>
+              Qty Act: {totalQtyAct}
+              {targetQty > 0 ? ` / ${targetQty}` : ""}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

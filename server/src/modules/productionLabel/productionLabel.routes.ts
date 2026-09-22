@@ -5,6 +5,7 @@ import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { getLatestCrossModule, isValidTankCodeOrJoined } from "../../lib/productionLabelHelpers";
 import { notFutureDDMMYYYY } from "../../lib/dateValidation";
+import { checkProductionLabelGate } from "../../lib/stageGate";
 
 export const productionLabelRouter = Router();
 productionLabelRouter.use(requireAuth);
@@ -159,6 +160,18 @@ productionLabelRouter.post(
     }
     if (parsed.data.codeTanki && !(await isValidTankCodeOrJoined(parsed.data.codeTanki))) {
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
+    // Milling WAJIB selesai dulu sebelum label produksi bisa dicetak/disimpan
+    // (2026-09-22, instruksi eksplisit user) -- lihat checkProductionLabelGate
+    // di stageGate.ts. Cuma berlaku kalau Milling memang required utk
+    // Material Order ini; Order rework (RF01/RF02) tetap dikecualikan.
+    const gate = await checkProductionLabelGate(parsed.data.order, parsed.data.materialNumber, parsed.data.codeTanki);
+    if (!gate.ok) {
+      res.status(400).json({
+        success: false,
+        message: `Order ${parsed.data.order} belum menyelesaikan ${gate.missingStage} (${gate.missingStage} - DN) -- tidak bisa mencetak Production Label dulu.`,
+      });
       return;
     }
     const created = await prisma.productionLabel.create({

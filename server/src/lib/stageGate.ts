@@ -269,3 +269,47 @@ export function checkColourMatchingGate(order: string, materialNumber: string | 
   return gateAgainst(order, materialNumber, ["aftermix", "milling", "premix"]);
 }
 
+/**
+ * Prasyarat Production Label (2026-09-22, instruksi eksplisit user): Milling
+ * WAJIB selesai sebelum Label Entry SFG bisa Save/Cetak Label -- TAPI HANYA
+ * kalau Milling memang required utk Material Order ini
+ * (isStageRequiredForMaterial); Material yg memang skip Milling sama sekali
+ * (millingRequired=false) tidak kena gerbang ini. BEDA dari gateAgainst di
+ * atas (yg mencari prasyarat TERDEKAT dari beberapa kandidat) -- ini SELALU
+ * & SPESIFIK milling, bukan turun ke Premix kalau Milling di-skip, krn
+ * Production Label memang cuma peduli "sudah lewat Milling atau tidak",
+ * bukan urutan produksi lengkap.
+ *
+ * Tanki turunan (2026-09-22, instruksi eksplisit user, revisi lanjutan):
+ * kalau `codeTanki` yg dikirim (dari dropdown "Pilih Tanki" di Label Entry
+ * SFG) cocok dgn salah satu baris tanki turunan Milling Order ini
+ * (codeTanki1/codeTanki2), cek Finish tanki SPESIFIK itu SAJA -- BUKAN
+ * agregat qty seluruh Order (isMillingDone) -- supaya turunan yg sudah
+ * Finish bisa langsung dicetak labelnya duluan, tanpa perlu nunggu turunan
+ * lain yg masih berjalan. Kalau `codeTanki` kosong/tidak cocok satu pun
+ * baris Milling Order ini (mis. Label Entry FG yg tidak py konsep tanki
+ * turunan sama sekali), fallback ke isMillingDone (agregat Order) spt
+ * sebelumnya.
+ */
+export async function checkProductionLabelGate(
+  order: string,
+  materialNumber: string | null | undefined,
+  codeTanki?: string | null
+): Promise<StageGateResult> {
+  if (await isGateExemptOrder(order)) return { ok: true };
+  const millingRequired = await isStageRequiredForMaterial("milling", materialNumber);
+  if (!millingRequired) return { ok: true };
+
+  const trimmedCodeTanki = codeTanki?.trim();
+  if (trimmedCodeTanki) {
+    const matchingTank = await prisma.millingLog.findFirst({
+      where: { order, OR: [{ codeTanki1: trimmedCodeTanki }, { codeTanki2: trimmedCodeTanki }] },
+      select: { finish: true },
+    });
+    if (matchingTank) return { ok: matchingTank.finish != null, missingStage: STAGE_LABEL.milling };
+  }
+
+  const done = await isMillingDone(order);
+  return { ok: done, missingStage: STAGE_LABEL.milling };
+}
+

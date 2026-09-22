@@ -56,8 +56,8 @@ export default function MaintenanceListPage() {
             </select>
           </div>
           <div className="field">
-            <label>Cari Code Tanki</label>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari Code Tanki..." />
+            <label>Cari Equipment Type</label>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari Equipment Type..." />
           </div>
         </div>
 
@@ -74,7 +74,8 @@ export default function MaintenanceListPage() {
               render: (r) => formatDateTime(r.timestamp),
               csvValue: (r) => toExcelDateTimeString(r.timestamp),
             },
-            { key: "codeTanki", label: "Code Tanki / Objek", render: (r) => r.codeTanki },
+            { key: "codeTanki", label: "Equipment Type", render: (r) => r.codeTanki },
+            { key: "noDok", label: "No Dok", render: (r) => r.noDok ?? "-" },
             { key: "description", label: "Deskripsi Kerusakan", render: (r) => r.description },
             { key: "priority", label: "Prioritas", render: (r) => r.priority ?? "-" },
             { key: "reportedBy", label: "Pelapor", render: (r) => r.reportedBy },

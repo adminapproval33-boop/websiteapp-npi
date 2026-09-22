@@ -151,6 +151,10 @@ model MasterMesin {
   id        Int      @id @default(autoincrement())
   code      String   @unique
   lokasi    String?
+  /// Ditandai maintenance (2026-09-22, instruksi eksplisit user) -- dicentang
+  /// lewat Dashboard > Mesin Monitoring, yg langsung mengarahkan ke Form
+  /// Input Maintenance (pola sama dgn MasterTank.damaged).
+  damaged   Boolean  @default(false)
   updatedAt DateTime @updatedAt
 
   @@map("master_mesin")
@@ -518,6 +522,9 @@ model MaintenanceLog {
   id            Int                     @id @default(autoincrement())
   timestamp     DateTime                @default(now())
   codeTanki     String
+  /// No Dokumen rujukan (2026-09-22, instruksi eksplisit user) -- opsional,
+  /// bebas format (mis. nomor Work Order/PWO internal), bukan foreign key.
+  noDok         String?
   description   String
   reportedBy    String
   reportedByNik String?

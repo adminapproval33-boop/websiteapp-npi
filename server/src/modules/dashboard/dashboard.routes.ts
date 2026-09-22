@@ -1732,6 +1732,9 @@ dashboardRouter.get(
 export interface MesinStatusInfo {
   code: string;
   lokasi: string | null;
+  /// Ditandai maintenance (2026-09-22, instruksi eksplisit user) -- checkbox
+  /// di Dashboard > Mesin Monitoring, pola sama dgn TankStatusInfo.damaged.
+  damaged: boolean;
   status: "occupied" | "idle";
   occupant: {
     order: string;
@@ -1813,6 +1816,7 @@ async function buildMesinStatusMap(): Promise<Map<string, MesinStatusInfo>> {
     map.set(mesin.code, {
       code: mesin.code,
       lokasi: mesin.lokasi,
+      damaged: mesin.damaged,
       status: touch ? "occupied" : "idle",
       occupant: touch
         ? {

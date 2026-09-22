@@ -632,6 +632,27 @@ masterDataRouter.put(
   })
 );
 
+/// Checkbox "Maintenance" di Dashboard > Mesin Monitoring (2026-09-22,
+/// instruksi eksplisit user) -- dicentang lewat MesinDashboardPage.tsx, yg
+/// lalu langsung mengarahkan user ke Form Input Maintenance supaya
+/// perbaikannya tercatat. Mesin `damaged=true` dikeluarkan dari hitungan
+/// Idle/Terpakai (lihat buildMesinStatusMap di dashboard.routes.ts). Pola
+/// sama persis dgn PUT /tanks/:code/damaged di atas.
+masterDataRouter.put(
+  "/mesin/:code/damaged",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const code = String(req.params.code ?? "").trim();
+    const damaged = Boolean(req.body.damaged);
+    const updated = await prisma.masterMesin.update({ where: { code }, data: { damaged } }).catch(() => null);
+    if (!updated) {
+      res.status(404).json({ success: false, message: "Code Mesin tidak ditemukan." });
+      return;
+    }
+    res.json({ success: true, message: "Status Maintenance berhasil diperbarui.", data: updated });
+  })
+);
+
 /// Hapus 1 Code Mesin (2026-08-02, instruksi eksplisit user: tombol "-Code
 /// Mesin" -- mesin rusak/tidak dipakai lagi). Hapus master data-nya SAJA --
 /// histori MillingLog yg pernah pakai Code Mesin ini TETAP tersimpan apa

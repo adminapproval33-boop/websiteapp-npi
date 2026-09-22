@@ -4,6 +4,7 @@ import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import { formatDateTime } from "../../lib/datetime";
+import MaintenanceQuickModal from "../Maintenance/MaintenanceQuickModal";
 
 interface MesinOccupant {
   order: string;
@@ -19,6 +20,7 @@ interface MesinOccupant {
 interface MesinRow {
   code: string;
   lokasi: string | null;
+  damaged: boolean;
   status: "occupied" | "idle";
   occupant: MesinOccupant | null;
 }
@@ -51,6 +53,10 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
 export default function MesinDashboardPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  // Pop-up "Maintenance" (2026-09-22, instruksi eksplisit user) -- diisi Code
+  // Mesin yg checkbox-nya baru dicentang, dipakai buka MaintenanceQuickModal
+  // di bawah. null = pop-up tertutup.
+  const [maintenancePopupCode, setMaintenancePopupCode] = useState<string | null>(null);
   // Tombol "+Code Mesin" / "-Code Mesin" (2026-08-02, instruksi eksplisit
   // user, dipindah dari Master Data ke sini supaya admin bisa tambah/hapus
   // mesin langsung dari halaman monitoring-nya) -- tambah/hapus 1 Code Mesin
@@ -113,9 +119,27 @@ export default function MesinDashboardPage() {
     onError: (err) => setEditMesinError(err instanceof ApiError ? err.message : "Gagal memperbarui Lokasi."),
   });
 
+  /** Checkbox "Maintenance" (2026-08-02, diupdate 2026-09-22 instruksi
+   * eksplisit user) -- dicentang membuka pop-up MaintenanceQuickModal
+   * (BUKAN langsung pindah ke halaman Form Input Maintenance lagi, pola sama
+   * dgn pop-up "Booking Tanki" di Info Proses). `damaged` baru benar2
+   * di-set true SETELAH pop-up itu disimpan (lihat onSaved di bawah) --
+   * kalau user Batal, checkbox otomatis balik tidak tercentang krn tidak ada
+   * apa pun yg berubah. Uncheck (mesin selesai maintenance) TETAP langsung
+   * tanpa pop-up. Mesin `damaged=true` dikeluarkan dari hitungan
+   * Idle/Terpakai di bawah. */
+  const toggleDamaged = useMutation({
+    mutationFn: ({ code, damaged }: { code: string; damaged: boolean }) =>
+      api.put(`/master-data/mesin/${encodeURIComponent(code)}/damaged`, { damaged }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-mesin-status"] });
+    },
+  });
+
   const rows = mesinQuery.data ?? [];
-  const occupiedCount = rows.filter((r) => r.status === "occupied").length;
-  const idleCount = rows.length - occupiedCount;
+  const damagedCount = rows.filter((r) => r.damaged).length;
+  const occupiedCount = rows.filter((r) => !r.damaged && r.status === "occupied").length;
+  const idleCount = rows.length - damagedCount - occupiedCount;
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -135,6 +159,7 @@ export default function MesinDashboardPage() {
         <KpiCard label="Total Mesin" value={rows.length} color="var(--navy-light)" />
         <KpiCard label="Mesin Idle" value={idleCount} color="var(--success)" />
         <KpiCard label="Mesin Terpakai" value={occupiedCount} color="var(--danger)" />
+        <KpiCard label="Mesin Maintenance" value={damagedCount} color="#d97706" />
       </div>
 
       <div className="panel">
@@ -198,10 +223,25 @@ export default function MesinDashboardPage() {
                 </button>
               </>
             }
-            rowStyle={(r) => (r.status === "occupied" ? { background: "#fef2f2" } : undefined)}
+            rowStyle={(r) => (r.damaged ? { background: "#fffbeb" } : r.status === "occupied" ? { background: "#fef2f2" } : undefined)}
             columns={[
               { key: "code", label: "Code Mesin", render: (r) => r.code },
               { key: "lokasi", label: "Lokasi", render: (r) => r.lokasi ?? "-" },
+              {
+                key: "damagedCheckbox",
+                label: "Maintenance",
+                render: (r) => (
+                  <input
+                    type="checkbox"
+                    checked={r.damaged}
+                    title={r.damaged ? "Mesin ditandai maintenance" : "Centang kalau mesin ini sedang maintenance"}
+                    onChange={(e) =>
+                      e.target.checked ? setMaintenancePopupCode(r.code) : toggleDamaged.mutate({ code: r.code, damaged: false })
+                    }
+                  />
+                ),
+                csvValue: (r) => (r.damaged ? "Ya" : "Tidak"),
+              },
               {
                 key: "status",
                 label: "Status",
@@ -213,14 +253,15 @@ export default function MesinDashboardPage() {
                       borderRadius: 999,
                       fontSize: "0.75rem",
                       fontWeight: 700,
-                      background: r.status === "occupied" ? "#fbd6d6" : "#d4f4dd",
-                      color: r.status === "occupied" ? "#991b1b" : "#065f46",
+                      background: r.damaged ? "#fef3c7" : r.status === "occupied" ? "#fbd6d6" : "#d4f4dd",
+                      color: r.damaged ? "#92400e" : r.status === "occupied" ? "#991b1b" : "#065f46",
                     }}
+                    title={r.damaged ? "Ditandai maintenance -- lihat menu Maintenance" : undefined}
                   >
-                    {r.status === "occupied" ? "Terpakai" : "Idle"}
+                    {r.damaged ? "Maintenance" : r.status === "occupied" ? "Terpakai" : "Idle"}
                   </span>
                 ),
-                csvValue: (r) => (r.status === "occupied" ? "Terpakai" : "Idle"),
+                csvValue: (r) => (r.damaged ? "Maintenance" : r.status === "occupied" ? "Terpakai" : "Idle"),
               },
               { key: "order", label: "Order", render: (r) => r.occupant?.order ?? "-" },
               { key: "materialNumber", label: "Material Number", render: (r) => r.occupant?.materialNumber ?? "-" },
@@ -338,6 +379,17 @@ export default function MesinDashboardPage() {
             {editMesinMutation.isPending ? "Menyimpan..." : "Simpan"}
           </button>
         </Modal>
+      )}
+
+      {maintenancePopupCode && (
+        <MaintenanceQuickModal
+          codeTanki={maintenancePopupCode}
+          onClose={() => setMaintenancePopupCode(null)}
+          onSaved={() => {
+            toggleDamaged.mutate({ code: maintenancePopupCode, damaged: true });
+            setMaintenancePopupCode(null);
+          }}
+        />
       )}
     </div>
   );

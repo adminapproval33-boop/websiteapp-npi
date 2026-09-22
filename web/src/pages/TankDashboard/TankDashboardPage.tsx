@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
@@ -7,6 +6,7 @@ import Modal from "../../components/Modal";
 import ProcessBadge from "../../components/ProcessBadge";
 import { formatDateTime } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
+import MaintenanceQuickModal from "../Maintenance/MaintenanceQuickModal";
 
 interface TankOccupant {
   order: string;
@@ -107,7 +107,7 @@ const TA_TB_OPTIONS: { value: TaTbFilter; label: string }[] = [
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "empty", label: "Tanki Kosong" },
   { value: "occupied", label: "Tanki Terisi" },
-  { value: "damaged", label: "Tank Damaged" },
+  { value: "damaged", label: "Tank Maintenance" },
 ];
 
 function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -118,7 +118,6 @@ function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 }
 
 export default function TankDashboardPage() {
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   // Filter Tipe Tanki & Status (2026-08-21, instruksi eksplisit user) --
   // multi-select, kosong (default) = tampilkan semua. Tanki Atas/Bawah
@@ -138,6 +137,10 @@ export default function TankDashboardPage() {
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
   const [leadTimeDetailOrder, setLeadTimeDetailOrder] = useState<string | null>(null);
+  // Pop-up "Maintenance" (2026-09-22, instruksi eksplisit user) -- diisi Code
+  // Tanki yg checkbox-nya baru dicentang, dipakai buka MaintenanceQuickModal
+  // di bawah. null = pop-up tertutup.
+  const [maintenancePopupCode, setMaintenancePopupCode] = useState<string | null>(null);
 
   const tankQuery = useQuery({
     queryKey: ["tank-status"],
@@ -145,17 +148,21 @@ export default function TankDashboardPage() {
     refetchInterval: 30_000,
   });
 
-  /** Checkbox "Damaged" (2026-08-06, instruksi eksplisit user -- lokasinya
-   * SEMPAT ditaruh di Master Data > Tanki, tapi dipindah ke sini krn ini yg
-   * dimaksud user dari awal) -- dicentang langsung mengarahkan ke Form Input
-   * Maintenance (menu Maintenance) supaya perbaikannya tercatat. Tanki
-   * `damaged=true` dikeluarkan dari hitungan Kosong/Terisi di sini &
-   * Dashboard Produktivitas (lihat buildTankStatusMap di server). */
+  /** Checkbox "Maintenance" (2026-08-06, diupdate 2026-09-22 instruksi
+   * eksplisit user -- lokasinya SEMPAT ditaruh di Master Data > Tanki, tapi
+   * dipindah ke sini krn ini yg dimaksud user dari awal) -- dicentang
+   * membuka pop-up MaintenanceQuickModal (BUKAN langsung pindah ke halaman
+   * Form Input Maintenance lagi, pola sama dgn pop-up "Booking Tanki" di
+   * Info Proses). `damaged` baru benar2 di-set true SETELAH pop-up itu
+   * disimpan (lihat onSaved di bawah) -- kalau user Batal, checkbox otomatis
+   * balik tidak tercentang krn tidak ada apa pun yg berubah. Uncheck (tanki
+   * selesai maintenance) TETAP langsung tanpa pop-up. Tanki `damaged=true`
+   * dikeluarkan dari hitungan Kosong/Terisi di sini & Dashboard Produktivitas
+   * (lihat buildTankStatusMap di server). */
   const toggleDamaged = useMutation({
     mutationFn: ({ code, damaged }: { code: string; damaged: boolean }) => api.put(`/master-data/tanks/${encodeURIComponent(code)}/damaged`, { damaged }),
-    onSuccess: (_res, variables) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
-      if (variables.damaged) navigate(`/maintenance/form?codeTanki=${encodeURIComponent(variables.code)}`);
     },
   });
 
@@ -288,7 +295,7 @@ export default function TankDashboardPage() {
           <KpiCard label="Total Tank" value={visibleRows.length} color="var(--navy-light)" />
           <KpiCard label="Tank Kosong" value={emptyCount} color="var(--success)" />
           <KpiCard label="Tank Terisi" value={occupiedCount} color="var(--danger)" />
-          <KpiCard label="Tank Damaged" value={damagedCount} color="#d97706" />
+          <KpiCard label="Tank Maintenance" value={damagedCount} color="#d97706" />
         </div>
 
         <DataTable
@@ -327,22 +334,24 @@ export default function TankDashboardPage() {
                       background: r.damaged ? "#fef3c7" : r.status === "occupied" ? "#fbd6d6" : "#d4f4dd",
                       color: r.damaged ? "#92400e" : r.status === "occupied" ? "#991b1b" : "#065f46",
                     }}
-                    title={r.damaged ? "Ditandai rusak -- lihat menu Maintenance" : undefined}
+                    title={r.damaged ? "Ditandai maintenance -- lihat menu Maintenance" : undefined}
                   >
-                    {r.damaged ? "Damaged" : r.status === "occupied" ? "Terisi" : "Kosong"}
+                    {r.damaged ? "Maintenance" : r.status === "occupied" ? "Terisi" : "Kosong"}
                   </span>
                 ),
-                csvValue: (r) => (r.damaged ? "Damaged" : r.status === "occupied" ? "Terisi" : "Kosong"),
+                csvValue: (r) => (r.damaged ? "Maintenance" : r.status === "occupied" ? "Terisi" : "Kosong"),
               },
               {
                 key: "damagedCheckbox",
-                label: "Damaged",
+                label: "Maintenance",
                 render: (r) => (
                   <input
                     type="checkbox"
                     checked={r.damaged}
-                    title={r.damaged ? "Tanki ditandai rusak" : "Centang kalau tanki ini rusak"}
-                    onChange={(e) => toggleDamaged.mutate({ code: r.code, damaged: e.target.checked })}
+                    title={r.damaged ? "Tanki ditandai maintenance" : "Centang kalau tanki ini sedang maintenance"}
+                    onChange={(e) =>
+                      e.target.checked ? setMaintenancePopupCode(r.code) : toggleDamaged.mutate({ code: r.code, damaged: false })
+                    }
                   />
                 ),
                 csvValue: (r) => (r.damaged ? "Ya" : "Tidak"),
@@ -575,6 +584,17 @@ export default function TankDashboardPage() {
             terakhir menyentuh Tank ini (yang tampil di kolom Remark tabel).
           </p>
         </Modal>
+      )}
+
+      {maintenancePopupCode && (
+        <MaintenanceQuickModal
+          codeTanki={maintenancePopupCode}
+          onClose={() => setMaintenancePopupCode(null)}
+          onSaved={() => {
+            toggleDamaged.mutate({ code: maintenancePopupCode, damaged: true });
+            setMaintenancePopupCode(null);
+          }}
+        />
       )}
     </>
   );

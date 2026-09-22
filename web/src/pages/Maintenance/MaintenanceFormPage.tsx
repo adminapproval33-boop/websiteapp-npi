@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import TankSelect from "../../components/TankSelect";
+import { useMesinOptions } from "../../components/MesinSelect";
 import EmployeeNameSelect, { isKnownEmployeeName, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { toDateTimeLocalValue, validateNotFutureDate } from "../../lib/datetime";
@@ -12,6 +13,7 @@ import { emptyMaintenanceForm, MaintenanceForm, MaintenanceRow } from "./types";
 
 const MAINTENANCE_COL_DEFAULT_WIDTHS: Record<string, number> = {
   codeTanki: 200,
+  noDok: 160,
   priority: 160,
   reportedBy: 200,
   technician: 200,
@@ -21,7 +23,7 @@ const MAINTENANCE_COL_DEFAULT_WIDTHS: Record<string, number> = {
 };
 
 const MAINTENANCE_COL_ROWS: string[][] = [
-  ["codeTanki", "priority", "reportedBy", "technician"],
+  ["codeTanki", "noDok", "priority", "reportedBy", "technician"],
   ["scheduledDate", "start", "finish"],
 ];
 
@@ -33,9 +35,19 @@ function toDateValue(v: string): string {
  * "Form Input Maintenance" (2026-08-06, instruksi eksplisit user) -- halaman
  * TERPISAH dari List Job/Jadwal Pengerjaan (beda dari modul lain yg Input +
  * History gabung 1 komponen bertab), krn user eksplisit minta 3 sub-menu
- * sendiri2 di sidebar. Dua jalur masuk lewat query string:
- * - `?codeTanki=X` -- dari checkbox "Damaged" di Master Data > Tanki
- *   (MasterDataPage.tsx), form langsung terisi Code Tanki-nya.
+ * sendiri2 di sidebar. Jalur masuk lewat query string:
+ * - `?codeTanki=X` -- kalau ada yg mengetik/paste URL manual dgn Code
+ *   Tanki/Code Mesin tertentu. Field ini SATU field generik "Code Tanki /
+ *   Objek" (bukan foreign key), jadi bisa menampung keduanya -- `TankSelect`
+ *   diberi `extraKnownCodes` dari Master Data Mesin supaya Code Mesin yg
+ *   valid tidak ditandai "tidak ditemukan" (yg mana itu cuma berlaku utk
+ *   Code Tanki). Checkbox "Maintenance" di Tank/Mesin Monitoring SENDIRI
+ *   TIDAK LAGI ke sini (2026-09-22, instruksi eksplisit user) -- dicentang
+ *   langsung buka pop-up ringkas `MaintenanceQuickModal` di halaman yg sama,
+ *   supaya user tidak perlu pindah halaman sama sekali. Detail lengkap yg
+ *   tidak ada di pop-up itu (Tanggal Mulai/Selesai, Remark, lampiran foto)
+ *   tetap dilengkapi lewat halaman ini, tapi masuknya lewat `?editId=` di
+ *   bawah (List Job > Edit), bukan lagi lewat `?codeTanki=`.
  * - `?editId=123` -- dari tombol Edit di List Job Maintenance
  *   (MaintenanceListPage.tsx), fetch GET /maintenance/:id lalu isi form.
  */
@@ -43,6 +55,7 @@ export default function MaintenanceFormPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data: employees } = useEmployeeOptions();
+  const { data: mesinList } = useMesinOptions();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<MaintenanceForm>(emptyMaintenanceForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -73,6 +86,7 @@ export default function MaintenanceFormPage() {
       setEditingId(row.id);
       setForm({
         codeTanki: row.codeTanki,
+        noDok: row.noDok ?? "",
         description: row.description,
         reportedBy: row.reportedBy,
         reportedByNik: row.reportedByNik ?? null,
@@ -105,6 +119,14 @@ export default function MaintenanceFormPage() {
       const wasEditing = editingId;
       queryClient.invalidateQueries({ queryKey: ["maintenance-history"] });
       queryClient.invalidateQueries({ queryKey: ["maintenance-schedule"] });
+      // Tanggal Selesai baru terisi -> checkbox "Maintenance" di Tank/Mesin
+      // Monitoring otomatis hilang centangnya di backend (releaseMaintenanceFlag,
+      // 2026-09-22) -- invalidate juga di sini supaya kalau user balik ke
+      // Monitoring, datanya sudah ter-refresh (bukan cache lama).
+      if (res.data.finish) {
+        queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard-mesin-status"] });
+      }
       if (attachmentFile) {
         uploadMutation.mutate({ id: res.data.id, file: attachmentFile });
       } else {
@@ -173,8 +195,17 @@ export default function MaintenanceFormPage() {
         <ExcelBlock title="Maintenance » Form Input Maintenance">
           {guideX !== null && <div className="col-align-guide" style={{ left: guideX }} />}
           <ExcelRow>
-            <ExcelField label="Code Tanki / Objek" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")} {...gridNav("codeTanki")}>
-              <TankSelect bare id="maintenance-code-tanki" value={form.codeTanki} onChange={(v) => setForm({ ...form, codeTanki: v })} />
+            <ExcelField label="Equipment Type" widthPx={colWidths.codeTanki} onResizeStart={beginResize("codeTanki")} {...gridNav("codeTanki")}>
+              <TankSelect
+                bare
+                id="maintenance-code-tanki"
+                value={form.codeTanki}
+                onChange={(v) => setForm({ ...form, codeTanki: v })}
+                extraKnownCodes={mesinList}
+              />
+            </ExcelField>
+            <ExcelField label="No Dok" widthPx={colWidths.noDok} onResizeStart={beginResize("noDok")} {...gridNav("noDok")}>
+              <input value={form.noDok} onChange={(e) => setForm({ ...form, noDok: e.target.value })} />
             </ExcelField>
             <ExcelField label="Prioritas" widthPx={colWidths.priority} onResizeStart={beginResize("priority")} {...gridNav("priority")}>
               <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>

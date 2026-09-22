@@ -34,7 +34,8 @@ const optionalDate = z
 
 const saveSchema = z
   .object({
-    codeTanki: z.string().trim().min(1, "Code Tanki/Objek wajib diisi."),
+    codeTanki: z.string().trim().min(1, "Equipment Type wajib diisi."),
+    noDok: z.string().optional(),
     description: z.string().trim().min(1, "Deskripsi Kerusakan wajib diisi."),
     reportedBy: z.string().trim().min(1, "Pelapor wajib diisi."),
     reportedByNik: z.string().trim().optional().nullable(),
@@ -67,6 +68,20 @@ function computeStatus(row: { scheduledDate: Date | null; start: Date | null; fi
   if (row.start) return "Dikerjakan";
   if (row.scheduledDate) return "Dijadwalkan";
   return "Pending";
+}
+
+/// Begitu Tanggal Selesai (finish) sebuah Job Maintenance terisi, checkbox
+/// "Maintenance" di Tank/Mesin Monitoring utk Code Tanki/Mesin ybs OTOMATIS
+/// hilang centangnya (2026-09-22, instruksi eksplisit user) -- tidak perlu
+/// di-uncheck manual lagi. `codeTanki` di sini BUKAN foreign key & bisa
+/// berisi Code Tanki ATAU Code Mesin (lihat komentar model MaintenanceLog),
+/// jadi coba set `damaged=false` di KEDUA master data -- yg cocok cuma salah
+/// satu (Tank atau Mesin), `updateMany` pada yg tidak cocok cuma no-op.
+async function releaseMaintenanceFlag(code: string): Promise<void> {
+  await Promise.all([
+    prisma.masterTank.updateMany({ where: { code }, data: { damaged: false } }),
+    prisma.masterMesin.updateMany({ where: { code }, data: { damaged: false } }),
+  ]);
 }
 
 // ===================== GET (literal routes dulu, /:id PALING BAWAH) =====================
@@ -140,6 +155,7 @@ maintenanceRouter.post(
     const created = await prisma.maintenanceLog.create({
       data: { ...parsed.data, reportedByNik, technicianNik, inputBy: req.auth!.nik },
     });
+    if (created.finish) await releaseMaintenanceFlag(created.codeTanki);
     res.status(201).json({ success: true, message: "Data Maintenance berhasil disimpan.", data: created });
   })
 );
@@ -246,6 +262,7 @@ maintenanceRouter.put(
       where: { id },
       data: { ...parsed.data, reportedByNik, technicianNik },
     });
+    if (updated.finish) await releaseMaintenanceFlag(updated.codeTanki);
     res.json({ success: true, message: "Data Maintenance berhasil diperbarui.", data: updated });
   })
 );

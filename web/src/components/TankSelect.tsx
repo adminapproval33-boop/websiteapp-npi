@@ -29,7 +29,6 @@ export default function TankSelect({
   required = true,
   bare = false,
   label = "Code Tanki",
-  extraKnownCodes,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -38,19 +37,10 @@ export default function TankSelect({
   /** Jika true, render input polos saja (tanpa wrapper .field + label) supaya bisa dibungkus komponen layout lain, mis. ExcelField. */
   bare?: boolean;
   label?: string;
-  /** Kode tambahan di luar Master Data Tanki yg TETAP dianggap valid & ikut
-   * muncul di saran (2026-09-22, instruksi eksplisit user) -- dipakai Form
-   * Input Maintenance krn field "Equipment Type" di situ juga menerima
-   * Code Mesin (checkbox Maintenance di Dashboard > Mesin Monitoring). */
-  extraKnownCodes?: string[];
 }) {
   const { data: tanks } = useTankOptions();
-  // `tanks` undefined = Master Data Tanki belum termuat -- TETAP undefined di
-  // sini (bukan digenapi jadi []) supaya isKnownTankCode tidak menolak duluan
-  // pas loading, persis perilaku semula sebelum extraKnownCodes ditambahkan.
-  const allCodes = tanks ? [...tanks, ...(extraKnownCodes ?? [])] : undefined;
   const listId = `${id}-tank-options`;
-  const isInvalid = !isKnownTankCode(allCodes, value);
+  const isInvalid = !isKnownTankCode(tanks, value);
 
   const input = (
     <div style={{ flex: 1, width: "100%" }}>
@@ -64,7 +54,7 @@ export default function TankSelect({
         title={isInvalid ? "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran." : undefined}
       />
       <datalist id={listId}>
-        {(allCodes ?? extraKnownCodes ?? []).map((code) => (
+        {(tanks ?? []).map((code) => (
           <option key={code} value={code} />
         ))}
       </datalist>

@@ -35,7 +35,6 @@ const optionalDate = z
 const saveSchema = z
   .object({
     codeTanki: z.string().trim().min(1, "Equipment Type wajib diisi."),
-    noDok: z.string().optional(),
     description: z.string().trim().min(1, "Deskripsi Kerusakan wajib diisi."),
     reportedBy: z.string().trim().min(1, "Pelapor wajib diisi."),
     reportedByNik: z.string().trim().optional().nullable(),
@@ -82,6 +81,26 @@ async function releaseMaintenanceFlag(code: string): Promise<void> {
     prisma.masterTank.updateMany({ where: { code }, data: { damaged: false } }),
     prisma.masterMesin.updateMany({ where: { code }, data: { damaged: false } }),
   ]);
+}
+
+/// No Dok dibuat OTOMATIS oleh sistem, bukan input manual lagi (2026-09-22,
+/// instruksi eksplisit user: user yg minta pekerjaan maintenance tidak perlu
+/// mikirin nomor dokumen sendiri). Format "MTN-YYYYMMDD-0001" -- 4 digit
+/// nomor urut, RESET tiap hari (dihitung dari jumlah Job Maintenance yg
+/// timestamp-nya jatuh di hari yg sama). Sekali dibuat saat Job dibuat
+/// (POST), TIDAK PERNAH berubah lagi walau Job-nya di-edit (PUT) -- lihat
+/// `saveSchema` di atas yg sekarang TIDAK PUNYA field `noDok` sama sekali,
+/// jadi PUT otomatis tidak pernah menyentuh kolom ini.
+async function generateNoDok(): Promise<string> {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfNextDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const countToday = await prisma.maintenanceLog.count({
+    where: { timestamp: { gte: startOfDay, lt: startOfNextDay } },
+  });
+  const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const seq = String(countToday + 1).padStart(4, "0");
+  return `MTN-${datePart}-${seq}`;
 }
 
 // ===================== GET (literal routes dulu, /:id PALING BAWAH) =====================
@@ -152,8 +171,9 @@ maintenanceRouter.post(
       sanitizeNik(parsed.data.reportedByNik),
       sanitizeNik(parsed.data.technicianNik),
     ]);
+    const noDok = await generateNoDok();
     const created = await prisma.maintenanceLog.create({
-      data: { ...parsed.data, reportedByNik, technicianNik, inputBy: req.auth!.nik },
+      data: { ...parsed.data, noDok, reportedByNik, technicianNik, inputBy: req.auth!.nik },
     });
     if (created.finish) await releaseMaintenanceFlag(created.codeTanki);
     res.status(201).json({ success: true, message: "Data Maintenance berhasil disimpan.", data: created });

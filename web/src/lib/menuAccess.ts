@@ -53,8 +53,6 @@ export const MENU_KEY_BY_PATH: Record<string, MenuKey> = {
   "/qc/check-results": "checkResults",
   "/qc/admin-qc": "adminQc",
   "/maintenance/form": "maintenance",
-  "/maintenance/list": "maintenance",
-  "/maintenance/schedule": "maintenance",
   "/production-label/entry": "productionLabel",
   "/production-label/entry-fg": "productionLabelFg",
   "/pr/entry": "purchaseRequisition",

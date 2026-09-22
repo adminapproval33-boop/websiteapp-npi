@@ -24,7 +24,6 @@ export default function MaintenanceQuickModal({
   onSaved: () => void;
 }) {
   const { data: employees } = useEmployeeOptions();
-  const [noDok, setNoDok] = useState("");
   const [description, setDescription] = useState("");
   const [reportedBy, setReportedBy] = useState("");
   const [reportedByNik, setReportedByNik] = useState<string | null>(null);
@@ -38,7 +37,6 @@ export default function MaintenanceQuickModal({
     mutationFn: () =>
       api.post("/maintenance", {
         codeTanki,
-        noDok,
         description,
         reportedBy,
         reportedByNik,
@@ -78,10 +76,6 @@ export default function MaintenanceQuickModal({
   return (
     <Modal title={`Maintenance — ${codeTanki}`} onClose={onClose} width={480} closeOnBackdropClick={false}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div className="field">
-          <label>No Dok</label>
-          <input value={noDok} onChange={(e) => setNoDok(e.target.value)} />
-        </div>
         <div className="field">
           <label>Deskripsi</label>
           <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />

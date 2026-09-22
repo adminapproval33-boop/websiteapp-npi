@@ -23,9 +23,7 @@ import MesinDashboardPage from "../pages/MesinDashboard/MesinDashboardPage";
 import QualityCheckReviewPage from "../pages/QualityCheckReview/QualityCheckReviewPage";
 import ProductionLabelEntryPage from "../pages/ProductionLabel/ProductionLabelEntryPage";
 import ProductionLabelEntryFgPage from "../pages/ProductionLabel/ProductionLabelEntryFgPage";
-import MaintenanceFormPage from "../pages/Maintenance/MaintenanceFormPage";
-import MaintenanceListPage from "../pages/Maintenance/MaintenanceListPage";
-import MaintenanceSchedulePage from "../pages/Maintenance/MaintenanceSchedulePage";
+import MaintenanceHubPage from "../pages/Maintenance/MaintenanceHubPage";
 import BackupManagementPage from "../pages/Backup/BackupManagementPage";
 
 export interface MenuLeaf {
@@ -85,11 +83,7 @@ export const menuTree: MenuNode[] = [
     leaf("Label Entry SFG", "/production-label/entry", <ProductionLabelEntryPage />),
     leaf("Label Entry FG", "/production-label/entry-fg", <ProductionLabelEntryFgPage />),
   ]),
-  group("Maintenance", [
-    leaf("Form Input Maintenance", "/maintenance/form", <MaintenanceFormPage />),
-    leaf("List Job Maintenance", "/maintenance/list", <MaintenanceListPage />),
-    leaf("Jadwal Pengerjaan", "/maintenance/schedule", <MaintenanceSchedulePage />),
-  ]),
+  leaf("Maintenance", "/maintenance/form", <MaintenanceHubPage />),
   group("Purchase Requisition", [
     leaf("PR Entry", "/pr/entry", undefined, OUT_OF_SCOPE),
     leaf("PR History", "/pr/history", undefined, OUT_OF_SCOPE),

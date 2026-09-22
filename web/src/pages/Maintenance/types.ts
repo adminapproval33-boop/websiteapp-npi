@@ -43,7 +43,6 @@ export const MAINTENANCE_STATUS_COLOR: Record<MaintenanceStatus, string> = {
 
 export const emptyMaintenanceForm = {
   codeTanki: "",
-  noDok: "",
   description: "",
   reportedBy: "",
   reportedByNik: null as string | null,

@@ -67,24 +67,19 @@ const saveSchema = z
   .superRefine((data, ctx) => {
     // Form Received/Leader/Code Tanki 1/Code Mesin/Material Number/dst sudah
     // wajib TANPA SYARAT lewat skema di atas (direvisi 2026-07-28, lihat
-    // requiredDate). Sisa tahap granular cuma 1: Start terisi -> Member, Qty
-    // Act, Fineness, Visco, & Suhu jadi wajib (KECUALI Finish); Finish terisi
-    // -> Start jadi wajib.
+    // requiredDate). Sisa tahap granular cuma 1: Start terisi -> Member & Qty
+    // Act jadi wajib (KECUALI Finish); Finish terisi -> Start jadi wajib.
+    // Fineness/Visco/Suhu SENGAJA TIDAK LAGI disyaratkan wajib begitu Start
+    // terisi (2026-09-22, instruksi eksplisit user -- sebelumnya wajib,
+    // sekarang boleh dikosongkan, bacaan itu tetap bisa diisi belakangan).
     const hasStart = data.start != null;
     const hasFinish = data.finish != null;
     const hasMembers = (data.members?.length ?? 0) > 0;
     const hasQtyAct = Boolean(data.qtyAct && data.qtyAct.trim());
-    const hasReadings = (arr?: string[]) => (arr ?? []).some((v) => v.trim().length > 0);
-    const hasFineness = hasReadings(data.fineness);
-    const hasVisco = hasReadings(data.visco);
-    const hasSuhu = hasReadings(data.suhu);
 
     if (hasStart) {
       if (!hasMembers) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["members"], message: "Member wajib diisi kalau Start sudah diisi." });
       if (!hasQtyAct) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["qtyAct"], message: "Qty Act wajib diisi kalau Start sudah diisi." });
-      if (!hasFineness) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fineness"], message: "Fineness wajib diisi kalau Start sudah diisi." });
-      if (!hasVisco) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["visco"], message: "Visco wajib diisi kalau Start sudah diisi." });
-      if (!hasSuhu) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["suhu"], message: "Suhu wajib diisi kalau Start sudah diisi." });
     }
     if (hasFinish && !hasStart) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["finish"], message: "Finish hanya boleh diisi kalau Start sudah diisi." });

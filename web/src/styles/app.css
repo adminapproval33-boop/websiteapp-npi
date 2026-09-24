@@ -39,25 +39,6 @@
   }
 }
 
-@keyframes loginFloat {
-  0%,
-  100% {
-    transform: translateY(0) rotate(var(--float-rot, 0deg));
-  }
-  50% {
-    transform: translateY(-10px) rotate(var(--float-rot, 0deg));
-  }
-}
-
-@keyframes loginSpin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* Animasi "muncul bertahap" logo (2026-08-29, ditiru dari video
    "Websiteapp Npi Logo.mp4" yg dikirim user: ikon roll cat "menggulung"
    muncul duluan, baru wordmark teksnya "menyapu" masuk dari kiri ke
@@ -558,92 +539,56 @@
 
   .login-page {
     @apply relative flex h-screen flex-col items-center justify-center overflow-hidden;
-    background-color: #7f1d1d;
-    background-image:
-      linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.08) 50%, transparent 60%),
-      radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.16), transparent 38%),
-      radial-gradient(circle at 88% 78%, rgba(255, 255, 255, 0.14), transparent 36%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='104' viewBox='0 0 120 104'%3E%3Cpolygon points='30,0 90,0 120,52 90,104 30,104 0,52' fill='none' stroke='white' stroke-opacity='0.09' stroke-width='1.5'/%3E%3C/svg%3E"),
-      linear-gradient(to bottom right, #dc2626, #b91c1c, #7f1d1d);
-    background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat;
+    /* Fallback dark background (2026-09-23, disesuaikan lagi krn animasinya
+       diganti versi ruang angkasa) -- dipakai sesaat sebelum canvas
+       .login-galaxy-bg sempat menggambar frame pertamanya, warnanya sengaja
+       disamakan persis dgn fillStyle awal canvas (#020309) supaya tidak ada
+       kedipan warna saat transisi. */
+    background-color: #020309;
   }
 
-  /* Video animasi tetesan cat merah-biru (2026-08-29, file dikirim user) --
-     full-bleed di paling belakang (z-0, dirender SEBELUM .login-decor di
-     JSX jadi otomatis di bawahnya), gradasi CSS di .login-page tetap jadi
-     background-color fallback kalau video gagal load/lambat buffer. */
-  /* Video terasa "kurang tajam" (2026-08-29, keluhan eksplisit user) --
-     resolusi asli file cuma 1920x1080 (fixed, tidak ada tool edit video di
-     sini utk render ulang lebih tinggi), jadi kalau layar user lebih lebar
-     dari itu, object-cover MEMBESARKAN videonya (upscale) & pasti kelihatan
-     lebih lembut/blur -- itu batasan sumber videonya, CSS tidak bisa
-     nambah detail piksel yang memang tidak ada. Yang bisa dibantu murni
-     dari sisi tampilan: naikkan sedikit contrast+saturate (murah secara
-     performa, dipercepat GPU) supaya tepi & warnanya kerasa lebih
-     "nendang"/tajam scr persepsi, tanpa filter berat (mis. SVG convolution
-     sharpen) yang berisiko bikin animasi lain di halaman ini patah-patah
-     di laptop kantor yang speknya pas-pasan. */
-  .login-bg-video {
-    @apply pointer-events-none absolute inset-0 z-0 h-full w-full object-cover;
-    filter: contrast(1.12) saturate(1.2);
+  /* Canvas animasi galaksi cat interaktif (2026-09-23, instruksi eksplisit
+     user: ganti total background login lama -- video tetesan cat + dekorasi
+     molekul SVG -- dgn animasi ini). Logic partikelnya full di
+     PaintGalaxyBackground.tsx; di sini cuma perlu full-bleed di paling
+     belakang & tidak menyerap event mouse (skrip-nya pasang listener di
+     window, bukan di canvas, jadi pointer-events-none aman & kartu login
+     tetap bisa diklik normal). */
+  .login-galaxy-bg {
+    @apply pointer-events-none absolute inset-0 z-0 h-full w-full;
   }
 
-  .login-decor {
-    @apply pointer-events-none absolute inset-0 z-0 overflow-hidden;
+  /* Wrapper penggeser kartu (2026-09-23, keluhan eksplisit user: kartu yg
+     dulu persis di tengah layar "mengganggu" krn menutupi pas titik pusat
+     animasi galaksi PaintGalaxyBackground -- lalu direvisi sekali lagi krn
+     kartu dirasa "masih kurang kepinggir", padding-right diperkecil spy
+     kartu mepet ke tepi kanan). PaintGalaxyBackground.tsx sendiri MENGUKUR
+     posisi .login-card-wrap ini scr langsung (getBoundingClientRect) & pas
+     kartu digeser spt ini, animasinya otomatis re-center ke ruang kosong di
+     kiri kartu -- bukan lagi cuma ke tengah window penuh -- supaya
+     pusarannya kelihatan simetris DI DALAM area yg kelihatan, bukan
+     "kepotong separuh" krn ketutup kartu. transform di sini TIDAK ditaruh
+     langsung di .login-card-wrap krn elemen itu py animasi masuk sendiri
+     (loginCardIn, fill-mode "both") yg pas selesai bakal nge-set
+     transform:none & menimpa translateX manapun yg ditaruh di elemen yg
+     sama -- makanya harus di wrapper terpisah. Cuma aktif di layar cukup
+     lebar (>=900px); di layar sempit kartu nyaris memenuhi lebar layar
+     sendiri jadi digeser pun percuma & berisiko mepet/terpotong, dibiarkan
+     tetap di tengah. */
+  .login-shift {
+    @apply relative z-10 flex w-full justify-center;
   }
 
-  .decor-splatter,
-  .decor-molecule,
-  .decor-spray,
-  .decor-atom,
-  .decor-city,
-  .decor-network,
-  .decor-star,
-  .decor-smoke {
-    @apply absolute;
-  }
-
-  /* Atom sedikit berputar -- gerakan lambat & halus, cukup buat latar
-     terasa hidup tanpa mengganggu fokus ke kartu login di tengah. */
-  .decor-atom svg {
-    animation: loginSpin 18s linear infinite;
-    transform-origin: center;
-  }
-
-  .decor-splatter svg,
-  .decor-molecule svg,
-  .decor-spray svg,
-  .decor-atom svg,
-  .decor-city svg,
-  .decor-network svg,
-  .decor-star svg,
-  .decor-smoke svg {
-    @apply block w-full;
+  @media (min-width: 900px) {
+    .login-shift {
+      justify-content: flex-end;
+      padding-right: clamp(16px, 3vw, 56px);
+    }
   }
 
   .login-card-wrap {
-    @apply relative z-10;
+    @apply relative;
     animation: loginCardIn 0.6s ease-out both;
-  }
-
-  .login-card-palette {
-    @apply pointer-events-none absolute z-0 w-[100px] drop-shadow-lg;
-  }
-
-  .login-card-palette svg {
-    @apply block w-full;
-  }
-
-  .login-card-palette-top {
-    @apply -right-7 -top-9 z-20 w-[92px];
-    --float-rot: 8deg;
-    animation: loginFloat 4.5s ease-in-out infinite;
-  }
-
-  .login-card-palette-bottom {
-    @apply -bottom-12 -left-16 w-[150px];
-    --float-rot: -8deg;
-    animation: loginFloat 5.5s ease-in-out infinite 0.4s;
   }
 
   /* Kotak login dibelah 2 warna (2026-08-29, instruksi eksplisit user):

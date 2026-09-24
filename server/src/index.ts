@@ -1,3 +1,4 @@
+import "./timezone";
 import { createApp } from "./app";
 import { env } from "./lib/env";
 import { startBackupScheduler } from "./modules/backup/backupScheduler";

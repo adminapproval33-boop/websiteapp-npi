@@ -11,10 +11,25 @@ import { requireAuth, AuthedRequest } from "../../middleware/auth";
 export const chatRouter = Router();
 chatRouter.use(requireAuth);
 
-const CONTACT_SELECT = { nik: true, name: true, department: true, avatarPath: true } as const;
+const CONTACT_SELECT = { nik: true, name: true, department: true, avatarPath: true, lastActiveAt: true } as const;
 
-/** "Online" = punya baris Session yg belum expired (lihat lib/session.ts) --
- * tidak perlu tabel/state terpisah, cukup pakai sesi login yg sudah ada. */
+/** "Online" (2026-09-23, instruksi eksplisit user, REVISI) -- SEBELUMNYA
+ * cuma "punya sesi belum expired", tapi sesi itu sliding-expiration & ikut
+ * ke-refresh oleh SEMUA request termasuk polling background Kontak/Chat
+ * sendiri (tiap 15 detik) -- akibatnya user yg tab-nya kebuka tapi TIDAK
+ * disentuh sama sekali (mis. lupa logout, komputer bersama) tetap tampil
+ * hijau terus-menerus, laporan nyata user. Sekarang WAJIB DUA-duanya:
+ * sesi masih berlaku (`expiresAt`) DAN py aktivitas nyata dlm
+ * ACTIVE_WINDOW_MS terakhir (`lastActiveAt`, diisi lewat POST
+ * /chat/heartbeat yg dipanggil frontend HANYA saat ada mouse/keyboard/klik
+ * & tab sedang terlihat -- lihat useActivityHeartbeat.ts, TIDAK terpicu
+ * oleh polling background manapun). */
+const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+
+function isRecentlyActive(lastActiveAt: Date | null): boolean {
+  return Boolean(lastActiveAt && Date.now() - lastActiveAt.getTime() <= ACTIVE_WINDOW_MS);
+}
+
 chatRouter.get(
   "/online",
   asyncRoute(async (req: AuthedRequest, res) => {
@@ -26,9 +41,27 @@ chatRouter.get(
     });
     const niks = sessions.map((s) => s.nik);
     const users = niks.length
-      ? await prisma.user.findMany({ where: { nik: { in: niks } }, select: CONTACT_SELECT, orderBy: { name: "asc" } })
+      ? await prisma.user.findMany({
+          where: { nik: { in: niks }, lastActiveAt: { gt: new Date(Date.now() - ACTIVE_WINDOW_MS) } },
+          select: CONTACT_SELECT,
+          orderBy: { name: "asc" },
+        })
       : [];
     res.json({ success: true, data: users });
+  })
+);
+
+/** Dipanggil frontend berkala HANYA saat ada aktivitas nyata & tab sedang
+ * terlihat (lihat useActivityHeartbeat.ts) -- menandai `User.lastActiveAt`
+ * SEKARANG, sumber satu-satunya utk status "Online" (titik hijau) & info
+ * "Terakhir aktif" (2026-09-23, instruksi eksplisit user). Disimpan di
+ * User (BUKAN Session) supaya tetap ada riwayatnya walau user sudah logout
+ * (Session dihapus saat logout, lihat lib/session.ts revokeSession). */
+chatRouter.post(
+  "/heartbeat",
+  asyncRoute(async (req: AuthedRequest, res) => {
+    await prisma.user.update({ where: { nik: req.auth!.nik }, data: { lastActiveAt: new Date() } });
+    res.json({ success: true });
   })
 );
 
@@ -108,8 +141,8 @@ chatRouter.get(
           distinct: ["nik"],
         })
       : [];
-    const onlineNiks = new Set(sessions.map((s) => s.nik));
-    const data = users.map((u) => ({ ...u, isOnline: onlineNiks.has(u.nik) }));
+    const sessionAliveNiks = new Set(sessions.map((s) => s.nik));
+    const data = users.map((u) => ({ ...u, isOnline: sessionAliveNiks.has(u.nik) && isRecentlyActive(u.lastActiveAt) }));
     res.json({ success: true, data });
   })
 );

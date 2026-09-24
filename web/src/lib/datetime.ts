@@ -44,6 +44,27 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   return d.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** Format Date/ISO string jadi teks relatif ("Baru saja", "5 menit lalu", "2
+ * jam lalu", "3 hari lalu") -- dipakai label "Terakhir aktif" di panel
+ * Kontak (2026-09-23, instruksi eksplisit user). Lebih dari 7 hari jatuh
+ * balik ke `formatDateTime` biasa (tanggal absolut lebih berguna drpd
+ * "X hari lalu" yg makin lama makin kasar presisinya). */
+export function formatRelativeTime(value: string | Date | null | undefined): string {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return formatDateTime(d);
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "Baru saja";
+  if (diffMin < 60) return `${diffMin} menit lalu`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} jam lalu`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay} hari lalu`;
+  return formatDateTime(d);
+}
+
 /** Format Date/ISO string (tanpa jam) ke dd-mm-yyyy -- dipakai Lot No & Exp
  * di Production Label (2026-08-04, instruksi eksplisit user: keduanya
  * harus seragam formatnya, pakai strip bukan garis miring). */

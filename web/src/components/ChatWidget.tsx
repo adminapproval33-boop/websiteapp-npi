@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { useActivityHeartbeat } from "../lib/useActivityHeartbeat";
+import { formatRelativeTime } from "../lib/datetime";
 import Avatar from "./Avatar";
 import ChatWindow, { ChatContact } from "./ChatWindow";
 
@@ -19,6 +21,7 @@ const POLL_MS = 15000;
  */
 export default function ChatWidget() {
   const { user } = useAuth();
+  useActivityHeartbeat(!!user);
   // Default CIUT (2026-08-09, instruksi eksplisit user) -- panel penuh
   // menutupi konten halaman kalau selalu terbuka (mis. Papan Info di
   // Beranda). Ciut = cuma bar judul "Kontak (N)" yg tetap kelihatan (jumlah
@@ -216,7 +219,10 @@ export default function ChatWidget() {
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>
                       {c.department}
-                      {!c.isOnline && " · Offline"}
+                      {/* "Terakhir aktif" (2026-09-23, instruksi eksplisit
+                          user) -- gantikan label "Offline" polos yg tidak
+                          menjawab "kapan terakhir dia beneran make". */}
+                      {!c.isOnline && ` · ${c.lastActiveAt ? `Terakhir aktif ${formatRelativeTime(c.lastActiveAt)}` : "Offline"}`}
                     </div>
                   </span>
                   {unread > 0 && (

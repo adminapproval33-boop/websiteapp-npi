@@ -9,6 +9,10 @@ export interface ChatContact {
   name: string;
   department: string;
   avatarPath: string | null;
+  /** Kapan kontak ini terakhir py aktivitas nyata (2026-09-23, instruksi
+   * eksplisit user) -- dipakai label "Terakhir aktif" di panel Kontak saat
+   * offline, lihat ChatWidget.tsx. */
+  lastActiveAt: string | null;
 }
 
 interface ChatMessage {

@@ -124,12 +124,18 @@ interface TrendDetailRow {
 interface TankOccupancyRow {
   plant: string;
   tipeTanki: string;
-  /** TIDAK termasuk tanki Damaged (2026-08-06, instruksi eksplisit user) */
+  /** Jumlah FISIK seluruh tanki, TERMASUK yg Damaged (2026-09-23, REVISI
+   * instruksi eksplisit user -- sebelumnya tidak termasuk Damaged, sekarang
+   * "Tanki Aktif" di bawah yg jadi kolom terpisah utk itu). */
   total: number;
+  /** Jumlah tanki yg TIDAK Damaged (aktif/bisa dipakai) -- inilah acuan
+   * Kosong/Terisi/%Terisi di bawah, BUKAN `total`. */
+  aktif: number;
   terisi: number;
   kosong: number;
   /** Ditandai lewat checkbox "Damaged" di Master Data > Tanki -- dikeluarkan
-   * dari total/kosong/terisi krn bukan kapasitas yg benar2 bisa dipakai. */
+   * dari aktif/kosong/terisi/%Terisi krn bukan kapasitas yg benar2 bisa
+   * dipakai, TAPI tetap ikut dihitung di `total` (jumlah fisik). */
   damaged: number;
   percentTerisi: number;
 }
@@ -329,8 +335,9 @@ export default function ProduktivitasDashboardPage() {
 
   const totalQtyDiproses = productivity.reduce((sum, r) => sum + r.totalQty, 0);
   const totalTanki = tankOccupancy.reduce((sum, r) => sum + r.total, 0);
+  const totalAktif = tankOccupancy.reduce((sum, r) => sum + r.aktif, 0);
   const totalTerisi = tankOccupancy.reduce((sum, r) => sum + r.terisi, 0);
-  const overallPercentTerisi = totalTanki > 0 ? Math.round((totalTerisi / totalTanki) * 100) : 0;
+  const overallPercentTerisi = totalAktif > 0 ? Math.round((totalTerisi / totalAktif) * 100) : 0;
 
   // Baris "Total" di bawah tiap tabel (2026-08-21, instruksi eksplisit user
   // -- BUKAN kolom tambahan di samping, footer row lewat prop `footer` DataTable).
@@ -475,36 +482,39 @@ export default function ProduktivitasDashboardPage() {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
           <KpiCard label="Total Qty Diproses (KG/Ltr)" value={numberFmt.format(totalQtyDiproses)} color="var(--navy-light)" />
           <KpiCard label="Total Tanki" value={totalTanki} color="var(--navy-light)" />
+          <KpiCard label="Tanki Aktif" value={totalAktif} color="var(--navy-light)" />
           <KpiCard label="Tanki Terisi" value={totalTerisi} color="var(--danger)" />
-          <KpiCard label="Tanki Kosong" value={totalTanki - totalTerisi} color="var(--success)" />
+          <KpiCard label="Tanki Kosong" value={totalAktif - totalTerisi} color="var(--success)" />
           <KpiCard label="% Terisi Keseluruhan" value={`${overallPercentTerisi}%`} color="#d97706" />
         </div>
 
         <h3 style={{ marginBottom: 4 }}>Okupansi Tanki per Plant</h3>
         <p style={{ marginTop: 0, marginBottom: 8, color: "var(--text-muted)", fontSize: "0.78rem" }}>
           Menampilkan kondisi tanki <strong>saat ini</strong> (real-time, sama dengan Dashboard &gt; Tank Monitoring) --
-          tombol periode/rentang tanggal di atas TIDAK berpengaruh ke tabel ini. Tanki yang ditandai{" "}
-          <strong>Damaged</strong> (Master Data &gt; Tanki) dikeluarkan dari Total/Kosong/Terisi/% Terisi -- dihitung
-          terpisah di kolom Damaged.
+          tombol periode/rentang tanggal di atas TIDAK berpengaruh ke tabel ini. <strong>Total Tanki</strong> adalah
+          jumlah fisik seluruh tanki (termasuk yang <strong>Damaged</strong>). Tanki yang ditandai Damaged (Master
+          Data &gt; Tanki) dikeluarkan dari <strong>Tanki Aktif</strong>/Kosong/Terisi/% Terisi -- % Terisi dihitung
+          dari Tanki Aktif (yang tidak rusak), bukan dari Total Tanki.
         </p>
         <DataTable
           rowKey={(r: TankOccupancyRow) => `${r.plant}-${r.tipeTanki}`}
           exportFileName="dashboard-produktivitas-tanki"
-          storageKey="dashboard-produktivitas-tanki-v3"
+          storageKey="dashboard-produktivitas-tanki-v4"
           rows={tankOccupancy}
           emptyMessage="Belum ada data tanki."
           columns={[
             { key: "plant", label: "Plant", render: (r) => r.plant },
             { key: "tipeTanki", label: "Tipe Tanki", render: (r) => r.tipeTanki },
             { key: "total", label: "Total Tanki", render: (r) => r.total },
-            { key: "terisi", label: "Terisi", render: (r) => r.terisi },
-            { key: "kosong", label: "Kosong", render: (r) => r.kosong },
+            { key: "aktif", label: "Tanki Aktif", render: (r) => r.aktif },
             {
               key: "damaged",
               label: "Damaged",
               render: (r) => <span style={{ color: r.damaged > 0 ? "var(--danger)" : undefined, fontWeight: r.damaged > 0 ? 700 : undefined }}>{r.damaged}</span>,
               csvValue: (r) => r.damaged,
             },
+            { key: "terisi", label: "Terisi", render: (r) => r.terisi },
+            { key: "kosong", label: "Kosong", render: (r) => r.kosong },
             {
               key: "percentTerisi",
               label: "% Terisi",
@@ -516,6 +526,7 @@ export default function ProduktivitasDashboardPage() {
           footer={{
             plant: "Total",
             total: totalTanki,
+            aktif: totalAktif,
             terisi: totalTerisi,
             kosong: totalKosong,
             damaged: totalDamaged,

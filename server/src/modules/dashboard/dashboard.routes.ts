@@ -2121,19 +2121,24 @@ async function buildProduktivitasData(finishRange: { gte?: Date; lte?: Date }) {
   const taTbLabel = (v: string | null) => TA_TB_LABEL[(v ?? "").trim().toUpperCase()] ?? "Tidak Diketahui";
 
   // Tanki `damaged=true` (checkbox Master Data > Tanki, 2026-08-06 instruksi
-  // eksplisit user) DIKELUARKAN dari Total/Kosong/Terisi -- dihitung
+  // eksplisit user) DIKELUARKAN dari Tanki Aktif/Kosong/Terisi -- dihitung
   // terpisah di kolom "Damaged" sendiri, krn tanki rusak bukan kapasitas yg
-  // benar2 bisa dipakai produksi.
-  const tankByPlant = new Map<string, { plant: string; tipeTanki: string; total: number; terisi: number; damaged: number }>();
+  // benar2 bisa dipakai produksi. "Total Tanki" (2026-09-23, REVISI instruksi
+  // eksplisit user) SEKARANG ikut menghitung tanki Damaged juga (= jumlah
+  // fisik seluruh tanki, Aktif + Damaged) -- "Tanki Aktif" jadi kolom
+  // TERPISAH utk jumlah yg TIDAK rusak, dan itulah yg tetap jadi acuan
+  // %Terisi (bukan Total Tanki), krn %Terisi cuma relevan thd kapasitas yg
+  // benar2 bisa dipakai.
+  const tankByPlant = new Map<string, { plant: string; tipeTanki: string; aktif: number; terisi: number; damaged: number }>();
   for (const t of tankMap.values()) {
     const plant = plantKey(t.locationPlant);
     const tipeTanki = taTbLabel(t.taTb);
     const key = `${plant}|${tipeTanki}`;
-    const row = tankByPlant.get(key) ?? { plant, tipeTanki, total: 0, terisi: 0, damaged: 0 };
+    const row = tankByPlant.get(key) ?? { plant, tipeTanki, aktif: 0, terisi: 0, damaged: 0 };
     if (t.damaged) {
       row.damaged += 1;
     } else {
-      row.total += 1;
+      row.aktif += 1;
       if (t.status === "occupied") row.terisi += 1;
     }
     tankByPlant.set(key, row);
@@ -2142,11 +2147,12 @@ async function buildProduktivitasData(finishRange: { gte?: Date; lte?: Date }) {
     .map((r) => ({
       plant: r.plant,
       tipeTanki: r.tipeTanki,
-      total: r.total,
+      total: r.aktif + r.damaged,
+      aktif: r.aktif,
       terisi: r.terisi,
-      kosong: r.total - r.terisi,
+      kosong: r.aktif - r.terisi,
       damaged: r.damaged,
-      percentTerisi: r.total > 0 ? Math.round((r.terisi / r.total) * 100) : 0,
+      percentTerisi: r.aktif > 0 ? Math.round((r.terisi / r.aktif) * 100) : 0,
     }))
     .sort((a, b) => a.plant.localeCompare(b.plant) || a.tipeTanki.localeCompare(b.tipeTanki));
 

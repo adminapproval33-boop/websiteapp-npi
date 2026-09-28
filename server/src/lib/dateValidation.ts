@@ -1,15 +1,40 @@
 import { z } from "zod";
 
 /**
- * Refine tambahan "tidak boleh tanggal yg belum terjadi" utk field Date
- * opsional/wajib tiap modul (2026-08-21, instruksi eksplisit user) -- root
- * cause: grafik Dashboard Produktivitas kecolongan titik data "di masa
- * depan" krn field `finish` production log diisi salah tanggal, TANPA
- * validasi apa pun di backend (cuma di frontend, yg bisa dilewati kalau API
- * dipanggil langsung). Dibandingkan ke AKHIR hari ini (23:59:59.999 waktu
- * lokal server) supaya jam berapa pun user input hari ini tetap lolos --
- * cuma tanggal SETELAH hari ini yg diblokir, sama persis logikanya dgn
- * `isFutureDate` di frontend (`web/src/lib/datetime.ts`).
+ * Rentang tanggal "wajar" -- batas ATAS = AKHIR hari ini (23:59:59.999 waktu
+ * lokal server, spt semula -- jam berapa pun user input HARI INI tetap
+ * lolos), batas BAWAH = persis 1 tahun ke belakang dari sekarang (bukan
+ * tahun kalender tetap) (2026-09-28, instruksi eksplisit user -- sempat
+ * dicoba diperketat ke "persis detik ini" tapi dibalik lagi krn kebanyakan
+ * blokir input jam wajar yg masih di hari yg sama). Root cause 3 laporan
+ * terpisah yg mendorong batas BAWAH ini: Order 1040008541 py Packing Finish
+ * "0006-09-25" -- tahun ketiban jadi "0006" alih-alih "2026", kemungkinan
+ * besar krn native date-picker browser meloloskan tahun yg belum lengkap
+ * diketik; Order 1020055068 py Colour Matching Finish "1970-01-01" -- pola
+ * khas `new Date(null)`/`new Date(undefined)` yg diam-diam dianggap "detik
+ * ke-nol" alih-alih ditolak; Order 1010165713 py Approval Finish App
+ * "0001-01-01". Ketiganya LOLOS begitu saja sebelum ini krn versi lama
+ * `notFutureDate` cuma mengecek "tidak boleh di masa depan" -- tanggal yg
+ * jauh ke BELAKANG, sekonyol apa pun, tetap dianggap sah. Dihitung ULANG
+ * tiap kali fungsi dipanggil (bukan konstanta modul-level) supaya "hari
+ * ini" & "1 tahun lalu" selalu akurat relatif thd waktu request, bukan
+ * waktu server pertama kali start. */
+function getSensibleRange(): { min: Date; max: Date } {
+  const max = new Date();
+  max.setHours(23, 59, 59, 999);
+  const min = new Date();
+  min.setFullYear(min.getFullYear() - 1);
+  return { min, max };
+}
+
+/**
+ * Refine tambahan "tidak boleh tanggal yg belum terjadi, & tidak boleh
+ * tanggal yg konyol jauh ke belakang" utk field Date opsional/wajib tiap
+ * modul (2026-08-21, instruksi eksplisit user, DIPERKETAT 2026-09-28 --
+ * lihat `getSensibleRange` di atas). Root cause awal (Agustus): grafik
+ * Dashboard Produktivitas kecolongan titik data "di masa depan" krn field
+ * `finish` production log diisi salah tanggal, TANPA validasi apa pun di
+ * backend (cuma di frontend, yg bisa dilewati kalau API dipanggil langsung).
  *
  * Generik atas `T extends ZodTypeAny` (bukan dibatasi ke `Date | null`
  * spesifik) krn pola `requiredDate`/`optionalDate` BEDA-BEDA tiap modul --
@@ -27,11 +52,10 @@ export function notFutureDate<T extends z.ZodTypeAny>(schema: T, label: string):
   return schema.refine(
     (v: unknown) => {
       if (!(v instanceof Date)) return true;
-      const endOfToday = new Date();
-      endOfToday.setHours(23, 59, 59, 999);
-      return v.getTime() <= endOfToday.getTime();
+      const { min, max } = getSensibleRange();
+      return v.getTime() >= min.getTime() && v.getTime() <= max.getTime();
     },
-    { message: `${label} tidak boleh diisi tanggal yang belum terjadi (melebihi hari ini).` }
+    { message: `${label} tidak valid -- tidak boleh di masa depan atau lebih dari 1 tahun yang lalu.` }
   ) as unknown as T;
 }
 
@@ -48,10 +72,9 @@ export function notFutureDDMMYYYY<T extends z.ZodTypeAny>(schema: T, label: stri
       const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(v);
       if (!m) return true;
       const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-      const endOfToday = new Date();
-      endOfToday.setHours(23, 59, 59, 999);
-      return d.getTime() <= endOfToday.getTime();
+      const { min, max } = getSensibleRange();
+      return d.getTime() >= min.getTime() && d.getTime() <= max.getTime();
     },
-    { message: `${label} tidak boleh diisi tanggal yang belum terjadi (melebihi hari ini).` }
+    { message: `${label} tidak valid -- tidak boleh di masa depan atau lebih dari 1 tahun yang lalu.` }
   ) as unknown as T;
 }

@@ -28,7 +28,12 @@ interface ProductionOrderRow {
    * bawah). 2026-07-31, instruksi eksplisit user. */
   codeTanki: string | null;
   timestamp: Date;
-  leadTimeProses: number;
+  /** `null` = belum ada satu pun tahap yg selesai sama sekali ("Belum
+   * diproses" di frontend) -- DIBEDAKAN dari `0` yg berarti SUDAH ada progres
+   * tapi kebetulan proses & selesainya di hari kerja yg sama (2026-09-28,
+   * instruksi eksplisit user: sebelumnya dua kasus ini sama-sama tampil "0
+   * hari kerja" & disalahartikan sbg bug tiap kali dilaporkan). */
+  leadTimeProses: number | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing utk Order ini, TERPISAH dari kolom "Proses" --
@@ -1293,7 +1298,7 @@ dashboardRouter.get(
       return CANONICAL_STAGES.filter((s) => materialSetByStage[s].has(materialNumber));
     }
 
-    function computeLeadTimeProses(order: string, materialNumber: string | null): number {
+    function computeLeadTimeProses(order: string, materialNumber: string | null): number | null {
       let startDate: Date | null = null;
       for (const stage of applicableStagesInOrder(materialNumber)) {
         const d = stageFinishMaps[stage].get(order);
@@ -1302,7 +1307,8 @@ dashboardRouter.get(
           break;
         }
       }
-      if (!startDate) return 0;
+      // `null` (bukan 0) -- lihat komentar `leadTimeProses` di ProductionOrderRow.
+      if (!startDate) return null;
 
       const flow = materialNumber ? materialFlowByNumber.get(materialNumber) : undefined;
       const endDate = isMillingOnlyRouteFlow(flow) ? millingFinishByOrder.get(order) ?? null : packingFinishByOrder.get(order) ?? null;

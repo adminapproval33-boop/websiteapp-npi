@@ -30,7 +30,10 @@ interface ProductionOrderRow {
   finish: string | null;
   remark: string | null;
   codeTanki: string | null;
-  leadTimeProses: number;
+  /** `null` = belum ada tahap apa pun yg selesai (tampil "Belum diproses") --
+   * dibedakan dari `0` (sudah py progres, cuma kebetulan selesai di hari
+   * kerja yg sama), 2026-09-28 instruksi eksplisit user. */
+  leadTimeProses: number | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing, TERPISAH dari kolom "Proses" -- sesuai instruksi
@@ -633,10 +636,10 @@ export default function ProductionOrderDashboardPage() {
                   title="Klik utk lihat lama proses di tiap tahapan"
                   style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
                 >
-                  {r.leadTimeProses} hari kerja
+                  {r.leadTimeProses == null ? "Belum diproses" : `${r.leadTimeProses} hari kerja`}
                 </span>
               ),
-              csvValue: (r) => r.leadTimeProses,
+              csvValue: (r) => (r.leadTimeProses == null ? "Belum diproses" : r.leadTimeProses),
             },
           ]}
         />

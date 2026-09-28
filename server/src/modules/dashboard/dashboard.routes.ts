@@ -368,6 +368,56 @@ function finishBasedLabel(stageName: "Approval", finish: Date | null): string {
   return finish ? `${stageName} - DN` : stageName;
 }
 
+interface ApprovalStatusFields {
+  prepareProduksi: Date | null;
+  sprayMan: string | null;
+  wetSample: string | null;
+  panel: string | null;
+  multipleCust: string | null;
+  lotCoa: Date | null;
+  sendToTech: Date | null;
+  technicalDateReceiving: Date | null;
+  submitToCustomer: Date | null;
+  customer: string | null;
+  custSegmen: string | null;
+  techName: string | null;
+  finishApp: Date | null;
+}
+
+/**
+ * Label Proses Approval 3-tahap (2026-09-28, instruksi eksplisit user,
+ * REVISI dari `finishBasedLabel` 2-tahap di atas -- dipakai KHUSUS di
+ * /production-orders, TIDAK menggantikan finishBasedLabel yg masih dipakai
+ * Tank Monitoring supaya tampilan situ tidak ikut berubah tanpa diminta):
+ * 1) "Prepare Date" SAMPAI "Submit Tech" (seluruh kolom "Production Input
+ *    Column" -- Prepare Date, Spray Man, Wet Sample, Panel, Multiple Cust,
+ *    Lot COA, Send To Tech -- DITAMBAH "Submit Tech" yg field DB-nya
+ *    `technicalDateReceiving`, lihat ApprovalPage.tsx) terisi SEMUA ->
+ *    "Wait Approval".
+ * 2) "Submit Cust" SAMPAI "Tech Name" (submitToCustomer, Customer, Cust
+ *    Segmen, Tech Name) terisi SEMUA -> "Approval".
+ * 3) "Finish App" terisi -> "Approval - DN" (selesai).
+ * Urutan pengecekan SENGAJA dari plg maju ke plg mundur (bukan berurutan)
+ * krn begitu Finish App terisi, field2 sebelumnya psti sudah lengkap juga --
+ * jadi tidak perlu re-cek satu-satu dari awal.
+ */
+function approvalStatusLabel(r: ApprovalStatusFields): string {
+  if (r.finishApp) return "Approval - DN";
+  if (r.submitToCustomer && r.customer && r.custSegmen && r.techName) return "Approval";
+  if (
+    r.prepareProduksi &&
+    r.sprayMan &&
+    r.wetSample &&
+    r.panel &&
+    r.multipleCust &&
+    r.lotCoa &&
+    r.sendToTech &&
+    r.technicalDateReceiving
+  )
+    return "Wait Approval";
+  return "-";
+}
+
 /**
  * Status Order terkini lintas modul produksi (Premix, Aftermix, Milling,
  * Colour Matching, Packing) -- acuannya nomor Order, dipakai oleh Dashboard
@@ -509,6 +559,7 @@ dashboardRouter.get(
           remark: true,
           timestamp: true,
           codeTanki: true,
+          tanggalMasukQc: true,
           parameters: {
             orderBy: { no: "asc" },
             select: { parameter: true, standard: true, result: true, start: true, finish: true },
@@ -522,9 +573,17 @@ dashboardRouter.get(
           materialNumber: true,
           orderQty: true,
           prepareProduksi: true,
+          sprayMan: true,
+          wetSample: true,
+          panel: true,
+          multipleCust: true,
+          lotCoa: true,
           sendToTech: true,
           technicalDateReceiving: true,
           submitToCustomer: true,
+          customer: true,
+          custSegmen: true,
+          techName: true,
           finishApp: true,
           codeTanki: true,
           remark: true,
@@ -547,6 +606,19 @@ dashboardRouter.get(
     for (const r of adminQcRows) {
       if (!latestAdminQcByOrder.has(r.order)) latestAdminQcByOrder.set(r.order, r);
     }
+    /** Tahap "QC" dianggap MULAI begitu "QC Entry Date" (CheckResult.tanggalMasukQc)
+     * terisi, dan dianggap SELESAI begitu "QC Passed" (AdminQc.qcPassed, dari
+     * baris AdminQc TERBARU per Order) terisi (2026-09-28, instruksi eksplisit
+     * user) -- BUKAN lagi "asal ada baris History Input Check Results"
+     * (definisi lama `checkResultOrders`, terlalu longgar: Order yg baris QC-nya
+     * ada tapi belum py QC Passed sama sekali tetap kecatat "done", bikin
+     * progressPercent/Lead Time Proses salah -- root cause laporan Order
+     * 1020055733). */
+    const qcPassedOrders = new Set(
+      Array.from(latestAdminQcByOrder.values())
+        .filter((r) => r.qcPassed)
+        .map((r) => r.order)
+    );
 
     // Set per tahap (utk kolom "Proses Bar") -- dari data yg SAMA yg sudah
     // di-fetch di atas, tidak perlu query lagi.
@@ -557,6 +629,17 @@ dashboardRouter.get(
     const packingOrders = new Set(packing.map((r) => r.order));
     const checkResultOrders = new Set(checkResults.map((r) => r.order));
     const approvalOrders = new Set(approvals.map((r) => r.order));
+    /** Tahap "Approval" dianggap SELESAI begitu "Finish App" (baris Approval
+     * TERBARU per Order) terisi (2026-09-28, instruksi eksplisit user) -- BUKAN
+     * lagi "asal ada baris Approval" (`approvalOrders` di atas, terlalu longgar,
+     * root cause sama dgn QC di Order 1020055733: dipakai `computeStages` di
+     * bawah, `approvalOrders` sendiri TETAP dipakai apa adanya utk `hasAnyHistory`
+     * -- itu murni "pernah disentuh", bukan "sudah selesai"). */
+    const approvalFinishAppOrders = new Set(
+      Array.from(latestRowByOrder(approvals).values())
+        .filter((r) => r.finishApp)
+        .map((r) => r.order)
+    );
 
     // Set materialNumber PER TAHAP (siapapun Order-nya) -- dipakai utk
     // menentukan tahap mana saja yg RELEVAN ditampilkan sbg label utk 1
@@ -596,8 +679,8 @@ dashboardRouter.get(
         Milling: millingDoneOrders,
         Aftermix: aftermixDoneOrders,
         "Colour Matching": colourMatchingDoneOrders,
-        QC: checkResultOrders,
-        Approval: approvalOrders,
+        QC: qcPassedOrders,
+        Approval: approvalFinishAppOrders,
         Packing: packingOrders,
       };
 
@@ -954,7 +1037,6 @@ dashboardRouter.get(
         timestamp: latestMoment(r.formReceived, r.sendToPqe, r.timestamp),
       })),
       ...checkResults.map((r) => {
-        const rep = qcRepresentativeParam(r.parameters);
         // Label Proses QC direvisi TOTAL 2026-07-29 sesuai instruksi eksplisit
         // user, menggantikan format lama "QC : <Item Check> : <Verdict>" --
         // sekarang cuma 2 state: Order ada di "History Input Check Results"
@@ -967,32 +1049,40 @@ dashboardRouter.get(
           order: r.order,
           orderQty: r.orderQty,
           process: adminQc?.qcPassed ? "QC - DN" : "QC",
-          start: rep?.start ?? null,
-          finish: rep?.finish ?? null,
+          // REVISI 2026-09-28 (instruksi eksplisit user, menggantikan aturan lama
+          // yg cuma pakai Start Item Check terwakil): QC dianggap MULAI dari
+          // "QC Entry Date" (tanggalMasukQc, header Input Check Results) & SELESAI
+          // dari "QC Passed" (AdminQc.qcPassed) -- konsisten dgn qcPassedOrders/
+          // qcFinishByOrder di atas, supaya label "QC - DN" & tanggal Finish yg
+          // dipakai Lead Time Proses sejalan, tidak lagi 2 sumber kebenaran beda.
+          start: r.tanggalMasukQc ?? null,
+          finish: adminQc?.qcPassed ?? null,
           remark: r.remark,
           codeTanki: r.codeTanki,
-          // Beda dengan modul lain (pakai latestMoment/Finish-lalu-Start): QC
-          // SENGAJA cuma pakai kolom Start Item Check terwakil saja (bukan Finish,
-          // bukan timestamp Save header) -- sesuai instruksi eksplisit utk QC.
-          timestamp: rep?.start ?? r.timestamp,
+          timestamp: latestMoment(r.tanggalMasukQc ?? null, adminQc?.qcPassed ?? null, r.timestamp),
         };
       }),
       ...queueApprovalRows,
       ...approvals.map((r) => {
-        const adminQc = latestAdminQcByOrder.get(r.order);
         return {
           order: r.order,
           orderQty: r.orderQty,
-          process: finishBasedLabel("Approval", r.finishApp),
-          // Start Proses tetap diambil dari "QC to App" (kolom History Admin
-          // QC) spy konsisten sama sebelumnya; Finish Proses SEKARANG Finish
-          // App langsung (bukan lagi QC Passed) -- sesuai instruksi 2026-07-29:
-          // status "Approval - DN" ditentukan murni dari Finish App.
-          start: adminQc?.qcToApproval ?? null,
+          // REVISI 2026-09-28 (instruksi eksplisit user): label 3-tahap, lihat
+          // `approvalStatusLabel` -- menggantikan finishBasedLabel 2-tahap yg
+          // dipakai di sini sebelumnya (Tank Monitoring TIDAK ikut berubah).
+          process: approvalStatusLabel(r),
+          // REVISI 2026-09-28 (instruksi eksplisit user, GANTI dari "QC to App"
+          // di Admin QC): Start Proses Approval sekarang dari "Submit Cust"
+          // (ApprovalSchedule.submitToCustomer, kolom di menu Approval sendiri)
+          // -- sebelumnya diambil dari tabel LAIN (AdminQc.qcToApproval), yg
+          // dirasa membingungkan krn Start-nya tidak berasal dari menu Approval
+          // itu sendiri. Finish Proses tetap Finish App -- status "Approval - DN"
+          // ditentukan murni dari Finish App.
+          start: r.submitToCustomer ?? null,
           finish: r.finishApp,
           remark: r.remark,
           codeTanki: r.codeTanki,
-          timestamp: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
+          timestamp: latestMoment(r.submitToCustomer ?? null, r.finishApp, r.timestamp),
         };
       }),
     ];
@@ -1135,10 +1225,12 @@ dashboardRouter.get(
       );
       millingFinishByOrder.set(order, latestFinish);
     }
+    // Finish tahap QC = "QC Passed" (AdminQc.qcPassed, baris AdminQc TERBARU per
+    // Order) -- BUKAN lagi Finish item-check terwakil (2026-09-28, instruksi
+    // eksplisit user, konsisten dgn qcPassedOrders di atas).
     const qcFinishByOrder = new Map<string, Date>();
-    for (const r of latestRowByOrder(checkResults).values()) {
-      const rep = qcRepresentativeParam(r.parameters);
-      if (rep?.finish) qcFinishByOrder.set(r.order, rep.finish);
+    for (const r of latestAdminQcByOrder.values()) {
+      if (r.qcPassed) qcFinishByOrder.set(r.order, r.qcPassed);
     }
     const approvalFinishByOrder = new Map<string, Date>();
     for (const r of latestRowByOrder(approvals).values()) {

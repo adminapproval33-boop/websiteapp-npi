@@ -478,9 +478,23 @@ masterDataRouter.post(
     const records = Array.from(dedupMap.values());
 
     if (mode === "replace") {
+      // Snapshot tanki yg lagi ditandai "Maintenance" SEBELUM dihapus (2026-09-29,
+      // root cause laporan nyata: semua centang Maintenance hilang begitu Master
+      // Data Tanki di-upload ulang mode Replace) -- kolom `damaged` itu STATUS
+      // APLIKASI (dicentang manual lewat Master Data > Tanki/Tank Monitoring),
+      // BUKAN bagian dari file yg diupload sama sekali, jadi delete+recreate
+      // otomatis mereset semuanya balik ke false. Dipulihkan lagi setelah re-
+      // create SELESAI, tapi HANYA utk Code Tanki yg masih ada di file baru --
+      // kalau tanki itu memang sudah tidak ada lagi di file terbaru, biarkan
+      // hilang (itu memang tujuan mode Replace).
+      const previouslyDamaged = await prisma.masterTank.findMany({ where: { damaged: true }, select: { code: true } });
       await prisma.masterTank.deleteMany({});
       for (const batch of chunk(records, 5000)) {
         await prisma.masterTank.createMany({ data: batch, skipDuplicates: true });
+      }
+      const damagedCodes = previouslyDamaged.map((r) => r.code);
+      if (damagedCodes.length > 0) {
+        await prisma.masterTank.updateMany({ where: { code: { in: damagedCodes } }, data: { damaged: true } });
       }
     } else {
       for (const batch of chunk(records, 200)) {
@@ -566,9 +580,17 @@ masterDataRouter.post(
     const records = Array.from(dedupMap.values());
 
     if (mode === "replace") {
+      // Sama persis pola pemulihan "Maintenance" spt Master Data Tanki di atas
+      // (lihat komentar lebih lengkap di situ) -- `damaged` di Master Mesin
+      // JUGA status aplikasi, bukan bagian dari file yg diupload.
+      const previouslyDamaged = await prisma.masterMesin.findMany({ where: { damaged: true }, select: { code: true } });
       await prisma.masterMesin.deleteMany({});
       for (const batch of chunk(records, 5000)) {
         await prisma.masterMesin.createMany({ data: batch, skipDuplicates: true });
+      }
+      const damagedCodes = previouslyDamaged.map((r) => r.code);
+      if (damagedCodes.length > 0) {
+        await prisma.masterMesin.updateMany({ where: { code: { in: damagedCodes } }, data: { damaged: true } });
       }
     } else {
       for (const batch of chunk(records, 200)) {

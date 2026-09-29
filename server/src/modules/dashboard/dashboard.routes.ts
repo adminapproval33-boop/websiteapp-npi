@@ -1849,11 +1849,40 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   }
   const activeTouches = touches.filter((t) => !isOrderDone(t.order));
 
-  // Per kode Tank, ambil touch PALING BARU DI ANTARA Order yg MASIH AKTIF
-  // saja (`activeTouches`, lihat komentar `isOrderDone` di atas) -- itulah
-  // Order yg diasumsikan sedang memegang tank itu sekarang.
-  const latestByTank = new Map<string, TankTouch>();
+  // Order yg SUDAH PINDAH TANKI (2026-09-29, instruksi eksplisit user -- root
+  // cause laporan nyata: Order 1030062588 py Aftermix+Colour Matching di
+  // tanki 043 (12-21 Sep), TAPI QC belakangan (23 Sep) tercatat pindah ke
+  // tanki 044 utk rework/"Improve" -- tanki 043 nyangkut tetap "Terisi"
+  // SELAMANYA krn sistem lama tidak py sinyal "sudah dibebaskan", padahal
+  // fisiknya sudah pindah). Utk 1 Order yg SAMA: kalau ada touch LEBIH BARU
+  // di tanki LAIN, touch2 di tanki2 LAMA dianggap "sudah ditinggalkan" &
+  // dibuang dari daftar kandidat -- KECUALI kalau moment-nya PERSIS SAMA dgn
+  // touch tanki paling baru Order itu (tandanya touch simultan/1 kejadian
+  // yg sama, spt Milling Couple+Moving -- 1 baris MillingLog yg ngisi
+  // codeTanki1 & codeTanki2 SEKALIGUS, push 2 touch dgn `moment` computed
+  // SEKALI lalu dipakai berdua -- jadi TIDAK saling menggugurkan).
+  const latestMomentByOrder = new Map<string, number>();
   for (const t of activeTouches) {
+    const ms = t.moment.getTime();
+    const cur = latestMomentByOrder.get(t.order);
+    if (cur === undefined || ms > cur) latestMomentByOrder.set(t.order, ms);
+  }
+  const tanksAtLatestMomentByOrder = new Map<string, Set<string>>();
+  for (const t of activeTouches) {
+    if (t.moment.getTime() !== latestMomentByOrder.get(t.order)) continue;
+    const set = tanksAtLatestMomentByOrder.get(t.order) ?? new Set<string>();
+    set.add(t.code);
+    tanksAtLatestMomentByOrder.set(t.order, set);
+  }
+  const nonSupersededTouches = activeTouches.filter(
+    (t) => t.moment.getTime() === latestMomentByOrder.get(t.order) || (tanksAtLatestMomentByOrder.get(t.order)?.has(t.code) ?? false)
+  );
+
+  // Per kode Tank, ambil touch PALING BARU DI ANTARA Order yg MASIH AKTIF &
+  // BELUM ditinggalkan pindah tanki (`nonSupersededTouches`, lihat komentar
+  // di atas) -- itulah Order yg diasumsikan sedang memegang tank itu sekarang.
+  const latestByTank = new Map<string, TankTouch>();
+  for (const t of nonSupersededTouches) {
     const existing = latestByTank.get(t.code);
     if (!existing || t.moment.getTime() > existing.moment.getTime()) latestByTank.set(t.code, t);
   }
@@ -1968,6 +1997,64 @@ dashboardRouter.get(
   asyncRoute(async (req, res) => {
     const map = await buildTankStatusMap();
     res.json({ success: true, data: Array.from(map.values()) });
+  })
+);
+
+/**
+ * Tanki PALING BARU yg tercatat utk 1 Order, lintas SEMUA modul proses
+ * (Premix/Aftermix, Milling -- 2 slot, Colour Matching, QC, Approval) --
+ * dipakai popup konfirmasi "pindah tanki" di form Input tiap modul (2026-09-29,
+ * instruksi eksplisit user: peringatkan admin SEBELUM Save kalau Code Tanki
+ * yg diketik beda dari tanki proses sebelumnya utk Order yg sama, root cause
+ * yg sama dgn perbaikan Tank Monitoring "tanki nyangkut" -- 2 tanki kecolongan
+ * ke-Terisi bareng krn tidak ada yg mengecek/mengingatkan pas Save).
+ * DISENGAJA query per-Order (bukan reuse buildTankStatusMap yg narik SEMUA
+ * data) supaya ringan dipanggil tiap kali form mau Save, bukan cuma di
+ * dashboard. Logikanya SAMA (moment = latestMoment start/finish/timestamp),
+ * cuma TANPA gerbang isOrderDone/aturan "sudah selesai" dashboard -- di sini
+ * kita justru mau tahu tanki APAPUN yg paling terakhir dicatat, terlepas
+ * Order-nya masih aktif atau sudah selesai.
+ */
+dashboardRouter.get(
+  "/latest-tank-by-order/:order",
+  asyncRoute(async (req, res) => {
+    const order = String(req.params.order).trim();
+    if (!order) {
+      res.json({ success: true, data: null });
+      return;
+    }
+    const [pa, ml, cm, ap, cr] = await Promise.all([
+      prisma.premixAftermixLog.findMany({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.millingLog.findMany({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.colourMatchingLog.findMany({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.approvalSchedule.findMany({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.checkResult.findMany({
+        where: { order },
+        include: { parameters: { orderBy: { no: "asc" } } },
+        orderBy: { timestamp: "desc" },
+      }),
+    ]);
+
+    const bestRef: { value: { code: string; ms: number } | null } = { value: null };
+    const consider = (code: string | null, moment: Date) => {
+      if (!code) return;
+      const ms = moment.getTime();
+      if (!bestRef.value || ms > bestRef.value.ms) bestRef.value = { code, ms };
+    };
+    for (const r of pa) consider(r.codeTanki, latestMoment(r.start, r.finish, r.timestamp));
+    for (const r of ml) {
+      const m = latestMoment(r.start, r.finish, r.timestamp);
+      consider(r.codeTanki1, m);
+      consider(r.codeTanki2, m);
+    }
+    for (const r of cm) consider(r.codeTanki, latestMoment(r.start, r.finish, r.timestamp));
+    for (const r of ap) consider(r.codeTanki, latestMoment(null, r.finishApp, r.timestamp));
+    for (const r of cr) {
+      const rep = qcRepresentativeParam(r.parameters);
+      consider(r.codeTanki, rep?.start ?? r.timestamp);
+    }
+
+    res.json({ success: true, data: bestRef.value ? { codeTanki: bestRef.value.code } : null });
   })
 );
 

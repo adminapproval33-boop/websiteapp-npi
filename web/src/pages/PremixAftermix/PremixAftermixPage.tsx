@@ -24,6 +24,8 @@ import WeeklyScheduleCalendar, {
   parseInsertBeforeId,
 } from "../../components/WeeklyScheduleCalendar";
 import Modal from "../../components/Modal";
+import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
+import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
@@ -255,6 +257,7 @@ export default function PremixAftermixPage({
   const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const { pending: pendingTankChange, checkTankChange, confirmProceed: confirmTankChange, cancel: cancelTankChange } = useTankChangeGuard();
   const [search, setSearch] = useState("");
   const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
@@ -847,7 +850,7 @@ export default function PremixAftermixPage({
     setError("");
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage("");
     setError("");
@@ -871,6 +874,8 @@ export default function PremixAftermixPage({
       setError(dateError);
       return;
     }
+    const tankOk = await checkTankChange(form.order, [form.codeTanki]);
+    if (!tankOk) return;
     saveMutation.mutate();
   }
 
@@ -1527,6 +1532,15 @@ export default function PremixAftermixPage({
             {scheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
           </button>
         </Modal>
+      )}
+
+      {pendingTankChange && (
+        <TankChangeConfirmDialog
+          previousTank={pendingTankChange.previousTank}
+          newTanks={pendingTankChange.newTanks}
+          onCancel={cancelTankChange}
+          onConfirm={confirmTankChange}
+        />
       )}
     </div>
   );

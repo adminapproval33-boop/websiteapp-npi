@@ -14,8 +14,10 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import CustomerSelect from "../../components/CustomerSelect";
 import DataTable from "../../components/DataTable";
 import AutoGrowTextarea from "../../components/AutoGrowTextarea";
+import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
 import { ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
+import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import { openCheckSheetPrintWindow } from "../../lib/printCheckSheet";
 import { openPackingKeepSampelPrintWindow } from "../../lib/printPackingKeepSampel";
@@ -366,6 +368,7 @@ export default function CheckResultsPage({
   const [lastSavedCheckId, setLastSavedCheckId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const { pending: pendingTankChange, checkTankChange, confirmProceed: confirmTankChange, cancel: cancelTankChange } = useTankChangeGuard();
   const [filters, setFilters] = useState({ order: "", materialNumber: "", materialDescription: "", batch: "" });
   const appearanceFileInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -712,7 +715,7 @@ export default function CheckResultsPage({
     return null;
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage("");
     setError("");
@@ -721,6 +724,8 @@ export default function CheckResultsPage({
       setError(validationError);
       return;
     }
+    const tankOk = await checkTankChange(form.order, [form.codeTanki]);
+    if (!tankOk) return;
     saveMutation.mutate();
   }
 
@@ -1170,6 +1175,15 @@ export default function CheckResultsPage({
             />
           </div>
         </div>
+      )}
+
+      {pendingTankChange && (
+        <TankChangeConfirmDialog
+          previousTank={pendingTankChange.previousTank}
+          newTanks={pendingTankChange.newTanks}
+          onCancel={cancelTankChange}
+          onConfirm={confirmTankChange}
+        />
       )}
     </div>
   );

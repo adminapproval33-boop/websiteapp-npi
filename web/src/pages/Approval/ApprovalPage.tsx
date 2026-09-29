@@ -8,6 +8,8 @@ import IuPlantSelect from "../../components/IuPlantSelect";
 import CustomerSelect from "../../components/CustomerSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
+import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
+import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
 import EmployeeNameSelect, {
   displayNameWithNik,
@@ -456,6 +458,7 @@ export default function ApprovalPage({
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const { pending: pendingTankChange, checkTankChange, confirmProceed: confirmTankChange, cancel: cancelTankChange } = useTankChangeGuard();
   /** Order yang ternyata SUDAH punya baris Approval (2026-09-02, instruksi
    * eksplisit user: banyak Order kedobelan di Lot History krn orang ke-2
    * (biasanya tim Teknikal) ketik ulang Order yg sama di tab Input alih-alih
@@ -1114,7 +1117,7 @@ export default function ApprovalPage({
     setError("");
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage("");
     setError("");
@@ -1206,6 +1209,8 @@ export default function ApprovalPage({
         return;
       }
     }
+    const tankOk = await checkTankChange(form.order, [form.codeTanki]);
+    if (!tankOk) return;
     saveMutation.mutate();
   }
 
@@ -1951,6 +1956,15 @@ export default function ApprovalPage({
             }}
           />
         </Modal>
+      )}
+
+      {pendingTankChange && (
+        <TankChangeConfirmDialog
+          previousTank={pendingTankChange.previousTank}
+          newTanks={pendingTankChange.newTanks}
+          onCancel={cancelTankChange}
+          onConfirm={confirmTankChange}
+        />
       )}
     </div>
   );

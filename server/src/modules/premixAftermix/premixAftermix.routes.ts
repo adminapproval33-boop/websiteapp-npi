@@ -17,6 +17,31 @@ premixAftermixRouter.use(requireAuth);
 
 const sectionEnum = z.enum(["PREMIX", "AFTERMIX"]);
 
+/** Booking ("Booking Premix"/"Booking Aftermix" dari pop-up Info Proses,
+ * lihat lib/tankBooking.ts) utk 1 section, DEDUPE ke baris PALING BARU per
+ * Order -- dipakai KEDUA antrian (premix-pwo-queue & aftermix-pwo-queue di
+ * bawah) supaya Order yg SUDAH dibooking tapi belum eligible scr syarat biasa
+ * (mis. Aftermix blm py "Milling - DN") tetap kelihatan di sini, BUKAN cuma
+ * di Kalender (2026-09-29, instruksi eksplisit user: "2 menu itu harus bisa
+ * saling terkoneksi"). Booking dgn Rencana Mulai TERISI otomatis sudah
+ * dijadwalkan ke Kalender saat disimpan (lihat POST /tank-manual-input/
+ * booking) -- frontend sendiri yg menyembunyikan kartu ini dari strip drag
+ * KALAU Order-nya sudah kedapatan di /pwo-schedule (lihat `scheduledOrders`
+ * di PremixAftermixPage.tsx), jadi di sini TIDAK perlu cek PwoSchedule sama
+ * sekali, cukup selalu sertakan booking apa adanya. */
+async function fetchSectionBookings(section: "PREMIX" | "AFTERMIX") {
+  const prefix = section === "PREMIX" ? "Booking Premix" : "Booking Aftermix";
+  const rows = await prisma.tankManualInput.findMany({
+    where: { remark: { startsWith: prefix } },
+    orderBy: { timestamp: "desc" },
+  });
+  const latestByOrder = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    if (!latestByOrder.has(r.order)) latestByOrder.set(r.order, r);
+  }
+  return latestByOrder;
+}
+
 // Transform ke `null` (bukan `undefined`) supaya kalau field ini DIKOSONGKAN
 // saat Edit, Prisma benar-benar meng-null-kannya di database -- Prisma
 // `update()` menganggap `undefined` sebagai "jangan ubah field ini", jadi
@@ -187,7 +212,36 @@ premixAftermixRouter.get(
         formReceived: latestPremixByOrder.get(r.order)?.formReceived ?? null,
       }));
 
-    res.json({ success: true, data });
+    // Order yg sudah dibooking (Booking Premix) tapi belum masuk `data` di
+    // atas (mis. belum ada di Master Data Cooispi, atau Material-nya belum
+    // py histori Premix) -- tetap disertakan spy antrian & booking terkoneksi.
+    const alreadyIncluded = new Set(data.map((r) => r.order));
+    const premixBookings = await fetchSectionBookings("PREMIX");
+    const bookingOrders = Array.from(premixBookings.keys()).filter((o) => !alreadyIncluded.has(o));
+    const bookingMasterOrders = bookingOrders.length
+      ? await prisma.masterOrder.findMany({
+          where: { order: { in: bookingOrders } },
+          select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+        })
+      : [];
+    const bookingMasterByOrder = new Map(bookingMasterOrders.map((m) => [m.order, m]));
+    const bookingRows = bookingOrders
+      .filter((o) => !startedPremixOrderSet.has(o) && !pastPremixOrderSet.has(o))
+      .map((order) => {
+        const b = premixBookings.get(order)!;
+        const master = bookingMasterByOrder.get(order);
+        return {
+          order,
+          materialNumber: master?.materialNumber ?? b.materialNumber ?? null,
+          materialDescription: master?.materialDescription ?? b.materialDescription ?? null,
+          batch: master?.batch ?? b.batch ?? null,
+          orderQty: master?.orderQty ?? b.orderQty ?? null,
+          plant: master?.plant ?? null,
+          formReceived: null,
+        };
+      });
+
+    res.json({ success: true, data: [...data, ...bookingRows] });
   })
 );
 
@@ -392,7 +446,47 @@ premixAftermixRouter.get(
       };
     });
 
-    res.json({ success: true, data });
+    // Order yg sudah dibooking (Booking Aftermix) tapi belum masuk `data` di
+    // atas (mis. belum "Milling - DN") -- tetap disertakan spy antrian &
+    // booking terkoneksi (2026-09-29, instruksi eksplisit user).
+    const alreadyIncluded = new Set(data.map((r) => r.order));
+    const aftermixBookings = await fetchSectionBookings("AFTERMIX");
+    const bookingOrders = Array.from(aftermixBookings.keys()).filter((o) => !alreadyIncluded.has(o));
+    const bookingMasterOrders = bookingOrders.length
+      ? await prisma.masterOrder.findMany({
+          where: { order: { in: bookingOrders } },
+          select: { order: true, materialNumber: true, materialDescription: true, batch: true, orderQty: true, plant: true },
+        })
+      : [];
+    const bookingMasterByOrder = new Map(bookingMasterOrders.map((m) => [m.order, m]));
+    const bookingRows = bookingOrders
+      .filter((o) => !startedAftermixOrderSet.has(o) && !pastAftermixOrderSet.has(o))
+      .map((order) => {
+        const b = aftermixBookings.get(order)!;
+        const master = bookingMasterByOrder.get(order);
+        return {
+          order,
+          materialNumber: master?.materialNumber ?? b.materialNumber ?? null,
+          materialDescription: master?.materialDescription ?? b.materialDescription ?? null,
+          batch: master?.batch ?? b.batch ?? null,
+          orderQty: master?.orderQty ?? b.orderQty ?? null,
+          plant: master?.plant ?? null,
+          iuPlant: null,
+          codeTanki1: b.codeTanki,
+          codeTanki2: null,
+          codeMesin: null,
+          spvProduksi: null,
+          leader: null,
+          members: null,
+          qtyAct: null,
+          formReceived: null,
+          start: null,
+          finish: null,
+          remark: b.remark,
+        };
+      });
+
+    res.json({ success: true, data: [...data, ...bookingRows] });
   })
 );
 

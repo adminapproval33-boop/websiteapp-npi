@@ -15,9 +15,11 @@ import EmployeeNameSelect, {
   MemberEntry,
 } from "../../components/EmployeeNameSelect";
 import DataTable from "../../components/DataTable";
+import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeFormPerMan } from "../../lib/qty";
+import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
 import { useAuth } from "../../auth/AuthContext";
@@ -206,6 +208,7 @@ export default function ColourMatchingPage({
   const [memberNikInput, setMemberNikInput] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const { pending: pendingTankChange, checkTankChange, confirmProceed: confirmTankChange, cancel: cancelTankChange } = useTankChangeGuard();
   const [search, setSearch] = useState("");
   const [queueSearch, setQueueSearch] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
@@ -485,7 +488,7 @@ export default function ColourMatchingPage({
     setError("");
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setMessage("");
     setError("");
@@ -530,6 +533,8 @@ export default function ColourMatchingPage({
       setError(dateError);
       return;
     }
+    const tankOk = await checkTankChange(form.order, [form.codeTanki]);
+    if (!tankOk) return;
     saveMutation.mutate();
   }
 
@@ -976,6 +981,15 @@ export default function ColourMatchingPage({
             />
           </div>
         </div>
+      )}
+
+      {pendingTankChange && (
+        <TankChangeConfirmDialog
+          previousTank={pendingTankChange.previousTank}
+          newTanks={pendingTankChange.newTanks}
+          onCancel={cancelTankChange}
+          onConfirm={confirmTankChange}
+        />
       )}
     </div>
   );

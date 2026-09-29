@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { isValidTankCode } from "../../lib/tankCode";
-import { bookingRemark } from "../../lib/tankBooking";
+import { bookingRemark, parseBookingSection, type BookingSection } from "../../lib/tankBooking";
 
 export const tankManualInputRouter = Router();
 tankManualInputRouter.use(requireAuth);
@@ -120,6 +120,52 @@ tankManualInputRouter.post(
     const created = await prisma.tankManualInput.create({
       data: { ...rest, remark: bookingRemark(section, note), inputBy: req.auth!.nik },
     });
+
+    // Booking dgn "Rencana Mulai" terisi -- OTOMATIS dijadwalkan ke hari itu
+    // di Kalender PWO Schedule & Queue (2026-09-29, instruksi eksplisit user:
+    // "2 menu itu harus bisa saling terkoneksi", supaya Order yg sudah
+    // dibooking tidak perlu di-drag manual lagi krn tanggalnya kan sudah
+    // ditentukan pas booking). Kalau Rencana Mulai kosong, Order ini muncul
+    // di daftar List biasa lewat /premix-pwo-queue & /aftermix-pwo-queue
+    // (lihat perubahan di premixAftermix.routes.ts) -- menunggu di-drag manual
+    // spt Order lain. `scheduledDate` di-truncate ke tengah malam UTC dari
+    // TANGGAL KALENDER (bukan jam) Rencana Mulai -- SAMA PERSIS konvensi yg
+    // dipakai drag-drop manual (lihat buildDayDropId di
+    // WeeklyScheduleCalendar.tsx: hari ditentukan dari getFullYear/Month/Date
+    // LOKAL lalu dikirim sbg string tanggal polos, yg oleh z.coerce.date()
+    // ditafsirkan sbg tengah malam UTC hari itu) -- kalau construct pakai
+    // `new Date(y,m,d)` biasa (bukan Date.UTC), nilainya bakal tengah malam
+    // WIB = 17:00 UTC HARI SEBELUMNYA, geser 1 hari dari yg dimaksud.
+    if (rest.plannedStart) {
+      const p = rest.plannedStart;
+      const scheduledDate = new Date(Date.UTC(p.getFullYear(), p.getMonth(), p.getDate()));
+      const maxSeq = await prisma.pwoSchedule.aggregate({
+        where: { section, scheduledDate },
+        _max: { sequence: true },
+      });
+      const sequence = (maxSeq._max.sequence ?? -1) + 1;
+      await prisma.pwoSchedule.upsert({
+        where: { order_section: { order: rest.order, section } },
+        create: {
+          order: rest.order,
+          section,
+          materialNumber: rest.materialNumber ?? null,
+          materialDescription: rest.materialDescription ?? null,
+          batch: rest.batch ?? null,
+          scheduledDate,
+          sequence,
+          createdBy: req.auth!.nik,
+        },
+        update: {
+          materialNumber: rest.materialNumber ?? null,
+          materialDescription: rest.materialDescription ?? null,
+          batch: rest.batch ?? null,
+          scheduledDate,
+          sequence,
+        },
+      });
+    }
+
     res.status(201).json({ success: true, message: "Booking tanki berhasil disimpan.", data: created });
   })
 );
@@ -138,14 +184,25 @@ tankManualInputRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    const result = await prisma.tankManualInput.deleteMany({
+    const toDelete = await prisma.tankManualInput.findMany({
       where: {
         order: parsed.data.order,
         codeTanki: parsed.data.codeTanki,
         OR: [{ remark: { startsWith: "Booking Premix" } }, { remark: { startsWith: "Booking Aftermix" } }],
       },
+      select: { id: true, remark: true },
     });
-    if (result.count === 0) throw new HttpError(404, "Booking tanki tidak ditemukan.");
+    if (toDelete.length === 0) throw new HttpError(404, "Booking tanki tidak ditemukan.");
+    await prisma.tankManualInput.deleteMany({ where: { id: { in: toDelete.map((r) => r.id) } } });
+    // Ikut hapus jadwal Kalender yg otomatis dibuat pas booking ini disimpan
+    // (lihat POST /booking di atas) -- kalau booking-nya dibatalkan, kartu di
+    // Kalender jg harus ikut hilang, bukan nyangkut jadi jadwal "hantu".
+    const sections = Array.from(
+      new Set(toDelete.map((r) => parseBookingSection(r.remark)).filter((s): s is BookingSection => s != null))
+    );
+    if (sections.length > 0) {
+      await prisma.pwoSchedule.deleteMany({ where: { order: parsed.data.order, section: { in: sections } } });
+    }
     res.json({ success: true, message: "Booking tanki dibatalkan." });
   })
 );

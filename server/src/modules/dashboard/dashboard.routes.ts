@@ -1103,6 +1103,35 @@ dashboardRouter.get(
     }
     const deduped = Array.from(latestByOrder.values());
 
+    /** Code Tanki fallback utk baris "menunggu antrian" (QU - ...) yg SENGAJA
+     * `codeTanki: null` (belum ada tanki fisik yg "sedang dipakai" krn tahap
+     * ybs belum mulai) -- 2026-09-29, instruksi eksplisit user: daripada "-"
+     * kosong, tampilkan tanki yg SAMA persis dgn Dashboard > Tank Monitoring
+     * (reuse buildTankStatusMap yg sama, supaya keduanya PASTI konsisten),
+     * dan kalau Order ini SUDAH TIDAK jadi occupant tank manapun di situ
+     * (mis. tank-nya sudah dianggap kosong/dipakai Order lain), fallback lagi
+     * ke tanki TERAKHIR yg beneran diinput admin (lintas modul manapun, dari
+     * `rows` yg sudah dibangun di atas -- SEBELUM dedupe per-Order, jadi
+     * masih mengandung SEMUA touch, baris antrian sendiri otomatis terlewat
+     * krn `codeTanki`-nya null). Cuma dipakai kalau nilai aslinya kosong --
+     * baris yg SUDAH py Code Tanki sendiri (touch asli) TIDAK disentuh. */
+    const tankStatusMap = await buildTankStatusMap();
+    const currentTankByOrder = new Map<string, string>();
+    for (const tank of tankStatusMap.values()) {
+      if (tank.occupant && !currentTankByOrder.has(tank.occupant.order)) {
+        currentTankByOrder.set(tank.occupant.order, tank.code);
+      }
+    }
+    const lastRealTankByOrder = new Map<string, { code: string; ms: number }>();
+    for (const r of rows) {
+      if (!r.codeTanki) continue;
+      const ms = r.timestamp.getTime();
+      const existing = lastRealTankByOrder.get(r.order);
+      if (!existing || ms > existing.ms) lastRealTankByOrder.set(r.order, { code: r.codeTanki, ms });
+    }
+    const fallbackTankFor = (order: string): string | null =>
+      currentTankByOrder.get(order) ?? lastRealTankByOrder.get(order)?.code ?? null;
+
     // Lookup terbaru dari Master Data Cooispi (MasterOrder), bukan snapshot History.
     const uniqueOrders = Array.from(latestByOrder.keys());
     const masterOrders = await prisma.masterOrder.findMany({
@@ -1367,7 +1396,7 @@ dashboardRouter.get(
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
-        codeTanki: packingRow ? packingRow.codeTanki : r.codeTanki,
+        codeTanki: (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order),
         leadTimeProses: computeLeadTimeProses(r.order, master?.materialNumber ?? null),
         stages,
         progressPercent,

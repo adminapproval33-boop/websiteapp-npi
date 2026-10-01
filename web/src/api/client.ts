@@ -18,6 +18,24 @@ export interface StoredSession {
   viewOnlyMenus: string[];
   mustResetPassword: boolean;
   avatarPath?: string | null;
+  /** Dari MasterEmployee (Data Karyawan), BUKAN field User -- di-lookup pakai
+   * NIK = employeeId lewat /auth/me (2026-10-01, instruksi eksplisit user:
+   * menu "cantumkan email" di Profil Akun, tersambung ke kolom Email di Data
+   * Karyawan). */
+  email?: string | null;
+  /** Preferensi PRIBADI milik user sendiri (menu Settings > Notifikasi,
+   * 2026-10-01, revisi ke-2) -- opt-in PER TAHAP, LEPAS dari `department` --
+   * SIAPA SAJA yang login boleh mengaktifkan tahap mana pun. Hanya berefek
+   * nyata kalau `email` di atas juga sudah diisi. */
+  notifyPremix?: boolean;
+  notifyMilling?: boolean;
+  notifyAftermix?: boolean;
+  notifyColourMatching?: boolean;
+  notifyQc?: boolean;
+  notifyApproval?: boolean;
+  /** Ambang Lead Time Proses (hari kerja) PRIBADI -- berlaku ke semua tahap
+   * yg diaktifkan di atas. */
+  notifyThresholdDays?: number;
 }
 
 // Pakai localStorage (bukan sessionStorage) SENGAJA (2026-08-08, instruksi

@@ -12,6 +12,42 @@ import { env } from "../../lib/env";
 
 export const authRouter = Router();
 
+/** Preferensi personal Notifikasi Order Macet (2026-10-01, instruksi
+ * eksplisit user: opt-in PER TAHAP + ambang personal, lepas dari departemen)
+ * -- dipakai bareng oleh /login & /me supaya field & defaultnya konsisten. */
+const NOTIF_PREF_SELECT = {
+  email: true,
+  notifyPremix: true,
+  notifyMilling: true,
+  notifyAftermix: true,
+  notifyColourMatching: true,
+  notifyQc: true,
+  notifyApproval: true,
+  notifyThresholdDays: true,
+} as const;
+
+function notifPrefDefaults(employee: {
+  email: string | null;
+  notifyPremix: boolean;
+  notifyMilling: boolean;
+  notifyAftermix: boolean;
+  notifyColourMatching: boolean;
+  notifyQc: boolean;
+  notifyApproval: boolean;
+  notifyThresholdDays: number;
+} | null) {
+  return {
+    email: employee?.email ?? null,
+    notifyPremix: employee?.notifyPremix ?? false,
+    notifyMilling: employee?.notifyMilling ?? false,
+    notifyAftermix: employee?.notifyAftermix ?? false,
+    notifyColourMatching: employee?.notifyColourMatching ?? false,
+    notifyQc: employee?.notifyQc ?? false,
+    notifyApproval: employee?.notifyApproval ?? false,
+    notifyThresholdDays: employee?.notifyThresholdDays ?? 20,
+  };
+}
+
 const loginSchema = z.object({
   nik: z.string().trim().min(1),
   password: z.string().min(1),
@@ -77,6 +113,10 @@ authRouter.post(
     }
 
     const token = await createSession(user.nik, req.ip, req.headers["user-agent"]);
+    const employee = await prisma.masterEmployee.findUnique({
+      where: { employeeId: user.nik },
+      select: NOTIF_PREF_SELECT,
+    });
 
     res.json({
       success: true,
@@ -90,6 +130,7 @@ authRouter.post(
       viewOnlyMenus: user.viewOnlyMenus,
       mustResetPassword: user.mustResetPassword,
       avatarPath: user.avatarPath,
+      ...notifPrefDefaults(employee),
     });
   })
 );
@@ -122,9 +163,101 @@ authRouter.post(
   })
 );
 
-authRouter.get("/me", requireAuth, (req: AuthedRequest, res) => {
-  res.json({ success: true, ...req.auth });
+authRouter.get(
+  "/me",
+  requireAuth,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    // Email bukan field User (akun login) -- disimpan di MasterEmployee
+    // (Data Karyawan), di-lookup pakai NIK = employeeId (2026-10-01, instruksi
+    // eksplisit user: menu "cantumkan email" di Profil Akun, dan email itu
+    // harus tampil juga di kolom Email Data Karyawan -- satu sumber data yg
+    // sama, bukan field terpisah di User).
+    const employee = await prisma.masterEmployee.findUnique({
+      where: { employeeId: req.auth!.nik },
+      select: NOTIF_PREF_SELECT,
+    });
+    res.json({
+      success: true,
+      ...req.auth,
+      ...notifPrefDefaults(employee),
+    });
+  })
+);
+
+const updateMyEmailSchema = z.object({
+  email: z.string().trim().email("Format email tidak valid.").nullable(),
 });
+
+authRouter.put(
+  "/me/email",
+  requireAuth,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = updateMyEmailSchema.safeParse({ email: req.body.email === "" ? null : req.body.email });
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    // Upsert -- akun login yg NIK-nya belum ada baris di Master Data Karyawan
+    // (mis. akun Administrator sistem) tetap bisa isi emailnya sendiri lewat
+    // Profil Akun; baris baru otomatis terbentuk di Data Karyawan.
+    const employee = await prisma.masterEmployee.upsert({
+      where: { employeeId: req.auth!.nik },
+      update: { email: parsed.data.email },
+      create: {
+        employeeId: req.auth!.nik,
+        fullName: req.auth!.name,
+        departemen: req.auth!.department,
+        email: parsed.data.email,
+      },
+    });
+    res.json({ success: true, message: "Email berhasil disimpan.", email: employee.email });
+  })
+);
+
+/** Menu Settings > Notifikasi (2026-10-01, instruksi eksplisit user, revisi
+ * ke-2: "dropdown pada setiap proses juga buat saja Aktif, Nonaktif ...
+ * kalau user tersebut memilih untuk menyalakan notifikasi Approval, maka
+ * user tersebut akan menerima email notifikasi approval"). Preferensi
+ * PRIBADI milik user ybs sendiri, PER TAHAP + ambang hari personal -- SIAPA
+ * SAJA yg login boleh mengaktifkan tahap mana pun, LEPAS dari `departemen`
+ * miliknya. Hanya berefek nyata kalau user ybs juga sudah isi email (lihat
+ * query di orderDelayAlertScheduler.ts). */
+const updateNotifPrefsSchema = z.object({
+  notifyPremix: z.boolean(),
+  notifyMilling: z.boolean(),
+  notifyAftermix: z.boolean(),
+  notifyColourMatching: z.boolean(),
+  notifyQc: z.boolean(),
+  notifyApproval: z.boolean(),
+  notifyThresholdDays: z.number().int().min(1).max(365),
+});
+
+authRouter.put(
+  "/me/order-delay-notif",
+  requireAuth,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = updateNotifPrefsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const employee = await prisma.masterEmployee.upsert({
+      where: { employeeId: req.auth!.nik },
+      update: parsed.data,
+      create: {
+        employeeId: req.auth!.nik,
+        fullName: req.auth!.name,
+        departemen: req.auth!.department,
+        ...parsed.data,
+      },
+    });
+    res.json({
+      success: true,
+      message: "Preferensi Notifikasi Order Macet berhasil disimpan.",
+      ...notifPrefDefaults(employee),
+    });
+  })
+);
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),

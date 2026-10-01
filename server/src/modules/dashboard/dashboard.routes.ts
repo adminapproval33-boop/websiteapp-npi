@@ -9,7 +9,7 @@ import { parseBookingSection } from "../../lib/tankBooking";
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
 
-interface ProductionOrderRow {
+export interface ProductionOrderRow {
   order: string;
   materialNumber: string | null;
   materialDescription: string | null;
@@ -441,10 +441,13 @@ function approvalStatusLabel(r: ApprovalStatusFields): string {
  * Cooispi) berdasarkan nomor Order, supaya selalu data terbaru. History
  * cuma jadi acuan nomor Order + info prosesnya (Start/Finish/Remark).
  */
-dashboardRouter.get(
-  "/production-orders",
-  asyncRoute(async (req, res) => {
-    const search = String(req.query.search ?? "").trim();
+/** Diekstrak dari handler GET /production-orders (2026-09-30, instruksi
+ * eksplisit user: fitur Notifikasi Order Macet) supaya bisa dipanggil ulang
+ * dari orderDelayAlertScheduler.ts tanpa duplikasi ~1000 baris logika
+ * agregasi Stage/Lead Time Proses di bawah. `search` default "" = seluruh
+ * Order (dipakai scheduler); route sendiri tetap meneruskan
+ * `req.query.search` spt semula. */
+export async function getProductionOrderRows(search = ""): Promise<ProductionOrderRow[]> {
 
     // Query TIDAK difilter `search` di sini lagi -- histori LINTAS ORDER (utk
     // Set per Material Number di bawah) harus tetap lengkap walau user lagi
@@ -1412,6 +1415,14 @@ dashboardRouter.get(
       };
     });
 
+    return result;
+}
+
+dashboardRouter.get(
+  "/production-orders",
+  asyncRoute(async (req, res) => {
+    const search = String(req.query.search ?? "").trim();
+    const result = await getProductionOrderRows(search);
     res.json({ success: true, data: result });
   })
 );

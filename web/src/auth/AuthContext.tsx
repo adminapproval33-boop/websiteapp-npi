@@ -8,6 +8,19 @@ import { api, ApiError, clearSession, loadSession, saveSession, StoredSession } 
  * cuma 1 sesi aktif, spt SAP). */
 const SESSION_POLL_MS = 20_000;
 
+/** Subset `StoredSession` yg diubah bareng oleh form Settings > Notifikasi
+ * (2026-10-01, revisi ke-2: opt-in PER TAHAP + ambang personal). */
+export type OrderDelayNotifPrefs = Pick<
+  StoredSession,
+  | "notifyPremix"
+  | "notifyMilling"
+  | "notifyAftermix"
+  | "notifyColourMatching"
+  | "notifyQc"
+  | "notifyApproval"
+  | "notifyThresholdDays"
+>;
+
 interface AuthContextValue {
   user: StoredSession | null;
   loading: boolean;
@@ -18,6 +31,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   markPasswordResetDone: () => void;
   updateAvatar: (avatarPath: string | null) => void;
+  updateEmail: (email: string | null) => void;
+  updateOrderDelayNotif: (prefs: OrderDelayNotifPrefs) => void;
   /** Pesan sekali-tampil kalau sesi ini baru saja ke-logout otomatis (mis.
    * diakhiri paksa krn login di perangkat lain) -- dibaca oleh LoginPage lalu
    * dikosongkan lagi (consume-once) supaya tidak muncul berulang. */
@@ -100,6 +115,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       viewOnlyMenus: res.viewOnlyMenus,
       mustResetPassword: res.mustResetPassword,
       avatarPath: res.avatarPath,
+      email: res.email,
+      notifyPremix: res.notifyPremix,
+      notifyMilling: res.notifyMilling,
+      notifyAftermix: res.notifyAftermix,
+      notifyColourMatching: res.notifyColourMatching,
+      notifyQc: res.notifyQc,
+      notifyApproval: res.notifyApproval,
+      notifyThresholdDays: res.notifyThresholdDays,
     };
     saveSession(session);
     setUser(session);
@@ -132,9 +155,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const updateEmail = useCallback((email: string | null) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, email };
+      saveSession(next);
+      return next;
+    });
+  }, []);
+
+  const updateOrderDelayNotif = useCallback((prefs: OrderDelayNotifPrefs) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...prefs };
+      saveSession(next);
+      return next;
+    });
+  }, []);
+
   const value = useMemo(
-    () => ({ user, loading, login, logout, markPasswordResetDone, updateAvatar, forcedLogoutMessage, clearForcedLogoutMessage }),
-    [user, loading, login, logout, markPasswordResetDone, updateAvatar, forcedLogoutMessage, clearForcedLogoutMessage]
+    () => ({
+      user,
+      loading,
+      login,
+      logout,
+      markPasswordResetDone,
+      updateAvatar,
+      updateEmail,
+      updateOrderDelayNotif,
+      forcedLogoutMessage,
+      clearForcedLogoutMessage,
+    }),
+    [
+      user,
+      loading,
+      login,
+      logout,
+      markPasswordResetDone,
+      updateAvatar,
+      updateEmail,
+      updateOrderDelayNotif,
+      forcedLogoutMessage,
+      clearForcedLogoutMessage,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

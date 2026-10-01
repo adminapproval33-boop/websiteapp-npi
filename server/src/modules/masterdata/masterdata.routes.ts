@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import multer from "multer";
 import ExcelJS from "exceljs";
 import { parse as parseCsv } from "csv-parse/sync";
@@ -886,6 +887,37 @@ masterDataRouter.get(
   })
 );
 
+/// Input Email di tabel Master Data > Employee (2026-09-30, instruksi
+/// eksplisit user: fitur Notifikasi Order Macet). Field ini STATUS APLIKASI
+/// (bukan dari file HR) -- lihat pemulihannya saat import Replace di atas.
+/// Divalidasi format dasar.
+const employeeUpdateSchema = z.object({
+  email: z.string().trim().email("Format email tidak valid.").nullable().optional(),
+});
+
+masterDataRouter.put(
+  "/employees/:employeeId",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const employeeId = String(req.params.employeeId);
+    const parsed = employeeUpdateSchema.safeParse({
+      email: req.body.email === "" ? null : req.body.email,
+    });
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const updated = await prisma.masterEmployee
+      .update({ where: { employeeId }, data: parsed.data })
+      .catch(() => null);
+    if (!updated) {
+      res.status(404).json({ success: false, message: "Karyawan tidak ditemukan." });
+      return;
+    }
+    res.json({ success: true, message: "Data karyawan berhasil diperbarui.", data: updated });
+  })
+);
+
 interface ModuleFieldConfig {
   name: string;
   nik: string;
@@ -1145,9 +1177,47 @@ masterDataRouter.post(
     const records = Array.from(dedupMap.values());
 
     if (mode === "replace") {
+      // Sama persis pola pemulihan spt Master Data Tanki/Mesin di atas --
+      // `email` dan preferensi Notifikasi Order Macet (notify*/
+      // notifyThresholdDays) adalah STATUS APLIKASI (diisi manual admin lewat
+      // menu Master Data > Employee, atau oleh karyawan ybs sendiri lewat
+      // Settings > Notifikasi), BUKAN bagian dari file HR yang diupload, jadi
+      // delete+recreate akan mereset semuanya ke default kalau tidak
+      // dipulihkan. Hanya dipulihkan utk employeeId yg masih ada di file baru.
+      const previousOverrides = await prisma.masterEmployee.findMany({
+        where: {
+          OR: [
+            { email: { not: null } },
+            { notifyPremix: true },
+            { notifyMilling: true },
+            { notifyAftermix: true },
+            { notifyColourMatching: true },
+            { notifyQc: true },
+            { notifyApproval: true },
+            { notifyThresholdDays: { not: 20 } },
+          ],
+        },
+        select: {
+          employeeId: true,
+          email: true,
+          notifyPremix: true,
+          notifyMilling: true,
+          notifyAftermix: true,
+          notifyColourMatching: true,
+          notifyQc: true,
+          notifyApproval: true,
+          notifyThresholdDays: true,
+        },
+      });
       await prisma.masterEmployee.deleteMany({});
       for (const batch of chunk(records, 8000)) {
         await prisma.masterEmployee.createMany({ data: batch, skipDuplicates: true });
+      }
+      const recordIds = new Set(records.map((r) => r.employeeId));
+      const stillPresent = previousOverrides.filter((o) => recordIds.has(o.employeeId));
+      for (const o of stillPresent) {
+        const { employeeId, ...data } = o;
+        await prisma.masterEmployee.update({ where: { employeeId }, data });
       }
     } else {
       for (const batch of chunk(records, 200)) {

@@ -265,6 +265,27 @@ model MasterEmployee {
   jobPosition  String?
   departemen   String?
   plant        String?
+  /// Alamat email karyawan -- diisi sendiri lewat Settings > Profil, atau oleh
+  /// admin di sini. Field APLIKASI (bukan dari file HR), jadi harus
+  /// dipertahankan lewat snapshot-restore saat import mode Replace (spt pola
+  /// damaged di Master Tanki/Mesin).
+  email        String?
+  /// Preferensi PRIBADI milik karyawan ybs sendiri (diatur lewat menu
+  /// Settings > Notifikasi, 2026-10-01 instruksi eksplisit user: "kalau user
+  /// tersebut memilih untuk menyalakan notifikasi Approval, maka user
+  /// tersebut akan menerima email notifikasi approval") -- per TAHAP, LEPAS
+  /// dari `departemen` di atas. TIDAK ADA flag admin terpisah -- SIAPA SAJA
+  /// yg sudah isi email & mengaktifkan salah satu tahap ini otomatis jadi
+  /// penerima utk tahap itu, apa pun departemennya.
+  notifyPremix         Boolean @default(false)
+  notifyMilling        Boolean @default(false)
+  notifyAftermix       Boolean @default(false)
+  notifyColourMatching Boolean @default(false)
+  notifyQc             Boolean @default(false)
+  notifyApproval       Boolean @default(false)
+  /// Ambang Lead Time Proses (hari kerja) PRIBADI milik karyawan ybs sendiri
+  /// -- berlaku ke SEMUA tahap yg diaktifkan di atas (bukan per-tahap).
+  notifyThresholdDays  Int     @default(20)
   updatedAt    DateTime @updatedAt
 
   @@map("master_employees")
@@ -1062,4 +1083,26 @@ model BackupSetting {
   updatedByNik      String?
 
   @@map("backup_settings")
+}
+
+/// Log audit + dedup harian utk Notifikasi Order Macet -- 1 baris per siklus
+/// digest yg berhasil jalan, dipakai scheduler utk memastikan tidak kirim
+/// dobel di hari yang sama walau server di-restart (pola sama dgn BackupEvent
+/// AUTO_CREATE). Jam cek (CHECK_HOUR) jadi konstanta tetap di
+/// orderDelayAlertScheduler.ts (2026-10-01, revisi ke-3 instruksi eksplisit
+/// user: "Pengaturan Sistem hilangkan saja, masukkan semuanya ke menu
+/// Notifikasi" -- sudah tidak ada lagi pengaturan sistem terpisah, semua
+/// murni preferensi personal per karyawan di MasterEmployee).
+model OrderDelayAlertEvent {
+  id                 Int      @id @default(autoincrement())
+  /// Jumlah order unik yg masuk ke MINIMAL 1 email (lintas semua penerima).
+  ordersFlagged      Int
+  /// Jumlah karyawan yg benar2 menerima email -- penerima personal per-tahap,
+  /// lihat field notify... & notifyThresholdDays di MasterEmployee.
+  recipientsNotified Int
+  note               String?
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("order_delay_alert_events")
 }

@@ -2,9 +2,11 @@ import "./timezone";
 import { createApp } from "./app";
 import { env } from "./lib/env";
 import { startBackupScheduler } from "./modules/backup/backupScheduler";
+import { startOrderDelayAlertScheduler } from "./modules/orderDelayAlert/orderDelayAlertScheduler";
 
 const app = createApp();
 startBackupScheduler();
+startOrderDelayAlertScheduler();
 
 const server = app.listen(env.port, () => {
   console.log(`Websiteapp NPI API berjalan di http://localhost:${env.port}`);

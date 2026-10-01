@@ -88,6 +88,7 @@ interface MasterEmployeeRow {
   jobPosition: string | null;
   departemen: string | null;
   plant: string | null;
+  email: string | null;
 }
 
 interface MaterialFlowRow {
@@ -163,6 +164,37 @@ function FlowCheckbox({
   );
 }
 
+/** Input email inline di tabel Master Data > Employee (2026-09-30, instruksi
+ * eksplisit user: fitur Notifikasi Order Macet) -- commit lewat onBlur (bukan
+ * tiap ketikan) supaya tidak spam PUT request, mirip FlowCheckbox tapi utk teks. */
+function EmailCell({
+  value,
+  disabled,
+  pending,
+  onCommit,
+}: {
+  value: string | null;
+  disabled?: boolean;
+  pending?: boolean;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  return (
+    <input
+      type="email"
+      value={draft}
+      disabled={disabled || pending}
+      placeholder="-"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const next = draft.trim();
+        if (next !== (value ?? "")) onCommit(next);
+      }}
+      style={{ width: "100%", minWidth: 180, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4 }}
+    />
+  );
+}
+
 type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow";
 
 function ImportCard({
@@ -230,6 +262,10 @@ export default function MasterDataPage() {
    * masterdata.routes.ts. Endpoint PUT yg dipakai di sini sama persis,
    * cuma UI di halaman ini yg dikunci lebih ketat. */
   const canEditFlow = user?.access === "FULL_ACCESS";
+  /** Sama spt canEditFlow -- email dipakai fitur Notifikasi Order Macet, cuma
+   * administrator (FULL_ACCESS) yg boleh mengedit langsung dari tabel ini
+   * (karyawan sendiri juga bisa isi emailnya lewat Settings > Profil). */
+  const canEditEmployee = user?.access === "FULL_ACCESS";
   const [tab, setTab] = useState<Tab>("cooispi");
 
   const [orderResult, setOrderResult] = useState("");
@@ -428,6 +464,29 @@ export default function MasterDataPage() {
     );
   }
 
+  const [employeeFieldError, setEmployeeFieldError] = useState("");
+  const [pendingEmployeeCell, setPendingEmployeeCell] = useState<string | null>(null);
+
+  const updateEmployeeField = useMutation({
+    mutationFn: ({ employeeId, field, value }: { employeeId: string; field: "email"; value: string }) =>
+      api
+        .put<{ success: boolean; data: MasterEmployeeRow }>(`/master-data/employees/${encodeURIComponent(employeeId)}`, {
+          [field]: value,
+        })
+        .then((r) => r.data),
+    onMutate: ({ employeeId, field }) => {
+      setEmployeeFieldError("");
+      setPendingEmployeeCell(`${employeeId}:${field}`);
+    },
+    onSuccess: (updatedRow, { employeeId }) => {
+      queryClient.setQueryData<MasterEmployeeRow[]>(["master-employees", employeeSearch], (old) =>
+        old?.map((r) => (r.employeeId === employeeId ? updatedRow : r))
+      );
+    },
+    onError: (err) => setEmployeeFieldError(err instanceof ApiError ? err.message : "Gagal menyimpan perubahan Data Karyawan."),
+    onSettled: () => setPendingEmployeeCell(null),
+  });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -575,6 +634,14 @@ export default function MasterDataPage() {
             <div className="panel-header">Data Karyawan Saat Ini ({employeesQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
               <LastUpdatedNote value={lastUpdatedQuery.data?.employee} />
+              {canEditEmployee && (
+                <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  Kolom Email dipakai fitur Notifikasi Order Macet (Developer Tools) -- karyawan yang sudah isi email
+                  &amp; mengaktifkan notifikasinya sendiri (menu Settings &gt; Notifikasi) otomatis jadi penerima
+                  untuk departemennya.
+                </p>
+              )}
+              {employeeFieldError && <p style={{ color: "var(--danger)", fontSize: "0.85rem" }}>{employeeFieldError}</p>}
               <input
                 placeholder="Cari Employee ID atau Nama..."
                 value={employeeSearch}
@@ -594,6 +661,22 @@ export default function MasterDataPage() {
                   { key: "jobPosition", label: "Job Position", render: (r) => r.jobPosition ?? "-" },
                   { key: "departemen", label: "Departemen", render: (r) => r.departemen ?? "-" },
                   { key: "plant", label: "Plant", render: (r) => r.plant ?? "-" },
+                  {
+                    key: "email",
+                    label: "Email",
+                    render: (r) =>
+                      canEditEmployee ? (
+                        <EmailCell
+                          value={r.email}
+                          pending={pendingEmployeeCell === `${r.employeeId}:email`}
+                          onCommit={(next) =>
+                            updateEmployeeField.mutate({ employeeId: r.employeeId, field: "email", value: next })
+                          }
+                        />
+                      ) : (
+                        r.email ?? "-"
+                      ),
+                  },
                 ]}
               />
             </div>

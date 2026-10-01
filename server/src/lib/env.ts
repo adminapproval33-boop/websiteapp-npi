@@ -50,4 +50,15 @@ export const env = {
   // Windows, lihat instalasi native di C:\Program Files\PostgreSQL\<versi>\bin).
   // Kosongkan kalau sudah ada di PATH (mis. di server Linux produksi).
   pgBinDir: process.env.PG_BIN_DIR ?? "",
+  // Notifikasi Order Macet lewat email (2026-09-30, instruksi eksplisit user:
+  // email otomatis kalau Lead Time Proses order >= sekian hari kerja).
+  // Sengaja TIDAK pakai required() -- kalau belum di-set, server
+  // tetap boleh jalan normal, cuma pengiriman email yg akan gagal dgn pesan
+  // jelas (lihat lib/mailer.ts) sampai kredensial SMTP kantor (Office 365/
+  // Google Workspace) diisi IT.
+  smtpHost: process.env.SMTP_HOST ?? "",
+  smtpPort: Number(process.env.SMTP_PORT ?? 587),
+  smtpUser: process.env.SMTP_USER ?? "",
+  smtpPass: process.env.SMTP_PASS ?? "",
+  smtpFrom: process.env.SMTP_FROM || process.env.SMTP_USER || "",
 };

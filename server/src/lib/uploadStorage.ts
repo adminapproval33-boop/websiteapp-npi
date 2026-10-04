@@ -1,6 +1,7 @@
 import path from "path";
 import crypto from "crypto";
 import multer from "multer";
+import sharp from "sharp";
 import { put } from "@vercel/blob";
 import { env } from "./env";
 
@@ -56,13 +57,49 @@ export function createImageUploader(maxMb: number) {
   });
 }
 
+// Server (Vercel Blob) terbatas storagenya -- foto kamera HP biasa bisa
+// 3-8 MB, padahal titik upload di aplikasi ini ada belasan (QC, Approval,
+// Milling, Maintenance, Packing, avatar, dst, lihat semua pemanggil
+// uploadToBlob()). 2026-10-04, instruksi eksplisit user (diteruskan dari
+// keluhan Pak Ilham/Digitalisasi NPI: "kalau bisa yg data image kalau bisa
+// dicompress dulu sizenya sebelum di simpan").
+const MAX_IMAGE_DIMENSION = 1920;
+const IMAGE_JPEG_QUALITY = 80;
+
+/** Perkecil dimensi & kompres ulang jadi JPEG kalau filenya gambar DAN hasil
+ * kompresinya benar-benar lebih kecil -- kalau gagal diproses (format aneh/
+ * rusak) atau hasilnya malah lebih besar, kembalikan file asli apa adanya
+ * (upload tidak boleh gagal gara-gara kompresi). PDF/Word/Excel tidak
+ * disentuh sama sekali. */
+async function compressImageIfSmaller(
+  file: Express.Multer.File
+): Promise<{ buffer: Buffer; contentType: string; ext: string }> {
+  const originalExt = path.extname(file.originalname).slice(0, 10);
+  if (!file.mimetype.toLowerCase().startsWith("image/")) {
+    return { buffer: file.buffer, contentType: file.mimetype, ext: originalExt };
+  }
+  try {
+    const compressed = await sharp(file.buffer)
+      .rotate() // terapkan orientasi EXIF dulu (mis. foto dari HP) sebelum metadata-nya dibuang.
+      .resize({ width: MAX_IMAGE_DIMENSION, height: MAX_IMAGE_DIMENSION, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: IMAGE_JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+    if (compressed.length < file.buffer.length) {
+      return { buffer: compressed, contentType: "image/jpeg", ext: ".jpg" };
+    }
+  } catch {
+    // Format gambar yg tidak didukung sharp, atau filenya korup -- simpan apa adanya.
+  }
+  return { buffer: file.buffer, contentType: file.mimetype, ext: originalExt };
+}
+
 /** Unggah buffer file ke Vercel Blob (private) di bawah `<subfolder>/`, kembalikan pathname (disimpan sebagai filePath di DB). */
 export async function uploadToBlob(subfolder: string, file: Express.Multer.File): Promise<string> {
-  const safeExt = path.extname(file.originalname).slice(0, 10);
-  const pathname = path.posix.join(subfolder, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
-  await put(pathname, file.buffer, {
+  const { buffer, contentType, ext } = await compressImageIfSmaller(file);
+  const pathname = path.posix.join(subfolder, `${Date.now()}-${crypto.randomUUID()}${ext}`);
+  await put(pathname, buffer, {
     access: "private",
-    contentType: file.mimetype,
+    contentType,
     addRandomSuffix: false,
     token: env.blobReadWriteToken,
   });

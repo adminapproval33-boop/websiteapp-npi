@@ -61,4 +61,9 @@ export const env = {
   smtpUser: process.env.SMTP_USER ?? "",
   smtpPass: process.env.SMTP_PASS ?? "",
   smtpFrom: process.env.SMTP_FROM || process.env.SMTP_USER || "",
+  // Kunci enkripsi kredensial tersimpan di DB (mis. SmtpSetting.pass, lihat
+  // lib/crypto.ts) -- opsional, kalau kosong kunci diturunkan otomatis dari
+  // DATABASE_URL supaya tetap terenkripsi tanpa setup tambahan. Isi sendiri
+  // (string acak panjang) kalau mau kuncinya independen dari DATABASE_URL.
+  encryptionKey: process.env.ENCRYPTION_KEY ?? "",
 };

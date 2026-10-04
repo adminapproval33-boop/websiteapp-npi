@@ -1106,3 +1106,27 @@ model OrderDelayAlertEvent {
   @@index([createdAt])
   @@map("order_delay_alert_events")
 }
+
+/// Kredensial SMTP email kantor, diisi lewat form web (menu Developer Tools >
+/// Pengaturan SMTP) -- bukan lewat file .env server lagi (2026-10-02, saran
+/// Pak Ilham/Digitalisasi NPI: "minta claude untuk buatkan form config diweb
+/// admin, lalu bpk input situ" -- supaya admin tidak perlu akses file server
+/// langsung tiap mau ganti kredensial). `pass` TIDAK PERNAH dikirim balik ke
+/// frontend (lihat smtp.routes.ts) -- hanya dipakai server-side saat kirim
+/// email. Singleton (id selalu "singleton"). lib/mailer.ts tetap fallback ke
+/// env var SMTP_* kalau baris ini belum diisi/enabled=false, supaya setup
+/// dev lokal lewat .env tetap jalan apa adanya.
+model SmtpSetting {
+  id           String   @id @default("singleton")
+  enabled      Boolean  @default(false)
+  host         String?
+  port         Int      @default(587)
+  user         String?
+  pass         String?
+  fromName     String?
+  fromEmail    String?
+  updatedAt    DateTime @updatedAt
+  updatedByNik String?
+
+  @@map("smtp_settings")
+}

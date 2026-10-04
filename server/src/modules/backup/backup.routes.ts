@@ -6,10 +6,11 @@ import { env } from "../../lib/env";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import {
+  ALLOWED_BACKUP_ADMIN_NIKS,
   applyRetention,
   assertSafeFilename,
   backupFilePath,
-  createBackup,
+  createBackupWithOffsiteCopy,
   deleteBackup,
   getDiskUsage,
   listBackupFiles,
@@ -34,11 +35,11 @@ backupRouter.use(requireAuth, requireFullAccess);
 /** Restore & Hapus backup MENIMPA/MENGHILANGKAN data produksi secara permanen
  * -- dibatasi ke NIK ini saja (2026-09-08, instruksi eksplisit user: "buatkan
  * sistem backup manajemen"), TIDAK terkait level akses FULL_ACCESS biasa,
- * sama pola dgn ALLOWED_SYNC_NIKS di approval.routes.ts. Frontend (lihat
+ * sama pola dgn ALLOWED_SYNC_NIKS di approval.routes.ts. Daftar NIK-nya di
+ * backupService.ts (bukan di sini lagi) supaya backupScheduler.ts juga bisa
+ * pakai saat mengirim email peringatan backup gagal. Frontend (lihat
  * ALLOWED_BACKUP_ADMIN_NIKS di BackupManagementPage.tsx) cuma sembunyikan
  * tombol -- validasi SESUNGGUHNYA tetap di sini krn frontend bisa dilewati. */
-const ALLOWED_BACKUP_ADMIN_NIKS = ["000001", "019375", "001475", "012385", "019701"];
-
 function requireBackupAdmin(req: AuthedRequest) {
   if (!ALLOWED_BACKUP_ADMIN_NIKS.includes(req.auth!.nik)) {
     throw new HttpError(403, "Akses ditolak. Aksi ini dibatasi untuk admin backup yang ditunjuk.");
@@ -46,12 +47,13 @@ function requireBackupAdmin(req: AuthedRequest) {
 }
 
 async function logEvent(
-  action: "CREATE" | "AUTO_CREATE" | "RESTORE" | "DELETE" | "CLEANUP" | "EXPORT_ADVANCED" | "IMPORT_ADVANCED",
+  action: "CREATE" | "AUTO_CREATE" | "RESTORE" | "DELETE" | "CLEANUP" | "EXPORT_ADVANCED" | "IMPORT_ADVANCED" | "AUTO_CREATE_FAILED",
   fileName: string | null,
   byNik: string | null,
-  note?: string
+  note?: string,
+  blobPath?: string | null
 ) {
-  await prisma.backupEvent.create({ data: { action, fileName, byNik, note } });
+  await prisma.backupEvent.create({ data: { action, fileName, byNik, note, blobPath: blobPath ?? null } });
 }
 
 // Sama batas ukuran dgn import Master Data (env.maxImportMb) -- file Import
@@ -108,11 +110,11 @@ backupRouter.post(
       res.status(400).json({ success: false, message: "Label backup tidak valid." });
       return;
     }
-    const info = await createBackup(parsed.data.label ?? "manual");
-    await logEvent("CREATE", info.fileName, req.auth!.nik);
+    const { info, blobPath } = await createBackupWithOffsiteCopy(parsed.data.label ?? "manual");
+    await logEvent("CREATE", info.fileName, req.auth!.nik, undefined, blobPath);
 
     const setting = await getOrCreateSetting();
-    const removed = applyRetention(setting.retentionDays, setting.retentionMaxCount);
+    const removed = await applyRetention(setting.retentionDays, setting.retentionMaxCount);
     if (removed.length > 0) {
       await logEvent("CLEANUP", null, null, `Retensi otomatis setelah backup baru: ${removed.join(", ")}`);
     }
@@ -136,7 +138,7 @@ backupRouter.delete(
   asyncRoute(async (req: AuthedRequest, res) => {
     requireBackupAdmin(req);
     const fileName = String(req.params.fileName);
-    deleteBackup(fileName);
+    await deleteBackup(fileName);
     await logEvent("DELETE", fileName, req.auth!.nik);
     res.json({ success: true, message: "File backup berhasil dihapus." });
   })
@@ -161,8 +163,14 @@ backupRouter.post(
     // Jaring pengaman: buat 1 backup "pre-restore" dari kondisi SAAT INI dulu
     // sebelum menimpa database, supaya restore yang salah pilih file tetap
     // bisa dibatalkan (2026-09-08, instruksi eksplisit user).
-    const safetySnapshot = await createBackup("pre-restore-safety");
-    await logEvent("CREATE", safetySnapshot.fileName, null, `Snapshot otomatis sebelum restore ke "${fileName}"`);
+    const { info: safetySnapshot, blobPath: safetyBlobPath } = await createBackupWithOffsiteCopy("pre-restore-safety");
+    await logEvent(
+      "CREATE",
+      safetySnapshot.fileName,
+      null,
+      `Snapshot otomatis sebelum restore ke "${fileName}"`,
+      safetyBlobPath
+    );
 
     await restoreBackup(fileName);
     await logEvent("RESTORE", fileName, req.auth!.nik);
@@ -179,7 +187,7 @@ backupRouter.post(
   asyncRoute(async (req: AuthedRequest, res) => {
     requireBackupAdmin(req);
     const setting = await getOrCreateSetting();
-    const removed = applyRetention(setting.retentionDays, setting.retentionMaxCount);
+    const removed = await applyRetention(setting.retentionDays, setting.retentionMaxCount);
     if (removed.length > 0) {
       await logEvent("CLEANUP", null, req.auth!.nik, `Manual: ${removed.join(", ")}`);
     }
@@ -313,8 +321,16 @@ backupRouter.post(
 
     // Jaring pengaman: snapshot pg_dump kondisi SAAT INI dulu sebelum menulis
     // apa pun (2026-09-09, sama pola dgn /backup/restore/:fileName).
-    const safetySnapshot = await createBackup("pre-import-advanced-safety");
-    await logEvent("CREATE", safetySnapshot.fileName, null, `Snapshot otomatis sebelum Import Advance oleh ${req.auth!.nik}`);
+    const { info: safetySnapshot, blobPath: safetyBlobPath } = await createBackupWithOffsiteCopy(
+      "pre-import-advanced-safety"
+    );
+    await logEvent(
+      "CREATE",
+      safetySnapshot.fileName,
+      null,
+      `Snapshot otomatis sebelum Import Advance oleh ${req.auth!.nik}`,
+      safetyBlobPath
+    );
 
     const results: CommitResult[] = await commitImport(sheets);
     const totalCreated = results.reduce((s, r) => s + r.created, 0);

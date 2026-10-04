@@ -42,10 +42,23 @@ interface BackupSettingValue {
 
 interface BackupEventRow {
   id: number;
-  action: "CREATE" | "AUTO_CREATE" | "RESTORE" | "DELETE" | "CLEANUP" | "EXPORT_ADVANCED" | "IMPORT_ADVANCED";
+  action:
+    | "CREATE"
+    | "AUTO_CREATE"
+    | "RESTORE"
+    | "DELETE"
+    | "CLEANUP"
+    | "EXPORT_ADVANCED"
+    | "IMPORT_ADVANCED"
+    | "AUTO_CREATE_FAILED";
   fileName: string | null;
   byNik: string | null;
   note: string | null;
+  /// Pathname salinan kedua di Vercel Blob, kalau ada (2026-10-04 -- lihat
+  /// createBackupWithOffsiteCopy di backupService.ts). null = belum sempat/
+  /// gagal diunggah ke cloud -- backup lokalnya tetap valid, cuma tidak
+  /// punya salinan kedua.
+  blobPath: string | null;
   createdAt: string;
 }
 
@@ -57,6 +70,7 @@ const ACTION_LABELS: Record<BackupEventRow["action"], string> = {
   CLEANUP: "Bersihkan Retensi",
   EXPORT_ADVANCED: "Export Data (Advance)",
   IMPORT_ADVANCED: "Import Data (Advance)",
+  AUTO_CREATE_FAILED: "Backup Otomatis GAGAL",
 };
 
 type AdvancedCategory = "master" | "transaksi" | "qc_approval" | "sosial";
@@ -309,8 +323,41 @@ export default function BackupManagementPage() {
 
   const storage = storageQuery.data;
 
+  // Indikator "kapan terakhir backup" (2026-10-04, instruksi eksplisit user:
+  // temuan audit "tidak ada indikator di halaman, admin harus cek manual") --
+  // dihitung dari file TERBARU di listQuery (sudah urut terbaru->terlama dari
+  // backend), bukan dari eventsQuery, supaya tetap akurat walau baris Event-nya
+  // suatu saat dibersihkan/hilang.
+  const latestBackup = listQuery.data?.[0] ?? null;
+  const hoursSinceLatest = latestBackup ? (Date.now() - new Date(latestBackup.createdAt).getTime()) / 3600000 : null;
+  const autoEnabled = settings?.autoBackupEnabled ?? false;
+  const isStale = autoEnabled && (latestBackup === null || (hoursSinceLatest !== null && hoursSinceLatest > 36));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {!listQuery.isLoading && !settingsQuery.isLoading && (
+        <div
+          className="panel"
+          style={{
+            borderLeft: `4px solid ${isStale ? "var(--danger)" : "var(--success)"}`,
+            padding: "10px 16px",
+          }}
+        >
+          {latestBackup === null ? (
+            <strong style={{ color: "var(--danger)" }}>Belum ada backup sama sekali.</strong>
+          ) : (
+            <span style={{ color: isStale ? "var(--danger)" : "var(--text-main)" }}>
+              <strong>Backup terakhir:</strong> {formatDateTime(latestBackup.createdAt)}
+              {hoursSinceLatest !== null && ` (${Math.floor(hoursSinceLatest)} jam yang lalu)`}
+              {isStale && " -- sudah lebih dari 36 jam, mohon dicek apakah backup otomatis masih berjalan normal."}
+            </span>
+          )}
+          {!autoEnabled && (
+            <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>(Backup otomatis sedang nonaktif.)</span>
+          )}
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-header">Kontrol Storage</div>
         <div className="panel-body">
@@ -667,8 +714,31 @@ export default function BackupManagementPage() {
               rows={eventsQuery.data ?? []}
               columns={[
                 { key: "createdAt", label: "Waktu", render: (r) => formatDateTime(r.createdAt) },
-                { key: "action", label: "Aksi", render: (r) => ACTION_LABELS[r.action] },
+                {
+                  key: "action",
+                  label: "Aksi",
+                  render: (r) =>
+                    r.action === "AUTO_CREATE_FAILED" ? (
+                      <span style={{ color: "var(--danger)", fontWeight: 600 }}>{ACTION_LABELS[r.action]}</span>
+                    ) : (
+                      ACTION_LABELS[r.action]
+                    ),
+                },
                 { key: "fileName", label: "File", render: (r) => r.fileName ?? "-" },
+                {
+                  key: "blobPath",
+                  label: "Salinan Cloud",
+                  render: (r) =>
+                    r.action === "CREATE" || r.action === "AUTO_CREATE" ? (
+                      r.blobPath ? (
+                        <span style={{ color: "var(--success)" }}>✓ Ada</span>
+                      ) : (
+                        <span style={{ color: "var(--text-muted)" }}>- Tidak ada</span>
+                      )
+                    ) : (
+                      "-"
+                    ),
+                },
                 { key: "byNik", label: "Oleh", render: (r) => r.byNik ?? "Sistem (otomatis)" },
                 { key: "note", label: "Catatan", render: (r) => r.note ?? "-" },
               ]}

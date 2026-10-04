@@ -15,7 +15,12 @@ export const env = {
   sessionTtlMinutes: Number(process.env.SESSION_TTL_MINUTES ?? 30),
   loginMaxAttempts: Number(process.env.LOGIN_MAX_ATTEMPTS ?? 5),
   loginLockMinutes: Number(process.env.LOGIN_LOCK_MINUTES ?? 5),
-  blobReadWriteToken: required("BLOB_READ_WRITE_TOKEN"),
+  // Folder tempat file lampiran upload disimpan (2026-10-04, instruksi
+  // eksplisit user: migrasi dari Vercel Blob -> sempat dicoba Cloudflare R2,
+  // tapi ditolak krn wajib kartu kredit -- jadi disk server sendiri, tanpa
+  // pihak ketiga). Kosongkan untuk pakai default "server/data/uploads" (lihat
+  // lib/uploadStorage.ts) -- folder ini sudah di-.gitignore sebelumnya.
+  uploadsDir: process.env.UPLOADS_DIR ?? "",
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 20),
   // Batas terpisah & jauh lebih besar khusus utk import Master Data (Order/Tanki),
   // karena file referensi seperti export SAP-COOISPI bisa berisi jutaan baris --

@@ -10,13 +10,13 @@ import {
   applyRetention,
   assertSafeFilename,
   backupFilePath,
-  createBackupWithOffsiteCopy,
+  createBackup,
   deleteBackup,
   getDiskUsage,
   listBackupFiles,
   restoreBackup,
 } from "./backupService";
-import { getBlobUsage } from "./blobUsage";
+import { getUploadsUsage } from "./uploadsUsage";
 import {
   AdvancedCategory,
   streamExportWorkbook,
@@ -50,10 +50,9 @@ async function logEvent(
   action: "CREATE" | "AUTO_CREATE" | "RESTORE" | "DELETE" | "CLEANUP" | "EXPORT_ADVANCED" | "IMPORT_ADVANCED" | "AUTO_CREATE_FAILED",
   fileName: string | null,
   byNik: string | null,
-  note?: string,
-  blobPath?: string | null
+  note?: string
 ) {
-  await prisma.backupEvent.create({ data: { action, fileName, byNik, note, blobPath: blobPath ?? null } });
+  await prisma.backupEvent.create({ data: { action, fileName, byNik, note } });
 }
 
 // Sama batas ukuran dgn import Master Data (env.maxImportMb) -- file Import
@@ -87,8 +86,8 @@ backupRouter.get(
 backupRouter.get(
   "/storage",
   asyncRoute(async (_req, res) => {
-    const [disk, blob] = await Promise.all([getDiskUsage(), getBlobUsage()]);
-    res.json({ success: true, data: { disk, blob } });
+    const [disk, uploads] = await Promise.all([getDiskUsage(), getUploadsUsage()]);
+    res.json({ success: true, data: { disk, uploads } });
   })
 );
 
@@ -110,8 +109,8 @@ backupRouter.post(
       res.status(400).json({ success: false, message: "Label backup tidak valid." });
       return;
     }
-    const { info, blobPath } = await createBackupWithOffsiteCopy(parsed.data.label ?? "manual");
-    await logEvent("CREATE", info.fileName, req.auth!.nik, undefined, blobPath);
+    const info = await createBackup(parsed.data.label ?? "manual");
+    await logEvent("CREATE", info.fileName, req.auth!.nik);
 
     const setting = await getOrCreateSetting();
     const removed = await applyRetention(setting.retentionDays, setting.retentionMaxCount);
@@ -163,14 +162,8 @@ backupRouter.post(
     // Jaring pengaman: buat 1 backup "pre-restore" dari kondisi SAAT INI dulu
     // sebelum menimpa database, supaya restore yang salah pilih file tetap
     // bisa dibatalkan (2026-09-08, instruksi eksplisit user).
-    const { info: safetySnapshot, blobPath: safetyBlobPath } = await createBackupWithOffsiteCopy("pre-restore-safety");
-    await logEvent(
-      "CREATE",
-      safetySnapshot.fileName,
-      null,
-      `Snapshot otomatis sebelum restore ke "${fileName}"`,
-      safetyBlobPath
-    );
+    const safetySnapshot = await createBackup("pre-restore-safety");
+    await logEvent("CREATE", safetySnapshot.fileName, null, `Snapshot otomatis sebelum restore ke "${fileName}"`);
 
     await restoreBackup(fileName);
     await logEvent("RESTORE", fileName, req.auth!.nik);
@@ -321,16 +314,8 @@ backupRouter.post(
 
     // Jaring pengaman: snapshot pg_dump kondisi SAAT INI dulu sebelum menulis
     // apa pun (2026-09-09, sama pola dgn /backup/restore/:fileName).
-    const { info: safetySnapshot, blobPath: safetyBlobPath } = await createBackupWithOffsiteCopy(
-      "pre-import-advanced-safety"
-    );
-    await logEvent(
-      "CREATE",
-      safetySnapshot.fileName,
-      null,
-      `Snapshot otomatis sebelum Import Advance oleh ${req.auth!.nik}`,
-      safetyBlobPath
-    );
+    const safetySnapshot = await createBackup("pre-import-advanced-safety");
+    await logEvent("CREATE", safetySnapshot.fileName, null, `Snapshot otomatis sebelum Import Advance oleh ${req.auth!.nik}`);
 
     const results: CommitResult[] = await commitImport(sheets);
     const totalCreated = results.reduce((s, r) => s + r.created, 0);

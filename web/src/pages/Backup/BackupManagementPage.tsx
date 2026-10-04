@@ -26,10 +26,9 @@ interface StorageInfo {
     diskFreeBytes: number | null;
     diskTotalBytes: number | null;
   };
-  blob: {
+  uploads: {
     totalBytes: number;
     fileCount: number;
-    truncated: boolean;
   };
 }
 
@@ -54,11 +53,6 @@ interface BackupEventRow {
   fileName: string | null;
   byNik: string | null;
   note: string | null;
-  /// Pathname salinan kedua di Vercel Blob, kalau ada (2026-10-04 -- lihat
-  /// createBackupWithOffsiteCopy di backupService.ts). null = belum sempat/
-  /// gagal diunggah ke cloud -- backup lokalnya tetap valid, cuma tidak
-  /// punya salinan kedua.
-  blobPath: string | null;
   createdAt: string;
 }
 
@@ -371,8 +365,8 @@ export default function BackupManagementPage() {
                 totalBytes={storage.disk.diskTotalBytes}
               />
               <UsageBar
-                label={`Lampiran (Vercel Blob, ${storage.blob.fileCount} file${storage.blob.truncated ? "+" : ""})`}
-                usedBytes={storage.blob.totalBytes}
+                label={`Lampiran Upload (${storage.uploads.fileCount} file)`}
+                usedBytes={storage.uploads.totalBytes}
                 totalBytes={null}
               />
               {storage.disk.diskFreeBytes !== null && (
@@ -381,8 +375,8 @@ export default function BackupManagementPage() {
                 </p>
               )}
               <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 6 }}>
-                Semua file (backup database maupun lampiran upload) tersimpan permanen di sini atau di Vercel Blob --
-                TIDAK ADA yang disimpan di penyimpanan sementara (temporary) server.
+                Semua file (backup database maupun lampiran upload) tersimpan permanen di disk server ini --
+                TIDAK ADA yang disimpan di penyimpanan sementara (temporary) server atau cloud pihak ketiga.
               </p>
               <button
                 className="btn btn-outline"
@@ -725,20 +719,6 @@ export default function BackupManagementPage() {
                     ),
                 },
                 { key: "fileName", label: "File", render: (r) => r.fileName ?? "-" },
-                {
-                  key: "blobPath",
-                  label: "Salinan Cloud",
-                  render: (r) =>
-                    r.action === "CREATE" || r.action === "AUTO_CREATE" ? (
-                      r.blobPath ? (
-                        <span style={{ color: "var(--success)" }}>✓ Ada</span>
-                      ) : (
-                        <span style={{ color: "var(--text-muted)" }}>- Tidak ada</span>
-                      )
-                    ) : (
-                      "-"
-                    ),
-                },
                 { key: "byNik", label: "Oleh", render: (r) => r.byNik ?? "Sistem (otomatis)" },
                 { key: "note", label: "Catatan", render: (r) => r.note ?? "-" },
               ]}

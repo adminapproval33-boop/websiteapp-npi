@@ -1067,12 +1067,6 @@ model BackupEvent {
   byNik     String?
   /// null = dipicu sistem (AUTO_CREATE/CLEANUP terjadwal), bukan oleh user.
   note      String?
-  /// Pathname salinan kedua di Vercel Blob (mis. "db-backups/xxx.dump") --
-  /// null kalau unggahan salinan cloud gagal/belum sempat dicoba (2026-10-04,
-  /// instruksi eksplisit user: backup lokal SAJA 1 titik kegagalan tunggal
-  /// krn ada di disk yg sama dgn database live, jadi tiap backup sekarang
-  /// juga diunggah ke storage terpisah).
-  blobPath  String?
   createdAt DateTime     @default(now())
 
   @@index([createdAt])

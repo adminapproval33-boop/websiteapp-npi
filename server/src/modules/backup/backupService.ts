@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { put, del } from "@vercel/blob";
 import { env } from "../../lib/env";
 
 /** Restore & Hapus backup MENIMPA/MENGHILANGKAN data produksi secara permanen
@@ -109,58 +108,6 @@ export async function createBackup(labelPrefix: string): Promise<BackupFileInfo>
   return { fileName, sizeBytes: stat.size, createdAt: stat.mtime.toISOString() };
 }
 
-/** Folder privat di Vercel Blob tempat salinan KEDUA tiap backup disimpan
- * (2026-10-04, instruksi eksplisit user: backup lokal SAJA satu titik
- * kegagalan tunggal krn ada di disk yg sama dgn database live -- lihat
- * createBackupWithOffsiteCopy di bawah). Nama file persis sama dgn file
- * lokalnya supaya gampang dipetakan utk dihapus lagi saat retensi jalan. */
-const OFFSITE_BLOB_FOLDER = "db-backups";
-
-/** Unggah 1 file dump yg SUDAH ADA di disk lokal sbg salinan kedua ke Vercel
- * Blob. Dipanggil terpisah dari createBackup() (lihat createBackupWithOffsiteCopy)
- * supaya kegagalan unggah ini TIDAK menggagalkan backup lokal yg sudah berhasil. */
-export async function uploadBackupOffsiteCopy(fileName: string): Promise<string> {
-  const filePath = backupFilePath(fileName);
-  const buffer = await fs.promises.readFile(filePath);
-  const pathname = `${OFFSITE_BLOB_FOLDER}/${fileName}`;
-  await put(pathname, buffer, {
-    access: "private",
-    contentType: "application/octet-stream",
-    addRandomSuffix: false,
-    token: env.blobReadWriteToken,
-  });
-  return pathname;
-}
-
-/** Best-effort -- dipanggil tiap kali backup lokal dihapus (manual/retensi)
- * supaya salinan cloud-nya ikut dibuang, tidak menumpuk selamanya. Boleh
- * gagal diam-diam (mis. salinan cloud memang belum pernah ada krn unggahan
- * awalnya gagal) -- itu bukan masalah, bukan kegagalan yg perlu dilaporkan. */
-async function deleteBackupOffsiteCopy(fileName: string): Promise<void> {
-  try {
-    await del(`${OFFSITE_BLOB_FOLDER}/${fileName}`, { token: env.blobReadWriteToken });
-  } catch {
-    // Diamkan -- lihat komentar di atas.
-  }
-}
-
-/** Buat backup lokal (wajib berhasil, sama spt createBackup() sebelumnya),
- * LALU coba unggah salinan keduanya ke Vercel Blob (boleh gagal -- backup
- * lokal tetap valid & terpakai walau salinan cloud gagal, lihat
- * blobPath: null di BackupEvent kalau itu terjadi). */
-export async function createBackupWithOffsiteCopy(
-  labelPrefix: string
-): Promise<{ info: BackupFileInfo; blobPath: string | null }> {
-  const info = await createBackup(labelPrefix);
-  let blobPath: string | null = null;
-  try {
-    blobPath = await uploadBackupOffsiteCopy(info.fileName);
-  } catch (err) {
-    console.error("[backup] Gagal unggah salinan cloud (backup lokal tetap tersimpan):", err);
-  }
-  return { info, blobPath };
-}
-
 export async function deleteBackup(fileName: string): Promise<void> {
   assertSafeFilename(fileName);
   const filePath = path.join(backupDir(), fileName);
@@ -168,7 +115,6 @@ export async function deleteBackup(fileName: string): Promise<void> {
     throw new Error("File backup tidak ditemukan.");
   }
   fs.unlinkSync(filePath);
-  await deleteBackupOffsiteCopy(fileName);
 }
 
 export function backupFilePath(fileName: string): string {

@@ -1,6 +1,6 @@
 import { prisma } from "../../lib/prisma";
 import { sendMail } from "../../lib/mailer";
-import { ALLOWED_BACKUP_ADMIN_NIKS, applyRetention, createBackupWithOffsiteCopy } from "./backupService";
+import { ALLOWED_BACKUP_ADMIN_NIKS, applyRetention, createBackup } from "./backupService";
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // cek tiap 15 menit -- cukup granular utk jadwal per-jam tanpa perlu dependency cron.
 
@@ -61,8 +61,8 @@ async function runAutoBackupCheck() {
   if (alreadyRanToday) return;
 
   try {
-    const { info, blobPath } = await createBackupWithOffsiteCopy("auto");
-    await prisma.backupEvent.create({ data: { action: "AUTO_CREATE", fileName: info.fileName, byNik: null, blobPath } });
+    const info = await createBackup("auto");
+    await prisma.backupEvent.create({ data: { action: "AUTO_CREATE", fileName: info.fileName, byNik: null } });
     const removed = await applyRetention(setting.retentionDays, setting.retentionMaxCount);
     if (removed.length > 0) {
       await prisma.backupEvent.create({

@@ -845,6 +845,16 @@
     color: #fff;
   }
 
+  /* <option> tidak mewarisi `background` transparan di atas -- browser
+     merender daftar dropdown-nya dengan background putih bawaan OS, jadi teks
+     putih di atasnya jadi tidak terbaca (2026-10-06, laporan user: opsi
+     "Nonaktif" di dropdown Notifikasi tidak terlihat). Set eksplisit biar
+     senada tema merah marun panel. */
+  .profile-details-panel .field select option {
+    background: #450a0a;
+    color: #fff;
+  }
+
   .profile-details-panel .field input::placeholder {
     color: rgba(255, 255, 255, 0.35);
   }

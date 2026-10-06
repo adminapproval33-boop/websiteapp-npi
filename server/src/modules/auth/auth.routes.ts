@@ -182,7 +182,11 @@ authRouter.get(
 );
 
 const updateMyEmailSchema = z.object({
-  email: z.string().trim().email("Format email tidak valid.").nullable(),
+  // `.toLowerCase()` SEBELUM `.email()` -- SELALU disimpan huruf kecil (2026-10-06,
+  // instruksi eksplisit user: "jika ada 1 email dipakai oleh beberapa user
+  // apakah bisa? harusnya dibikin tidak bisa") supaya `@unique` di schema.prisma
+  // efektif case-insensitive, bukan cuma case-sensitive bawaan Postgres.
+  email: z.string().trim().toLowerCase().email("Format email tidak valid.").nullable(),
 });
 
 authRouter.put(
@@ -193,6 +197,16 @@ authRouter.put(
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
       return;
+    }
+    if (parsed.data.email) {
+      const owner = await prisma.masterEmployee.findUnique({ where: { email: parsed.data.email } });
+      if (owner && owner.employeeId !== req.auth!.nik) {
+        res.status(409).json({
+          success: false,
+          message: `Email ini sudah dipakai oleh ${owner.fullName} (NIK ${owner.employeeId}).`,
+        });
+        return;
+      }
     }
     // Upsert -- akun login yg NIK-nya belum ada baris di Master Data Karyawan
     // (mis. akun Administrator sistem) tetap bisa isi emailnya sendiri lewat

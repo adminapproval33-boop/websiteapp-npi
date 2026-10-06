@@ -890,9 +890,12 @@ masterDataRouter.get(
 /// Input Email di tabel Master Data > Employee (2026-09-30, instruksi
 /// eksplisit user: fitur Notifikasi Order Macet). Field ini STATUS APLIKASI
 /// (bukan dari file HR) -- lihat pemulihannya saat import Replace di atas.
-/// Divalidasi format dasar.
+/// Divalidasi format dasar. `.toLowerCase()` SEBELUM `.email()` -- SELALU
+/// disimpan huruf kecil (2026-10-06, instruksi eksplisit user: 1 email tidak
+/// boleh dipakai >1 karyawan) supaya `@unique` di schema.prisma efektif
+/// case-insensitive, sama pola dgn updateMyEmailSchema di auth.routes.ts.
 const employeeUpdateSchema = z.object({
-  email: z.string().trim().email("Format email tidak valid.").nullable().optional(),
+  email: z.string().trim().toLowerCase().email("Format email tidak valid.").nullable().optional(),
 });
 
 masterDataRouter.put(
@@ -906,6 +909,16 @@ masterDataRouter.put(
     if (!parsed.success) {
       res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
       return;
+    }
+    if (parsed.data.email) {
+      const owner = await prisma.masterEmployee.findUnique({ where: { email: parsed.data.email } });
+      if (owner && owner.employeeId !== employeeId) {
+        res.status(409).json({
+          success: false,
+          message: `Email ini sudah dipakai oleh ${owner.fullName} (NIK ${owner.employeeId}).`,
+        });
+        return;
+      }
     }
     const updated = await prisma.masterEmployee
       .update({ where: { employeeId }, data: parsed.data })

@@ -268,8 +268,12 @@ model MasterEmployee {
   /// Alamat email karyawan -- diisi sendiri lewat Settings > Profil, atau oleh
   /// admin di sini. Field APLIKASI (bukan dari file HR), jadi harus
   /// dipertahankan lewat snapshot-restore saat import mode Replace (spt pola
-  /// damaged di Master Tanki/Mesin).
-  email        String?
+  /// damaged di Master Tanki/Mesin). @unique (2026-10-06, instruksi eksplisit
+  /// user: 1 email tidak boleh dipakai lebih dari 1 karyawan -- SELALU
+  /// disimpan huruf kecil oleh route handler-nya supaya unique ini efektif
+  /// case-insensitive, lihat auth.routes.ts & masterdata.routes.ts). NULL
+  /// (belum isi email) boleh dobel -- constraint Postgres standar.
+  email        String?  @unique
   /// Preferensi PRIBADI milik karyawan ybs sendiri (diatur lewat menu
   /// Settings > Notifikasi, 2026-10-01 instruksi eksplisit user: "kalau user
   /// tersebut memilih untuk menyalakan notifikasi Approval, maka user

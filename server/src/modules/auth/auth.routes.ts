@@ -23,7 +23,6 @@ const NOTIF_PREF_SELECT = {
   notifyColourMatching: true,
   notifyQc: true,
   notifyApproval: true,
-  notifyThresholdDays: true,
 } as const;
 
 function notifPrefDefaults(employee: {
@@ -34,7 +33,6 @@ function notifPrefDefaults(employee: {
   notifyColourMatching: boolean;
   notifyQc: boolean;
   notifyApproval: boolean;
-  notifyThresholdDays: number;
 } | null) {
   return {
     email: employee?.email ?? null,
@@ -44,7 +42,6 @@ function notifPrefDefaults(employee: {
     notifyColourMatching: employee?.notifyColourMatching ?? false,
     notifyQc: employee?.notifyQc ?? false,
     notifyApproval: employee?.notifyApproval ?? false,
-    notifyThresholdDays: employee?.notifyThresholdDays ?? 20,
   };
 }
 
@@ -218,10 +215,12 @@ authRouter.put(
  * ke-2: "dropdown pada setiap proses juga buat saja Aktif, Nonaktif ...
  * kalau user tersebut memilih untuk menyalakan notifikasi Approval, maka
  * user tersebut akan menerima email notifikasi approval"). Preferensi
- * PRIBADI milik user ybs sendiri, PER TAHAP + ambang hari personal -- SIAPA
- * SAJA yg login boleh mengaktifkan tahap mana pun, LEPAS dari `departemen`
- * miliknya. Hanya berefek nyata kalau user ybs juga sudah isi email (lihat
- * query di orderDelayAlertScheduler.ts). */
+ * PRIBADI milik user ybs sendiri, PER TAHAP -- SIAPA SAJA yg login boleh
+ * mengaktifkan tahap mana pun, LEPAS dari `departemen` miliknya. Hanya
+ * berefek nyata kalau user ybs juga sudah isi email (lihat query di
+ * orderDelayAlertScheduler.ts). Ambang Lead Time Proses & jam kirim BUKAN
+ * lagi preferensi di sini (2026-10-06, instruksi eksplisit user: pindah jadi
+ * GLOBAL, cuma diatur developer/admin lewat menu Pengaturan SMTP). */
 const updateNotifPrefsSchema = z.object({
   notifyPremix: z.boolean(),
   notifyMilling: z.boolean(),
@@ -229,7 +228,6 @@ const updateNotifPrefsSchema = z.object({
   notifyColourMatching: z.boolean(),
   notifyQc: z.boolean(),
   notifyApproval: z.boolean(),
-  notifyThresholdDays: z.number().int().min(1).max(365),
 });
 
 authRouter.put(

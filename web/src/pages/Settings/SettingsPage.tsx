@@ -89,7 +89,6 @@ interface NotifyPrefsForm {
   notifyColourMatching: boolean;
   notifyQc: boolean;
   notifyApproval: boolean;
-  notifyThresholdDays: number;
 }
 
 function NotificationSection() {
@@ -101,7 +100,6 @@ function NotificationSection() {
     notifyColourMatching: user?.notifyColourMatching ?? false,
     notifyQc: user?.notifyQc ?? false,
     notifyApproval: user?.notifyApproval ?? false,
-    notifyThresholdDays: user?.notifyThresholdDays ?? 20,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -115,7 +113,6 @@ function NotificationSection() {
       notifyColourMatching: user?.notifyColourMatching ?? false,
       notifyQc: user?.notifyQc ?? false,
       notifyApproval: user?.notifyApproval ?? false,
-      notifyThresholdDays: user?.notifyThresholdDays ?? 20,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -125,7 +122,6 @@ function NotificationSection() {
     user?.notifyColourMatching,
     user?.notifyQc,
     user?.notifyApproval,
-    user?.notifyThresholdDays,
   ]);
 
   const hasEmail = Boolean(user?.email);
@@ -154,7 +150,7 @@ function NotificationSection() {
           <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.65)", marginBottom: 12 }}>
             Pilih tahap proses mana saja yang ingin Anda terima notifikasinya lewat email -- lepas dari departemen
             Anda. Kalau Anda aktifkan mis. "Approval", Anda akan menerima email setiap ada order yang macet di tahap
-            Approval melebihi ambang hari di bawah, order dari departemen mana pun.
+            Approval melebihi ambang Lead Time Proses (ditentukan developer/admin), order dari departemen mana pun.
           </p>
           {!hasEmail && (
             <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)", marginBottom: 12 }}>
@@ -176,16 +172,6 @@ function NotificationSection() {
                   </select>
                 </div>
               ))}
-              <div className="field">
-                <label>Ambang Lead Time Proses (hari kerja)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={form.notifyThresholdDays}
-                  disabled={!hasEmail || saving}
-                  onChange={(e) => setForm({ ...form, notifyThresholdDays: Number(e.target.value) })}
-                />
-              </div>
             </div>
             {error && <p className="error-text">{error}</p>}
             {message && <p className="status-text">{message}</p>}

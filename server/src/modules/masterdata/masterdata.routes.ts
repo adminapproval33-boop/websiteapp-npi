@@ -1178,12 +1178,15 @@ masterDataRouter.post(
 
     if (mode === "replace") {
       // Sama persis pola pemulihan spt Master Data Tanki/Mesin di atas --
-      // `email` dan preferensi Notifikasi Order Macet (notify*/
-      // notifyThresholdDays) adalah STATUS APLIKASI (diisi manual admin lewat
-      // menu Master Data > Employee, atau oleh karyawan ybs sendiri lewat
-      // Settings > Notifikasi), BUKAN bagian dari file HR yang diupload, jadi
+      // `email` dan preferensi Notifikasi Order Macet per-tahap (notify*)
+      // adalah STATUS APLIKASI (diisi manual admin lewat menu Master Data >
+      // Employee, atau oleh karyawan ybs sendiri lewat Settings >
+      // Notifikasi), BUKAN bagian dari file HR yang diupload, jadi
       // delete+recreate akan mereset semuanya ke default kalau tidak
       // dipulihkan. Hanya dipulihkan utk employeeId yg masih ada di file baru.
+      // Ambang Lead Time Proses & jam kirim BUKAN lagi di MasterEmployee
+      // (2026-10-06: sudah GLOBAL lewat SmtpSetting), jadi tidak perlu
+      // dipulihkan di sini lagi.
       const previousOverrides = await prisma.masterEmployee.findMany({
         where: {
           OR: [
@@ -1194,7 +1197,6 @@ masterDataRouter.post(
             { notifyColourMatching: true },
             { notifyQc: true },
             { notifyApproval: true },
-            { notifyThresholdDays: { not: 20 } },
           ],
         },
         select: {
@@ -1206,7 +1208,6 @@ masterDataRouter.post(
           notifyColourMatching: true,
           notifyQc: true,
           notifyApproval: true,
-          notifyThresholdDays: true,
         },
       });
       await prisma.masterEmployee.deleteMany({});

@@ -18,7 +18,6 @@ export type OrderDelayNotifPrefs = Pick<
   | "notifyColourMatching"
   | "notifyQc"
   | "notifyApproval"
-  | "notifyThresholdDays"
 >;
 
 interface AuthContextValue {
@@ -122,7 +121,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       notifyColourMatching: res.notifyColourMatching,
       notifyQc: res.notifyQc,
       notifyApproval: res.notifyApproval,
-      notifyThresholdDays: res.notifyThresholdDays,
     };
     saveSession(session);
     setUser(session);

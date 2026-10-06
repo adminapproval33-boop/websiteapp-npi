@@ -33,9 +33,6 @@ export interface StoredSession {
   notifyColourMatching?: boolean;
   notifyQc?: boolean;
   notifyApproval?: boolean;
-  /** Ambang Lead Time Proses (hari kerja) PRIBADI -- berlaku ke semua tahap
-   * yg diaktifkan di atas. */
-  notifyThresholdDays?: number;
 }
 
 // Pakai localStorage (bukan sessionStorage) SENGAJA (2026-08-08, instruksi

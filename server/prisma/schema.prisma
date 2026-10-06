@@ -276,16 +276,16 @@ model MasterEmployee {
   /// tersebut akan menerima email notifikasi approval") -- per TAHAP, LEPAS
   /// dari `departemen` di atas. TIDAK ADA flag admin terpisah -- SIAPA SAJA
   /// yg sudah isi email & mengaktifkan salah satu tahap ini otomatis jadi
-  /// penerima utk tahap itu, apa pun departemennya.
+  /// penerima utk tahap itu, apa pun departemennya. Ambang Lead Time Proses &
+  /// jam kirim-nya sendiri BUKAN lagi di sini -- sudah GLOBAL lewat
+  /// SmtpSetting.notifyThresholdDays/notifySendHour (2026-10-06, instruksi
+  /// eksplisit user).
   notifyPremix         Boolean @default(false)
   notifyMilling        Boolean @default(false)
   notifyAftermix       Boolean @default(false)
   notifyColourMatching Boolean @default(false)
   notifyQc             Boolean @default(false)
   notifyApproval       Boolean @default(false)
-  /// Ambang Lead Time Proses (hari kerja) PRIBADI milik karyawan ybs sendiri
-  /// -- berlaku ke SEMUA tahap yg diaktifkan di atas (bukan per-tahap).
-  notifyThresholdDays  Int     @default(20)
   updatedAt    DateTime @updatedAt
 
   @@map("master_employees")
@@ -1093,17 +1093,18 @@ model BackupSetting {
 /// Log audit + dedup harian utk Notifikasi Order Macet -- 1 baris per siklus
 /// digest yg berhasil jalan, dipakai scheduler utk memastikan tidak kirim
 /// dobel di hari yang sama walau server di-restart (pola sama dgn BackupEvent
-/// AUTO_CREATE). Jam cek (CHECK_HOUR) jadi konstanta tetap di
-/// orderDelayAlertScheduler.ts (2026-10-01, revisi ke-3 instruksi eksplisit
-/// user: "Pengaturan Sistem hilangkan saja, masukkan semuanya ke menu
-/// Notifikasi" -- sudah tidak ada lagi pengaturan sistem terpisah, semua
-/// murni preferensi personal per karyawan di MasterEmployee).
+/// AUTO_CREATE). Jam cek & ambang Lead Time Proses dibaca dari
+/// SmtpSetting.notifySendHour/notifyThresholdDays (2026-10-06, instruksi
+/// eksplisit user: pindah dari preferensi personal ke satu nilai GLOBAL yg
+/// cuma bisa diatur developer/admin lewat menu Pengaturan SMTP -- opt-in
+/// per-tahap di MasterEmployee.notify* tetap personal per karyawan).
 model OrderDelayAlertEvent {
   id                 Int      @id @default(autoincrement())
   /// Jumlah order unik yg masuk ke MINIMAL 1 email (lintas semua penerima).
   ordersFlagged      Int
-  /// Jumlah karyawan yg benar2 menerima email -- penerima personal per-tahap,
-  /// lihat field notify... & notifyThresholdDays di MasterEmployee.
+  /// Jumlah karyawan yg benar2 menerima email -- opt-in per-tahap personal
+  /// (lihat field notify... di MasterEmployee), ambang & jam kirim GLOBAL
+  /// dari SmtpSetting.
   recipientsNotified Int
   note               String?
   createdAt          DateTime @default(now())
@@ -1130,6 +1131,22 @@ model SmtpSetting {
   pass         String?
   fromName     String?
   fromEmail    String?
+  /// Ambang Lead Time Proses (hari kerja) utk Notifikasi Order Macet -- GLOBAL,
+  /// cuma bisa diatur developer/admin di sini (2026-10-06, instruksi eksplisit
+  /// user: pindah dari "Ambang Lead Time Proses" personal di menu Settings >
+  /// Notifikasi, supaya cuma developer yg menentukan data mana yg terkirim).
+  /// Berlaku ke SEMUA karyawan yg opt-in notify* di MasterEmployee, lepas dari
+  /// tahap yg mereka aktifkan.
+  notifyThresholdDays Int @default(20)
+  /// Jam & menit WIB/GMT+7 (0-23 & 0-59, BUKAN jam OS/proses server -- lihat
+  /// currentWibMinutesOfDay() di orderDelayAlertScheduler.ts, 2026-10-06:
+  /// production belum tentu ber-timezone WIB) scheduler Notifikasi Order
+  /// Macet mengirim digest harian -- GLOBAL, gantikan konstanta CHECK_HOUR
+  /// yg sebelumnya hardcode. Pengiriman sebenarnya bisa meleset sampai ~15
+  /// menit SETELAH jam:menit ini (scheduler poll tiap 15 menit, lihat
+  /// CHECK_INTERVAL_MS), bukan presisi ke detik.
+  notifySendHour      Int @default(7)
+  notifySendMinute    Int @default(0)
   updatedAt    DateTime @updatedAt
   updatedByNik String?
 

@@ -4,14 +4,16 @@ import { getProductionOrderRows, ProductionOrderRow } from "../dashboard/dashboa
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // cek tiap 15 menit -- sama pola dgn backupScheduler.ts.
 
-/** Jam (0-23, waktu server) dijalankannya pengecekan & pengiriman harian --
- * KONSTANTA TETAP (2026-10-01, revisi ke-3 instruksi eksplisit user:
- * "Pengaturan Sistem hilangkan saja, masukkan semuanya ke menu Notifikasi,
- * agar user bisa mandiri setting sendiri") -- sudah tidak ada lagi menu admin
- * terpisah utk ini; scheduler otomatis jalan tiap hari begitu ada user yg
- * opt-in sendiri lewat Settings > Notifikasi, tidak ada saklar aktif/nonaktif
- * sistem lagi. */
-const CHECK_HOUR = 7;
+/** Menit-dalam-hari WIB (GMT+7, 0-1439) saat ini, dihitung EKSPLISIT dari UTC
+ * -- BUKAN `Date.getHours()/getMinutes()` (2026-10-06, temuan: itu ikut
+ * timezone OS/proses server, yang di production -- dikelola IT, bukan dev
+ * lokal -- belum tentu WIB, banyak server default UTC. Dropdown "Jam Kirim
+ * Notifikasi" + menitnya di menu Pengaturan SMTP WAJIB berarti WIB apa pun
+ * timezone OS server, supaya konsisten antara dev & production). */
+function currentWibMinutesOfDay(): number {
+  const now = new Date();
+  return ((now.getUTCHours() + 7) % 24) * 60 + now.getUTCMinutes();
+}
 
 /** Tahap proses (nama persis dari computeStages() di dashboard.routes.ts) ->
  * field toggle personal di MasterEmployee (2026-10-01, instruksi eksplisit
@@ -50,7 +52,10 @@ function currentStuckStage(row: ProductionOrderRow): string | null {
   return stuck.name;
 }
 
-function digestHtml(orders: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number }[]) {
+function digestHtml(
+  orders: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number }[],
+  thresholdDays: number
+) {
   const rows = orders
     .map(
       (o) =>
@@ -62,7 +67,7 @@ function digestHtml(orders: { order: string; materialDescription: string | null;
     )
     .join("");
   return `
-    <p>Order berikut sudah macet melebihi ambang batas Lead Time Proses yang Anda tentukan, di tahap yang Anda ikuti notifikasinya:</p>
+    <p>Order berikut sudah macet &ge; ${thresholdDays} hari kerja (ambang ditentukan developer/admin lewat Pengaturan SMTP), di tahap yang Anda ikuti notifikasinya:</p>
     <table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">
       <thead><tr>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Order</th>
@@ -76,9 +81,24 @@ function digestHtml(orders: { order: string; materialDescription: string | null;
   `;
 }
 
-async function runOrderDelayAlertCheck() {
-  const now = new Date();
-  if (now.getHours() !== CHECK_HOUR) return;
+// Diekspor supaya bisa dipicu manual (mis. skrip verifikasi "kirim sekarang
+// juga" tanpa menunggu poll berikutnya) -- logikanya sendiri tidak berubah.
+export async function runOrderDelayAlertCheck() {
+  // Ambang hari & jam kirim sekarang GLOBAL lewat SmtpSetting (2026-10-06,
+  // instruksi eksplisit user: pindah dari preferensi personal ke menu
+  // Pengaturan SMTP, khusus developer/admin) -- gantikan konstanta
+  // CHECK_HOUR & field notifyThresholdDays per karyawan yg sebelumnya ada.
+  const smtpSetting = await prisma.smtpSetting.findUnique({ where: { id: "singleton" } });
+  const sendHour = smtpSetting?.notifySendHour ?? 7;
+  const sendMinute = smtpSetting?.notifySendMinute ?? 0;
+  const thresholdDays = smtpSetting?.notifyThresholdDays ?? 20;
+
+  // ">=" (bukan "==="), supaya mendukung menit berapa pun walau poll cuma
+  // tiap 15 menit (2026-10-06, instruksi eksplisit user: dropdown menit) --
+  // begitu jam:menit target terlewati, kiriman pertama yg lolos dedup
+  // "sudah jalan hari ini" di bawah akan jalan, meleset paling lama ~15 menit
+  // dari CHECK_INTERVAL_MS, bukan presisi ke detik.
+  if (currentWibMinutesOfDay() < sendHour * 60 + sendMinute) return;
 
   const alreadyRanToday = await prisma.orderDelayAlertEvent.findFirst({
     where: { createdAt: { gte: new Date(`${todayKey()}T00:00:00`) } },
@@ -88,11 +108,10 @@ async function runOrderDelayAlertCheck() {
   try {
     const rows = await getProductionOrderRows();
 
-    // Kelompokkan order per tahap macetnya dulu (lepas dari threshold siapa
-    // pun -- ambang hari sekarang personal per karyawan, bukan 1 nilai global).
+    // Kelompokkan order per tahap macetnya, hanya yg >= ambang GLOBAL.
     const ordersByStage = new Map<string, { order: string; materialDescription: string | null; leadTimeProses: number }[]>();
     for (const r of rows) {
-      if (r.leadTimeProses === null) continue;
+      if (r.leadTimeProses === null || r.leadTimeProses < thresholdDays) continue;
       const stage = currentStuckStage(r);
       if (!stage || !STAGE_NOTIFY_FIELD[stage]) continue;
       const list = ordersByStage.get(stage) ?? [];
@@ -101,16 +120,15 @@ async function runOrderDelayAlertCheck() {
     }
 
     // Penerima = SIAPA SAJA yg sudah isi email, dicek per tahap yg dia
-    // aktifkan sendiri + ambang hari personalnya sendiri (2026-10-01, revisi
-    // ke-2 eksplisit user: "kalau user tersebut memilih untuk menyalakan
-    // notifikasi Approval, maka user tersebut akan menerima email notifikasi
-    // approval yang lead time prosesnya >=20 hari" -- 20 cuma contoh, angka
-    // aslinya dari notifyThresholdDays milik user ybs).
+    // aktifkan sendiri (2026-10-01, revisi ke-2 eksplisit user: "kalau user
+    // tersebut memilih untuk menyalakan notifikasi Approval, maka user
+    // tersebut akan menerima email notifikasi approval"); ambang harinya
+    // sendiri sudah GLOBAL (lihat thresholdDays di atas), bukan lagi per
+    // karyawan.
     const employees = await prisma.masterEmployee.findMany({
       where: { email: { not: null } },
       select: {
         email: true,
-        notifyThresholdDays: true,
         notifyPremix: true,
         notifyMilling: true,
         notifyAftermix: true,
@@ -127,15 +145,13 @@ async function runOrderDelayAlertCheck() {
       for (const [stage, field] of Object.entries(STAGE_NOTIFY_FIELD)) {
         if (!field || !emp[field]) continue;
         const list = ordersByStage.get(stage) ?? [];
-        for (const o of list) {
-          if (o.leadTimeProses >= emp.notifyThresholdDays) matched.push({ ...o, stage });
-        }
+        matched.push(...list.map((o) => ({ ...o, stage })));
       }
       if (matched.length === 0) continue;
       await sendMail({
         to: [emp.email!],
-        subject: `[MES NPI] ${matched.length} Order macet >= ${emp.notifyThresholdDays} hari kerja`,
-        html: digestHtml(matched),
+        subject: `[MES NPI] ${matched.length} Order macet >= ${thresholdDays} hari kerja`,
+        html: digestHtml(matched, thresholdDays),
       });
       recipientsNotified++;
       matched.forEach((m) => involvedOrders.add(m.order));

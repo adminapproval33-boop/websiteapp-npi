@@ -41,6 +41,14 @@ smtpRouter.get(
         fromName: setting.fromName,
         fromEmail: setting.fromEmail,
         hasPassword: Boolean(setting.pass),
+        // GLOBAL, cuma diatur developer/admin di sini (2026-10-06, instruksi
+        // eksplisit user: pindah dari "Ambang Lead Time Proses" personal di
+        // menu Settings > Notifikasi, supaya cuma developer yg menentukan
+        // data mana yg terkirim, + jam kirim notifikasi juga diatur di sini,
+        // gantikan konstanta CHECK_HOUR yg sebelumnya hardcode).
+        notifyThresholdDays: setting.notifyThresholdDays,
+        notifySendHour: setting.notifySendHour,
+        notifySendMinute: setting.notifySendMinute,
         updatedAt: setting.updatedAt,
       },
     });
@@ -58,6 +66,9 @@ const settingsSchema = z.object({
   pass: z.string().optional(),
   fromName: z.string().trim().nullable().optional(),
   fromEmail: z.string().trim().email("Format alamat pengirim tidak valid.").nullable().optional(),
+  notifyThresholdDays: z.number().int().min(1).max(365),
+  notifySendHour: z.number().int().min(0).max(23),
+  notifySendMinute: z.number().int().min(0).max(59),
 });
 
 smtpRouter.put(
@@ -85,14 +96,28 @@ smtpRouter.put(
   })
 );
 
+const testSendSchema = z.object({
+  // Opsional: alamat tujuan uji bebas (2026-10-06, instruksi eksplisit user
+  // -- sebelumnya email uji selalu ke Alamat Pengirim, tidak bisa dites ke
+  // alamat lain seperti ilham.putra@nipseapaint.com tanpa mengubah Alamat
+  // Pengirim yang sebenarnya). Kosong/tidak dikirim = fallback ke Alamat
+  // Pengirim/Nama Pengguna seperti semula.
+  to: z.string().trim().email("Format alamat tujuan uji tidak valid.").optional(),
+});
+
 smtpRouter.post(
   "/test-send",
-  asyncRoute(async (_req, res) => {
+  asyncRoute(async (req, res) => {
     const setting = await getOrCreateSetting();
     if (!setting.enabled) {
       throw new HttpError(400, "Aktifkan dulu status SMTP sebelum mengirim email uji.");
     }
-    const target = setting.fromEmail || setting.user;
+    const parsed = testSendSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.issues[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const target = parsed.data.to || setting.fromEmail || setting.user;
     if (!target) {
       throw new HttpError(400, "Isi dulu Alamat Pengirim/Nama Pengguna sebelum mengirim email uji.");
     }

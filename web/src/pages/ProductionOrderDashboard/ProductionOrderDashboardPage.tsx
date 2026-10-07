@@ -639,6 +639,12 @@ export default function ProductionOrderDashboardPage() {
                   {r.leadTimeProses == null ? "Belum diproses" : `${r.leadTimeProses} hari kerja`}
                 </span>
               ),
+              // Angka MENTAH (bukan teks "X hari kerja") -- `csvValue` ini
+              // JUGA dipakai DataTable sbg accessor filter/sort (lihat
+              // komentar di DataTable.tsx): dgn angka mentah + filter default
+              // `smartColumnFilter` yg baru, ketik "8" cuma cocok ke baris
+              // yg PERSIS 8 hari (bukan ikut ke 18/28/80 krn kebetulan
+              // mengandung digit "8", bug yg dilaporkan user 2026-10-07).
               csvValue: (r) => (r.leadTimeProses == null ? "Belum diproses" : r.leadTimeProses),
             },
           ]}

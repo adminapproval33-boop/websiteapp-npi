@@ -4,6 +4,7 @@ import {
   ColumnFiltersState,
   ColumnOrderState,
   ColumnSizingState,
+  FilterFn,
   SortingState,
   VisibilityState,
   flexRender,
@@ -38,6 +39,37 @@ function loadPersisted(storageKey: string): Persisted {
     return {};
   }
 }
+
+/** Filter default per-kolom: cocokkan ANGKA secara TEPAT, bukan substring
+ * (2026-10-07, laporan user: filter "Lead Time Proses" diketik "1" ikut
+ * menampilkan "21 hari kerja"/"31 hari kerja"/dst -- substring match bawaan
+ * TanStack cuma membandingkan teks, dan "1" memang ada di dalam teks "21").
+ * Ambil angka di AWAL teks yg diketik user (abaikan satuan di belakangnya spt
+ * " hari kerja"/"%") lalu bandingkan PERSIS -- TAPI HANYA kalau nilai kolom
+ * itu sendiri berupa number (besaran terukur: hari, %, KG/Ltr, byte, jumlah,
+ * dll, lihat `csvValue` tiap kolom). Kolom yg nilainya STRING (nomor
+ * Order/Batch/Material, status, dsb) TETAP substring seperti sebelumnya --
+ * itu memang perilaku yg diinginkan di sana (cari sebagian nomor). Query
+ * tanpa angka di depan (mis. "Belum" utk baris leadTimeProses null, yg
+ * csvValue-nya "Belum diproses") jatuh ke substring juga. */
+const smartColumnFilter: FilterFn<any> = (row, columnId, filterValue) => {
+  const raw = row.getValue(columnId);
+  const query = String(filterValue ?? "").trim();
+  if (!query) return true;
+
+  if (typeof raw === "number") {
+    const leadingNumber = query.match(/^-?\d+(?:[.,]\d+)?/);
+    if (leadingNumber) {
+      const target = Number(leadingNumber[0].replace(",", "."));
+      return raw === target;
+    }
+    return String(raw).toLowerCase().includes(query.toLowerCase());
+  }
+
+  return String(raw ?? "")
+    .toLowerCase()
+    .includes(query.toLowerCase());
+};
 
 /**
  * Tabel "seperti Excel": lebar kolom bisa di-drag, klik header untuk sort,
@@ -161,6 +193,7 @@ export default function DataTable<T>({
   const table = useReactTable({
     data: rows,
     columns: tanColumns,
+    defaultColumn: { filterFn: smartColumnFilter },
     state: { sorting, columnFilters, columnVisibility, columnOrder, columnSizing },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,

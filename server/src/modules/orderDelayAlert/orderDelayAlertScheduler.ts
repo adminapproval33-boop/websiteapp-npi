@@ -1,6 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { sendMail } from "../../lib/mailer";
-import { getProductionOrderRows, ProductionOrderRow } from "../dashboard/dashboard.routes";
+import { getProductionOrderRows, ProductionOrderRow, parsePctGR } from "../dashboard/dashboard.routes";
+import { buildOrderDelayAlertPptx, StuckOrder } from "./orderDelayAlertSlide";
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // cek tiap 15 menit -- sama pola dgn backupScheduler.ts.
 
@@ -53,7 +54,7 @@ function currentStuckStage(row: ProductionOrderRow): string | null {
 }
 
 function digestHtml(
-  orders: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number }[],
+  orders: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number; pctGR: string | null }[],
   thresholdDays: number
 ) {
   const rows = orders
@@ -63,7 +64,7 @@ function digestHtml(
           o.materialDescription ?? "-"
         }</td><td style="padding:4px 10px;border:1px solid #ddd;">${o.stage}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:right;">${
           o.leadTimeProses
-        } hari</td></tr>`
+        } hari</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:right;">${o.pctGR ?? "-"}</td></tr>`
     )
     .join("");
   return `
@@ -74,6 +75,7 @@ function digestHtml(
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Material</th>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Tahap Macet</th>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:right;">Lead Time Proses</th>
+        <th style="padding:4px 10px;border:1px solid #ddd;text-align:right;">% GR</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -109,15 +111,28 @@ export async function runOrderDelayAlertCheck() {
     const rows = await getProductionOrderRows();
 
     // Kelompokkan order per tahap macetnya, hanya yg >= ambang GLOBAL.
-    const ordersByStage = new Map<string, { order: string; materialDescription: string | null; leadTimeProses: number }[]>();
+    const ordersByStage = new Map<string, StuckOrder[]>();
     for (const r of rows) {
       if (r.leadTimeProses === null || r.leadTimeProses < thresholdDays) continue;
+      // Order yg %GR-nya sudah >=95% dianggap selesai di sisi SAP -- jangan
+      // ikut dianggap "macet" lagi di MES walau tahap internalnya belum
+      // ditandai selesai (2026-10-12, instruksi eksplisit user, temuan dari
+      // order 1010165618 yg pctGR 100% tapi stage Milling-nya belum done).
+      const pctGRValue = parsePctGR(r.pctGR);
+      if (pctGRValue !== null && pctGRValue >= 95) continue;
       const stage = currentStuckStage(r);
       if (!stage || !STAGE_NOTIFY_FIELD[stage]) continue;
       const list = ordersByStage.get(stage) ?? [];
-      list.push({ order: r.order, materialDescription: r.materialDescription, leadTimeProses: r.leadTimeProses });
+      list.push({ order: r.order, materialDescription: r.materialDescription, leadTimeProses: r.leadTimeProses, pctGR: r.pctGR });
       ordersByStage.set(stage, list);
     }
+
+    // Lampiran PPTX konsolidasi (semua tahap, semua order macet) -- dibangun
+    // SEKALI per hari, dipakai ulang sebagai lampiran yang SAMA ke semua
+    // penerima (2026-10-12, instruksi eksplisit user: tidak dipersonalisasi
+    // per tahap seperti body HTML-nya, lihat orderDelayAlertSlide.ts).
+    const pptxBuffer =
+      ordersByStage.size > 0 ? await buildOrderDelayAlertPptx(ordersByStage, thresholdDays, todayKey()) : null;
 
     // Penerima = SIAPA SAJA yg sudah isi email, dicek per tahap yg dia
     // aktifkan sendiri (2026-10-01, revisi ke-2 eksplisit user: "kalau user
@@ -141,7 +156,8 @@ export async function runOrderDelayAlertCheck() {
     let recipientsNotified = 0;
     const involvedOrders = new Set<string>();
     for (const emp of employees) {
-      const matched: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number }[] = [];
+      const matched: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number; pctGR: string | null }[] =
+        [];
       for (const [stage, field] of Object.entries(STAGE_NOTIFY_FIELD)) {
         if (!field || !emp[field]) continue;
         const list = ordersByStage.get(stage) ?? [];
@@ -152,6 +168,7 @@ export async function runOrderDelayAlertCheck() {
         to: [emp.email!],
         subject: `[MES NPI] ${matched.length} Order macet >= ${thresholdDays} hari kerja`,
         html: digestHtml(matched, thresholdDays),
+        attachments: pptxBuffer ? [{ filename: `order-macet-${todayKey()}.pptx`, content: pptxBuffer }] : undefined,
       });
       recipientsNotified++;
       matched.forEach((m) => involvedOrders.add(m.order));

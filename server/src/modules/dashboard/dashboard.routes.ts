@@ -1502,7 +1502,7 @@ export interface TankStatusInfo {
  * walau Order-nya sendiri belum py entri Packing -- krn %GR tinggi berarti
  * isi tanki itu sendiri sudah nyaris habis diambil/di-deliver.
  */
-function parsePctGR(raw: string | null | undefined): number | null {
+export function parsePctGR(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const n = Number(raw.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;

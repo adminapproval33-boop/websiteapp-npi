@@ -56,12 +56,18 @@ async function getMailTransport() {
   return { transport, from: config.from };
 }
 
-export async function sendMail(opts: { to: string[]; subject: string; html: string }): Promise<void> {
+export async function sendMail(opts: {
+  to: string[];
+  subject: string;
+  html: string;
+  attachments?: { filename: string; content: Buffer }[];
+}): Promise<void> {
   const { transport, from } = await getMailTransport();
   await transport.sendMail({
     from,
     to: opts.to.join(", "),
     subject: opts.subject,
     html: opts.html,
+    attachments: opts.attachments,
   });
 }

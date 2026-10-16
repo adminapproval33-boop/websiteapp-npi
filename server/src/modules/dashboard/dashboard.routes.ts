@@ -1119,10 +1119,20 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
      * krn `codeTanki`-nya null). Cuma dipakai kalau nilai aslinya kosong --
      * baris yg SUDAH py Code Tanki sendiri (touch asli) TIDAK disentuh. */
     const tankStatusMap = await buildTankStatusMap();
+    // Order bisa saja ikut tampil occupant di >1 tank skaligus (mis. booking
+    // basi yg belum ter-release, lihat isBookingReleased di buildTankStatusMap)
+    // -- kalau itu terjadi, menangkan occupant dgn `since` PALING BARU, bukan
+    // asal tank pertama yg ketemu saat iterasi (2026-10-16, bugfix: laporan
+    // user Order 1030062141 kepilih tank yg lebih lama krn urutan iterasi).
     const currentTankByOrder = new Map<string, string>();
+    const currentTankSinceByOrder = new Map<string, number>();
     for (const tank of tankStatusMap.values()) {
-      if (tank.occupant && !currentTankByOrder.has(tank.occupant.order)) {
+      if (!tank.occupant) continue;
+      const since = tank.occupant.since.getTime();
+      const existingSince = currentTankSinceByOrder.get(tank.occupant.order);
+      if (existingSince === undefined || since > existingSince) {
         currentTankByOrder.set(tank.occupant.order, tank.code);
+        currentTankSinceByOrder.set(tank.occupant.order, since);
       }
     }
     const lastRealTankByOrder = new Map<string, { code: string; ms: number }>();
@@ -1742,17 +1752,24 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
 
   // Booking tanki (2026-09-20, instruksi eksplisit user, lihat lib/tankBooking.ts)
   // -- BEDA dari Input Manual biasa: booking otomatis GUGUR (tidak lagi "menang
-  // mutlak") begitu (a) Order yg sama SUDAH di-input di tahap yg di-booking
-  // (Premix/Aftermix) SESUDAH booking dibuat -- artinya tanki aslinya sudah
-  // tercatat lewat input proses itu sendiri, di tanki manapun -- atau (b) tanki
-  // itu dipakai Order LAIN (Premix/Aftermix/Milling/Colour Matching) sesudah
-  // booking. Dibandingkan pakai `timestamp` (kapan baris DISIMPAN), BUKAN
-  // Start/Finish yg diketik user, krn jam Start bisa lebih lampau drpd booking.
+  // mutlak") begitu (a) Order yg sama SUDAH py input asli di tahap yg
+  // di-booking (Premix/Aftermix), MAU SEBELUM ATAU SESUDAH booking dibuat --
+  // artinya tanki aslinya sudah tercatat lewat input proses itu sendiri, di
+  // tanki manapun, jadi booking-nya otomatis tidak relevan lagi -- atau (b)
+  // tanki itu dipakai Order LAIN (Premix/Aftermix/Milling/Colour Matching)
+  // SESUDAH booking. (2026-10-16, bugfix: laporan user Order 1030062141 --
+  // booking Aftermix dibuat 6 Okt, PADAHAL input Aftermix asli order itu
+  // sendiri sudah ada dari 2 Okt (SEBELUM booking) -- krn kondisi (a)
+  // sebelumnya mensyaratkan input asli HARUS sesudah booking, kasus
+  // "booking menyusul padahal input aslinya sudah lebih dulu ada" ini tidak
+  // pernah ter-release, tanki booking-nya terus "nyangkut" dianggap occupied
+  // selamanya. Kondisi (b) TETAP pakai syarat "sesudah booking" apa adanya --
+  // itu soal tanki direbut order lain, beda kasus dari (a)).
   function isBookingReleased(b: ManualTankEntry): boolean {
     const section = parseBookingSection(b.remark);
     if (!section) return false;
     const t = b.timestamp.getTime();
-    if (premixAftermix.some((r) => r.order === b.order && r.section === section && r.timestamp.getTime() > t)) return true;
+    if (premixAftermix.some((r) => r.order === b.order && r.section === section)) return true;
     if (premixAftermix.some((r) => r.codeTanki === b.codeTanki && r.order !== b.order && r.timestamp.getTime() > t)) return true;
     if (milling.some((r) => r.order !== b.order && (r.codeTanki1 === b.codeTanki || r.codeTanki2 === b.codeTanki) && r.timestamp.getTime() > t)) return true;
     if (colourMatching.some((r) => r.codeTanki === b.codeTanki && r.order !== b.order && r.timestamp.getTime() > t)) return true;
@@ -2974,6 +2991,12 @@ dashboardRouter.get(
       if (!status) continue;
 
       const master = masterByOrder.get(order);
+
+      // Order dgn %GR "9999%" = status Teco (ditutup teknis/dibatalkan di
+      // SAP) -- jangan ditampilkan di dashboard Quality Check Review
+      // (2026-10-12, instruksi eksplisit user).
+      if (parsePctGR(master?.pctGR) !== null && parsePctGR(master?.pctGR)! >= 9999) continue;
+
       const source = check ?? adminQc!;
       rows.push({
         order,

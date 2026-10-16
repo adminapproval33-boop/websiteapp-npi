@@ -8,6 +8,7 @@ import { sanitizeNik } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 import { notFutureDate } from "../../lib/dateValidation";
 import { overwriteSheet } from "../../lib/googleSheets";
+import { parsePctGR } from "../dashboard/dashboard.routes";
 
 export const approvalRouter = Router();
 approvalRouter.use(requireAuth);
@@ -471,13 +472,21 @@ async function fetchLotHistory(filterCol: string, filterValue: string, statusFil
   });
   const pctGrByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
 
-  const enriched = rows.map((row) => ({
-    ...row,
-    pctGR: pctGrByOrder.get(row.order) ?? null,
-    status: computeStatus(row),
-    processingTime: formatProcessingTime(row.timestamp, row.finishApp),
-    hasAttachment: row.attachments.length > 0,
-  }));
+  const enriched = rows
+    .map((row) => ({
+      ...row,
+      pctGR: pctGrByOrder.get(row.order) ?? null,
+      status: computeStatus(row),
+      processingTime: formatProcessingTime(row.timestamp, row.finishApp),
+      hasAttachment: row.attachments.length > 0,
+    }))
+    // Order dgn %GR "9999%" = status Teco (ditutup teknis/dibatalkan di SAP)
+    // -- jangan ditampilkan di dashboard Approval (2026-10-12, instruksi
+    // eksplisit user).
+    .filter((r) => {
+      const pctGRValue = parsePctGR(r.pctGR);
+      return pctGRValue === null || pctGRValue < 9999;
+    });
 
   return statusFilter ? enriched.filter((r) => r.status === statusFilter) : enriched;
 }

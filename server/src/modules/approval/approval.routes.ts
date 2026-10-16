@@ -451,7 +451,7 @@ const FILTERABLE_COLUMNS = [
 /** Dipakai bareng oleh GET /lot-history & POST /lot-history/sync-to-sheet
  * (2026-08-23) supaya filter & kolom turunan (status/processing time/lampiran)
  * SELALU konsisten antara yang ditampilkan di tabel dan yang di-sync. */
-async function fetchLotHistory(filterCol: string, filterValue: string, statusFilter: string) {
+export async function fetchLotHistory(filterCol: string, filterValue: string, statusFilter: string) {
   const where =
     filterValue && (FILTERABLE_COLUMNS as readonly string[]).includes(filterCol)
       ? { [filterCol]: { contains: filterValue, mode: "insensitive" as const } }

@@ -2,6 +2,7 @@ import { prisma } from "../../lib/prisma";
 import { sendMail } from "../../lib/mailer";
 import { getProductionOrderRows, ProductionOrderRow, parsePctGR } from "../dashboard/dashboard.routes";
 import { buildOrderDelayAlertPptx, StuckOrder } from "./orderDelayAlertSlide";
+import { buildApprovalReportPptx } from "../approval/approvalReportSlide";
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000; // cek tiap 15 menit -- sama pola dgn backupScheduler.ts.
 
@@ -153,6 +154,19 @@ export async function runOrderDelayAlertCheck() {
       },
     });
 
+    // Lampiran KHUSUS utk penerima yg opt-in tahap Approval (2026-10-16,
+    // instruksi eksplisit user) -- format "Laporan Dashboard Approval" (chart
+    // T1/T2/>T2 per segmen dihitung LIVE + Gap Analysis statis, lihat
+    // approvalReportSlide.ts), MENGGANTIKAN lampiran konsolidasi biasa utk
+    // penerima itu -- bukan dilampirkan dobel. Dibangun lazy (sekali saja,
+    // SAAT dibutuhkan) supaya hari2 tanpa penerima Approval tidak perlu query
+    // ApprovalSchedule sama sekali.
+    let approvalReportBuffer: Buffer | null = null;
+    async function getApprovalReportBuffer(): Promise<Buffer> {
+      if (!approvalReportBuffer) approvalReportBuffer = await buildApprovalReportPptx();
+      return approvalReportBuffer;
+    }
+
     let recipientsNotified = 0;
     const involvedOrders = new Set<string>();
     for (const emp of employees) {
@@ -164,11 +178,19 @@ export async function runOrderDelayAlertCheck() {
         matched.push(...list.map((o) => ({ ...o, stage })));
       }
       if (matched.length === 0) continue;
+
+      const hasApprovalStage = matched.some((m) => m.stage === "Approval");
+      const attachment = hasApprovalStage
+        ? { filename: `approval-dashboard-report-${todayKey()}.pptx`, content: await getApprovalReportBuffer() }
+        : pptxBuffer
+          ? { filename: `order-macet-${todayKey()}.pptx`, content: pptxBuffer }
+          : null;
+
       await sendMail({
         to: [emp.email!],
         subject: `[MES NPI] ${matched.length} Order macet >= ${thresholdDays} hari kerja`,
         html: digestHtml(matched, thresholdDays),
-        attachments: pptxBuffer ? [{ filename: `order-macet-${todayKey()}.pptx`, content: pptxBuffer }] : undefined,
+        attachments: attachment ? [attachment] : undefined,
       });
       recipientsNotified++;
       matched.forEach((m) => involvedOrders.add(m.order));

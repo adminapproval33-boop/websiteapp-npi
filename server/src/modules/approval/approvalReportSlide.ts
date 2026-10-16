@@ -19,6 +19,19 @@ const LOGO_PATH = path.join(__dirname, "../../../../web/public/brand-logo.png");
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+const FONT_BODY = `Calibri`;
+const FONT_HEAD = `Cambria`;
+const BAR_COL = `col`;
+const BAR_CLUSTERED = `clustered`;
+const LEGEND_RIGHT = `r`;
+const LABEL_OUTEND = `outEnd`;
+const GRID_COLOR = `E7DCC8`;
+const GRID_NONE = `none`;
+const PROC_TITLE = `Processing Time by Submit-to-Customer Month Cohort (current age status)`;
+const PROC_METHOD_PREFIX = `Methodology: `;
+const SOURCE_LABEL = `Source: mes.nipseapaint.com:8090/dashboard/approval`;
+const GAP_TITLE = `Gap Analysis & Action Plan by Segment`;
+
 // T1/T2/>T2 = jumlah percobaan sampai OK, dibaca dari penanda "T<angka>"
 // tertinggi di kolom Remark (mis. "T1: NG ... T2: OK" = 2x percobaan).
 // Remark kosong/tanpa penanda dianggap OK langsung (T1). SAMA PERSIS dgn
@@ -33,6 +46,24 @@ function maxTry(remark: string | null): number {
 
 function monthKey(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// Bucket umur "hari sejak submit" -- SAMA PERSIS dgn AGE_BUCKETS/bucketOf di
+// OpenApprovalWorklist.tsx (kartu KPI "Lama Proses" dashboard Approval).
+const AGE_BUCKETS = [
+  { key: "1-7", color: "27AE60" },
+  { key: "8-14", color: "58D68D" },
+  { key: "15-21", color: AMBER },
+  { key: "21-30", color: "E67E22" },
+  { key: ">30", color: "922B21" },
+] as const;
+type AgeBucketKey = (typeof AGE_BUCKETS)[number]["key"];
+function bucketOfDays(days: number): AgeBucketKey {
+  if (days <= 7) return "1-7";
+  if (days <= 14) return "8-14";
+  if (days <= 21) return "15-21";
+  if (days <= 30) return "21-30";
+  return ">30";
 }
 
 // Gap Analysis & Action Plan -- narasi STATIS (2026-10-16, instruksi eksplisit
@@ -111,8 +142,6 @@ export async function buildApprovalReportPptx(): Promise<Buffer> {
     segMap.get(mk)![bucket]++;
   }
 
-  const segments = Array.from(bySegMonth.keys()).sort();
-
   // Rentang bulan sumbu-X: dari bulan data REAL paling awal tahun ini, s/d
   // Desember tahun berjalan (bulan yg belum terjadi = 0, placeholder --
   // 2026-10-13, instruksi eksplisit Pak Jaya: "biar ada Sept Oct Nov Dec nya
@@ -131,6 +160,36 @@ export async function buildApprovalReportPptx(): Promise<Buffer> {
   for (let i = earliestMonthIdx; i <= 11; i++) monthIdxRange.push(i);
   const ytdLabel = `Ytd.${String(currentYear).slice(-2)}`;
   const monthLabels = [...monthIdxRange.map((i) => MONTH_ABBR[i]), ytdLabel];
+
+  // Processing Time: utk tiap KOHORT bulan Submit Cust, distribusi umur SAAT
+  // INI (hari sejak submit, metodologi SAMA PERSIS dgn kartu "Lama Proses" di
+  // dashboard Approval) -- dihitung dari SEMUA order (bukan cuma yg closed),
+  // sama seperti kartu KPI aslinya.
+  const now = Date.now();
+  const byCohortMonth = new Map<string, Record<AgeBucketKey, number>>();
+  for (const r of rows) {
+    const startIso = r.submitToCustomer ?? r.timestamp;
+    if (!startIso) continue;
+    const mk = monthKey(startIso as Date);
+    if (!mk.startsWith(`${currentYear}-`)) continue;
+    const days = Math.max(0, Math.floor((now - (startIso as Date).getTime()) / 86400000));
+    const bucket = bucketOfDays(days);
+    if (!byCohortMonth.has(mk)) byCohortMonth.set(mk, { "1-7": 0, "8-14": 0, "15-21": 0, "21-30": 0, ">30": 0 });
+    byCohortMonth.get(mk)![bucket]++;
+  }
+  function cohortSeriesFor(bucketKey: AgeBucketKey): number[] {
+    const values = monthIdxRange.map((idx) => {
+      const mk = `${currentYear}-${String(idx + 1).padStart(2, "0")}`;
+      return byCohortMonth.get(mk)?.[bucketKey] ?? 0;
+    });
+    const ytd = values.reduce((a, b) => a + b, 0);
+    return [...values, ytd];
+  }
+
+  // Diurutkan berdasar total order TERBANYAK dulu (bukan alfabet) -- sama
+  // dgn urutan di file referensi (2026-10-16, instruksi eksplisit user:
+  // samakan formatnya).
+  const segments = Array.from(bySegMonth.keys()).sort((a, b) => seriesFor(b).total - seriesFor(a).total);
 
   function seriesFor(seg: string) {
     const segMap = bySegMonth.get(seg) ?? new Map();
@@ -199,62 +258,104 @@ export async function buildApprovalReportPptx(): Promise<Buffer> {
     { x: 0.5, y: 0.82, w: 12.3, fontFace: "Calibri", fontSize: 11.5, color: MUTED, isTextBox: true, margin: 0 }
   );
 
-  const legendT = ["T1 (OK on 1st try)", "T2 (2 tries)", ">T2 (>2 tries)"];
-  const legendColors = [GREEN, YELLOW, RED];
-  let legendX = 0.5;
-  legendT.forEach((label, i) => {
-    s2.addShape(pres.ShapeType.rect, { x: legendX, y: 1.28, w: 0.16, h: 0.16, fill: { color: legendColors[i] }, line: { type: "none" } });
-    s2.addText(label, { x: legendX + 0.22, y: 1.19, w: 2.5, fontFace: "Calibri", fontSize: 10.5, color: INK, isTextBox: true, margin: 0 });
-    legendX += 2.5;
-  });
-
-  const panelCount = Math.max(segments.length, 1);
-  const totalGapWidth = 0.27 * (panelCount - 1);
-  const chartW = (12.3 - totalGapWidth) / panelCount;
-  const chartXs = segments.map((_, i) => 0.5 + i * (chartW + 0.27));
+  // Layout: 3 chart full-width ditumpuk VERTIKAL (bukan 3 panel berdampingan)
+  // + legend vertikal di kanan, sejajar chart tengah -- sama persis dgn
+  // referensi (2026-10-16, instruksi eksplisit user: samakan formatnya).
+  // Posisi diambil dari koordinat EMU file referensi (dikonversi ke inch,
+  // 1in = 914400 EMU).
+  const CHART_X = 0.5;
+  const CHART_W = 11.3;
+  const CHART_H = 1.55;
+  const ROW_GAP = 1.86;
+  const FIRST_ROW_Y = 1.15;
+  const SERIES_T1 = `T1`;
+  const SERIES_T2 = `T2`;
+  const SERIES_OVER = `>T2`;
+  const ALIGN_CENTER = `center`;
 
   segments.forEach((seg, i) => {
     const { values, total } = seriesFor(seg);
-    s2.addText(seg, {
-      x: chartXs[i], y: 1.58, w: chartW, fontFace: "Calibri", fontSize: 14, bold: true, color: NAVY,
-      align: "center", isTextBox: true, margin: 0,
-    });
-    s2.addText(`${fmtNum(total)} orders (${ytdLabel})`, {
-      x: chartXs[i], y: 1.87, w: chartW, fontFace: "Calibri", fontSize: 10, color: MUTED,
-      align: "center", isTextBox: true, margin: 0,
-    });
+    const rowY = FIRST_ROW_Y + i * ROW_GAP;
+    s2.addText(
+      [
+        { text: seg, options: { color: NAVY, bold: true } },
+        { text: `   ${fmtNum(total)} orders (${ytdLabel})`, options: { color: MUTED, bold: true } },
+      ],
+      { x: CHART_X, y: rowY, w: CHART_W, fontFace: FONT_BODY, fontSize: 14, align: ALIGN_CENTER, isTextBox: true, margin: 0 }
+    );
     s2.addChart(
       pres.ChartType.bar,
       [
-        { name: "T1", labels: monthLabels, values: values.T1 },
-        { name: "T2", labels: monthLabels, values: values.T2 },
-        { name: ">T2", labels: monthLabels, values: values.over },
+        { name: SERIES_T1, labels: monthLabels, values: values.T1 },
+        { name: SERIES_T2, labels: monthLabels, values: values.T2 },
+        { name: SERIES_OVER, labels: monthLabels, values: values.over },
       ],
       {
-        x: chartXs[i], y: 2.2, w: chartW, h: 2.65,
-        barDir: "col", barGrouping: "clustered",
+        x: CHART_X, y: rowY + 0.25, w: CHART_W, h: CHART_H,
+        barDir: BAR_COL, barGrouping: BAR_CLUSTERED,
         showTitle: false, showLegend: false,
-        showValue: true, dataLabelPosition: "outEnd",
-        dataLabelColor: INK, dataLabelFontSize: 7, dataLabelFontFace: "Calibri", dataLabelFontBold: true,
+        showValue: true, dataLabelPosition: LABEL_OUTEND,
+        dataLabelColor: INK, dataLabelFontSize: 7, dataLabelFontFace: FONT_BODY, dataLabelFontBold: true,
         chartColors: [GREEN, YELLOW, RED],
         catAxisLabelColor: INK, valAxisLabelColor: INK,
         catAxisLabelFontSize: 9, valAxisLabelFontSize: 8,
-        catAxisLabelFontFace: "Calibri", valAxisLabelFontFace: "Calibri",
-        valGridLine: { color: "E7DCC8", size: 1 }, catGridLine: { style: "none" },
+        catAxisLabelFontFace: FONT_BODY, valAxisLabelFontFace: FONT_BODY,
+        valGridLine: { color: GRID_COLOR, size: 1 }, catGridLine: { style: GRID_NONE },
         valAxisMinVal: 0,
       }
     );
   });
 
-  s2.addText(
-    `Methodology: T1/T2/>T2 are calculated from orders with “Oke Approval” status (closed), grouped by Finish App month, based on the highest “T<number>” marker in the Remark column. Future months in ${currentYear} show 0 (not yet occurred as of this snapshot) and will fill in automatically as each month passes. ${ytdLabel} = year-to-date total.`,
-    { x: 0.5, y: 7.0, w: 12.3, fontFace: "Calibri", fontSize: 8.5, italic: true, color: MUTED, isTextBox: true, margin: 0 }
-  );
+  // Legend vertikal di kanan, sejajar baris tengah (2nd chart) -- sama posisi
+  // relatif dgn file referensi.
+  const legendLabel1 = `T1 (OK on 1st try)`;
+  const legendLabel2 = `T2 (2 tries)`;
+  const legendLabel3 = `>T2 (>2 tries)`;
+  const legendT = [legendLabel1, legendLabel2, legendLabel3];
+  const legendColors = [GREEN, YELLOW, RED];
+  const legendBaseY = FIRST_ROW_Y + ROW_GAP + 0.65;
+  legendT.forEach((label, i) => {
+    const y = legendBaseY + i * 0.27;
+    s2.addShape(pres.ShapeType.rect, { x: 11.9, y, w: 0.16, h: 0.16, fill: { color: legendColors[i] }, line: { type: GRID_NONE } });
+    s2.addText(label, { x: 12.1, y: y - 0.03, w: 1.2, fontFace: FONT_BODY, fontSize: 10.5, bold: true, color: INK, isTextBox: true, margin: 0 });
+  });
 
-  // ---------------- Slide 3: Gap Analysis & Action Plan (statis) ----------------
+  // ---------------- Slide 3: Processing Time by Submit-to-Customer Month Cohort (LIVE) ----------------
+  const s3Proc = pres.addSlide();
+  s3Proc.background = { color: PAPER };
+  s3Proc.addText(PROC_TITLE, {
+    x: 0.5, y: 0.35, w: 12.3, fontFace: FONT_HEAD, fontSize: 24, bold: true, color: NAVY, isTextBox: true, margin: 0,
+  });
+  s3Proc.addChart(
+    pres.ChartType.bar,
+    AGE_BUCKETS.map((b) => ({ name: b.key, labels: monthLabels, values: cohortSeriesFor(b.key) })),
+    {
+      x: 0.5, y: 1.1, w: 12.3, h: 5.3,
+      barDir: BAR_COL, barGrouping: BAR_CLUSTERED,
+      showTitle: false,
+      showLegend: true, legendPos: LEGEND_RIGHT, legendFontFace: FONT_BODY, legendFontSize: 10, legendColor: INK,
+      showValue: true, dataLabelPosition: LABEL_OUTEND,
+      dataLabelColor: INK, dataLabelFontSize: 9, dataLabelFontFace: FONT_BODY,
+      chartColors: AGE_BUCKETS.map((b) => b.color),
+      catAxisLabelColor: INK, valAxisLabelColor: INK,
+      catAxisLabelFontSize: 11, valAxisLabelFontSize: 9,
+      catAxisLabelFontFace: FONT_BODY, valAxisLabelFontFace: FONT_BODY,
+      valGridLine: { color: GRID_COLOR, size: 1 }, catGridLine: { style: GRID_NONE },
+      valAxisMinVal: 0,
+    }
+  );
+  s3Proc.addText(
+    PROC_METHOD_PREFIX + `grouped by the month each order was submitted to the customer; bars show that cohort's CURRENT age distribution (days since submit, as of this snapshot) -- same methodology as the “Processing Time” cards on the Approval dashboard. ${ytdLabel} = year-to-date total.`,
+    { x: 0.5, y: 6.55, w: 12.3, fontFace: FONT_BODY, fontSize: 9.5, italic: true, color: MUTED, isTextBox: true, margin: 0 }
+  );
+  s3Proc.addText(SOURCE_LABEL, {
+    x: 0.5, y: 7.1, w: 12.3, fontFace: FONT_BODY, fontSize: 10, color: MUTED, isTextBox: true, margin: 0,
+  });
+
+  // ---------------- Slide 4: Gap Analysis & Action Plan (statis) ----------------
   const s3 = pres.addSlide();
   s3.background = { color: PAPER };
-  s3.addText("Gap Analysis & Action Plan by Segment", {
+  s3.addText(GAP_TITLE, {
     x: 0.5, y: 0.35, w: 12.3, fontFace: "Cambria", fontSize: 26, bold: true, color: NAVY, isTextBox: true, margin: 0,
   });
   s3.addText(

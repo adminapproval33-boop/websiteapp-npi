@@ -23,6 +23,7 @@ import WeeklyScheduleCalendar, {
   parseDayDropId,
   parseInsertBeforeId,
 } from "../../components/WeeklyScheduleCalendar";
+import BookingEditModal from "../../components/BookingEditModal";
 import Modal from "../../components/Modal";
 import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
 import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
@@ -316,6 +317,9 @@ export default function PremixAftermixPage({
   } | null>(null);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleError, setScheduleError] = useState("");
+  /** Kartu Kalender yg di-double-click -> buka popup Booking Tanki (2026-10-20,
+   * instruksi eksplisit user). */
+  const [bookingEv, setBookingEv] = useState<ScheduleEvent | null>(null);
 
   const pwoScheduleQuery = useQuery({
     queryKey: ["pwo-schedule", section],
@@ -346,6 +350,12 @@ export default function PremixAftermixPage({
     },
     onSuccess: () => {
       setScheduleError("");
+      // Jadwalkan lewat dialog ini bisa ikut menggeser "Rencana Mulai" booking
+      // tanki yg sudah ada (lihat sync di POST /pwo-schedule) -- invalidate
+      // query booking-nya jg, supaya popup Booking Tanki langsung tampil
+      // tanggal baru begitu dibuka lagi TANPA perlu refresh manual (2026-10-20,
+      // bugfix instruksi eksplisit user).
+      if (scheduleTarget) queryClient.invalidateQueries({ queryKey: ["tank-booking-list", scheduleTarget.order] });
       setScheduleTarget(null);
       queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
     },
@@ -419,7 +429,15 @@ export default function PremixAftermixPage({
         batch: payload.batch ?? "",
         scheduledDate: payload.scheduledDate,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
+      // Drag-drop pindah hari ikut menggeser "Rencana Mulai" booking tanki yg
+      // sudah ada (lihat sync di POST /pwo-schedule) -- invalidate query
+      // booking-nya jg, supaya popup Booking Tanki langsung tampil tanggal
+      // baru begitu dibuka lagi TANPA perlu refresh manual (2026-10-20,
+      // bugfix instruksi eksplisit user).
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list", variables.order] });
+    },
     onError: (err) => setScheduleError(err instanceof ApiError ? err.message : "Gagal menjadwalkan lewat drag-drop."),
   });
 
@@ -1264,6 +1282,7 @@ export default function PremixAftermixPage({
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  onOpenBooking={setBookingEv}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1426,6 +1445,7 @@ export default function PremixAftermixPage({
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  onOpenBooking={setBookingEv}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1542,6 +1562,8 @@ export default function PremixAftermixPage({
           onConfirm={confirmTankChange}
         />
       )}
+
+      {bookingEv && <BookingEditModal ev={bookingEv} section={section} onClose={() => setBookingEv(null)} />}
     </div>
   );
 }

@@ -9,6 +9,52 @@ import { bookingRemark, parseBookingSection, type BookingSection } from "../../l
 export const tankManualInputRouter = Router();
 tankManualInputRouter.use(requireAuth);
 
+/** Suntik/perbarui jadwal Kalender PWO Schedule & Queue dari "Rencana Mulai"
+ * booking tanki -- dipakai BAIK oleh POST /booking (booking baru) MAUPUN PUT
+ * /booking/:id (edit booking lewat double-click kartu Kalender, 2026-10-20,
+ * instruksi eksplisit user: popup edit harus py kolom Rencana Mulai jg spt
+ * popup Booking yg asli, jadi perilaku auto-schedule-nya harus konsisten di
+ * kedua jalur). `scheduledDate` di-truncate ke tengah malam UTC dari TANGGAL
+ * KALENDER (bukan jam) Rencana Mulai -- SAMA PERSIS konvensi yg dipakai
+ * drag-drop manual (lihat buildDayDropId di WeeklyScheduleCalendar.tsx). */
+async function syncPwoScheduleFromPlannedStart(params: {
+  section: "PREMIX" | "AFTERMIX";
+  order: string;
+  materialNumber?: string | null;
+  materialDescription?: string | null;
+  batch?: string | null;
+  plannedStart: Date;
+  createdBy: string;
+}) {
+  const { section, order, materialNumber, materialDescription, batch, plannedStart: p, createdBy } = params;
+  const scheduledDate = new Date(Date.UTC(p.getFullYear(), p.getMonth(), p.getDate()));
+  const maxSeq = await prisma.pwoSchedule.aggregate({
+    where: { section, scheduledDate },
+    _max: { sequence: true },
+  });
+  const sequence = (maxSeq._max.sequence ?? -1) + 1;
+  await prisma.pwoSchedule.upsert({
+    where: { order_section: { order, section } },
+    create: {
+      order,
+      section,
+      materialNumber: materialNumber ?? null,
+      materialDescription: materialDescription ?? null,
+      batch: batch ?? null,
+      scheduledDate,
+      sequence,
+      createdBy,
+    },
+    update: {
+      materialNumber: materialNumber ?? null,
+      materialDescription: materialDescription ?? null,
+      batch: batch ?? null,
+      scheduledDate,
+      sequence,
+    },
+  });
+}
+
 const saveSchema = z.object({
   codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
   order: z.string().trim().min(1, "Order wajib diisi."),
@@ -128,41 +174,16 @@ tankManualInputRouter.post(
     // ditentukan pas booking). Kalau Rencana Mulai kosong, Order ini muncul
     // di daftar List biasa lewat /premix-pwo-queue & /aftermix-pwo-queue
     // (lihat perubahan di premixAftermix.routes.ts) -- menunggu di-drag manual
-    // spt Order lain. `scheduledDate` di-truncate ke tengah malam UTC dari
-    // TANGGAL KALENDER (bukan jam) Rencana Mulai -- SAMA PERSIS konvensi yg
-    // dipakai drag-drop manual (lihat buildDayDropId di
-    // WeeklyScheduleCalendar.tsx: hari ditentukan dari getFullYear/Month/Date
-    // LOKAL lalu dikirim sbg string tanggal polos, yg oleh z.coerce.date()
-    // ditafsirkan sbg tengah malam UTC hari itu) -- kalau construct pakai
-    // `new Date(y,m,d)` biasa (bukan Date.UTC), nilainya bakal tengah malam
-    // WIB = 17:00 UTC HARI SEBELUMNYA, geser 1 hari dari yg dimaksud.
+    // spt Order lain.
     if (rest.plannedStart) {
-      const p = rest.plannedStart;
-      const scheduledDate = new Date(Date.UTC(p.getFullYear(), p.getMonth(), p.getDate()));
-      const maxSeq = await prisma.pwoSchedule.aggregate({
-        where: { section, scheduledDate },
-        _max: { sequence: true },
-      });
-      const sequence = (maxSeq._max.sequence ?? -1) + 1;
-      await prisma.pwoSchedule.upsert({
-        where: { order_section: { order: rest.order, section } },
-        create: {
-          order: rest.order,
-          section,
-          materialNumber: rest.materialNumber ?? null,
-          materialDescription: rest.materialDescription ?? null,
-          batch: rest.batch ?? null,
-          scheduledDate,
-          sequence,
-          createdBy: req.auth!.nik,
-        },
-        update: {
-          materialNumber: rest.materialNumber ?? null,
-          materialDescription: rest.materialDescription ?? null,
-          batch: rest.batch ?? null,
-          scheduledDate,
-          sequence,
-        },
+      await syncPwoScheduleFromPlannedStart({
+        section,
+        order: rest.order,
+        materialNumber: rest.materialNumber,
+        materialDescription: rest.materialDescription,
+        batch: rest.batch,
+        plannedStart: rest.plannedStart,
+        createdBy: req.auth!.nik,
       });
     }
 
@@ -204,6 +225,71 @@ tankManualInputRouter.post(
       await prisma.pwoSchedule.deleteMany({ where: { order: parsed.data.order, section: { in: sections } } });
     }
     res.json({ success: true, message: "Booking tanki dibatalkan." });
+  })
+);
+
+const editBookingSchema = z.object({
+  codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+  note: z.string().optional(),
+  // Sama pola spt `bookingSchema` POST -- kosong = tidak diisi/tidak diubah.
+  plannedStart: z
+    .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
+    .transform((v) => (v ? v : null))
+    .optional(),
+});
+
+/** Edit booking tanki YANG SUDAH ADA, dipicu double-click kartu Kalender PWO
+ * Schedule (2026-10-20, instruksi eksplisit user) -- BEDA dari generic
+ * `PUT /:id` di bawah (itu pakai `saveSchema`, py field wajib yg tidak relevan
+ * utk booking, mis. Leader/SPV). Cuma boleh menimpa baris yg memang booking
+ * (remark berawalan "Booking Premix"/"Booking Aftermix", lihat
+ * lib/tankBooking.ts) -- baris Input Manual Tank Monitoring biasa DITOLAK,
+ * supaya endpoint ini tidak disalahgunakan menimpa baris itu. `plannedStart`
+ * terisi -> ikut suntik/geser jadwal Kalender (sama fungsi `syncPwoSchedule-
+ * FromPlannedStart` yg dipakai POST /booking), SUPAYA konsisten dgn popup
+ * create aslinya -- popup edit ini memang dibuat identik dgn popup Booking yg
+ * asli (termasuk kolom Rencana Mulai-nya), jadi perilakunya jg harus identik.
+ * Kalau field ini dikosongkan (tidak diisi) di form edit, jadwal Kalender yg
+ * SUDAH ADA dibiarkan apa adanya (TIDAK dihapus) -- field kosong di sini
+ * artinya "jangan ubah apa yg sudah terjadwal", bukan "hapus dari Kalender"
+ * (pembatalan jadwal py jalur sendiri lewat drag-drop/hapus kartu). */
+tankManualInputRouter.put(
+  "/booking/:id",
+  requireWrite,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = editBookingSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const existing = await prisma.tankManualInput.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new HttpError(404, "Booking tanki tidak ditemukan.");
+    const section = parseBookingSection(existing.remark);
+    if (!section) throw new HttpError(400, "Baris ini bukan booking tanki, tidak bisa diedit lewat endpoint ini.");
+    if (!(await isValidTankCode(parsed.data.codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
+    const updated = await prisma.tankManualInput.update({
+      where: { id: req.params.id },
+      data: {
+        codeTanki: parsed.data.codeTanki,
+        remark: bookingRemark(section, parsed.data.note),
+        ...(parsed.data.plannedStart ? { plannedStart: parsed.data.plannedStart } : {}),
+      },
+    });
+    if (parsed.data.plannedStart) {
+      await syncPwoScheduleFromPlannedStart({
+        section,
+        order: existing.order,
+        materialNumber: existing.materialNumber,
+        materialDescription: existing.materialDescription,
+        batch: existing.batch,
+        plannedStart: parsed.data.plannedStart,
+        createdBy: req.auth!.nik,
+      });
+    }
+    res.json({ success: true, message: "Booking tanki berhasil diperbarui.", data: updated });
   })
 );
 

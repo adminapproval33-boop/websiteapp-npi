@@ -710,9 +710,18 @@ premixAftermixRouter.get(
     });
     const todayAtpByOrder = new Map(masterOrders.map((m) => [m.order, m.todayAtp]));
 
+    // Code Tanki booking -- SAMA PERSIS pola "live join" todayAtp di atas,
+    // bukan disimpan di PwoSchedule sendiri (2026-10-20, instruksi eksplisit
+    // user: tampilkan tanki yg dibooking di kartu Kalender).
+    const bookings = await fetchSectionBookings(section);
+
     res.json({
       success: true,
-      data: rows.map((r) => ({ ...r, todayAtp: todayAtpByOrder.get(r.order) ?? null })),
+      data: rows.map((r) => ({
+        ...r,
+        todayAtp: todayAtpByOrder.get(r.order) ?? null,
+        codeTanki: bookings.get(r.order)?.codeTanki ?? null,
+      })),
     });
   })
 );
@@ -744,6 +753,22 @@ premixAftermixRouter.post(
       create: { order, section, scheduledDate, sequence, ...rest, createdBy: req.auth!.nik },
       update: { scheduledDate, sequence, ...rest },
     });
+
+    // Kartu yg Order-nya py booking aktif -- ikut sinkronkan "Rencana Mulai"
+    // booking ke hari baru ini (2026-10-20, bugfix instruksi eksplisit user:
+    // drag-drop pindah hari TIDAK ikut update plannedStart booking, jadi
+    // popup edit booking tetap nampilin tanggal LAMA walau kartu Kalender-nya
+    // sudah pindah hari lewat drag). Arah sebaliknya dari
+    // `syncPwoScheduleFromPlannedStart` di tankManualInput.routes.ts (field
+    // Rencana Mulai mengubah PwoSchedule) -- kedua arah harus konsisten,
+    // supaya drag-drop kartu ATAU edit Rencana Mulai sama-sama jadi satu
+    // sumber kebenaran, bukan dua yg bisa saling menyimpang.
+    const bookings = await fetchSectionBookings(section);
+    const booking = bookings.get(order);
+    if (booking) {
+      await prisma.tankManualInput.update({ where: { id: booking.id }, data: { plannedStart: scheduledDate } });
+    }
+
     res.json({ success: true, message: "Jadwal berhasil disimpan.", data: saved });
   })
 );

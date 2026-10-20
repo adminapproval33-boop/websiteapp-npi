@@ -19,6 +19,11 @@ export interface ScheduleEvent {
    * PwoSchedule sendiri, lihat komentar GET /pwo-schedule di
    * premixAftermix.routes.ts. */
   todayAtp: string | null;
+  /** Code Tanki booking (lib/tankBooking.ts) utk Order ini, kalau ada --
+   * SAMA spt todayAtp, live join dari TankManualInput, BUKAN disimpan di
+   * PwoSchedule sendiri (2026-10-20, instruksi eksplisit user). `null` kalau
+   * Order ini belum dibooking sama sekali. */
+  codeTanki: string | null;
 }
 
 const DAY_LABELS = ["SEN", "SEL", "RAB", "KAM", "JUM", "SAB"];
@@ -112,6 +117,19 @@ function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
+/** Badge "Overdue"/"On Time" di kartu (2026-10-20, instruksi eksplisit user) --
+ * bandingkan TANGGAL KALENDER saja (bukan timestamp persis), krn Kalender ini
+ * sendiri tidak py mekanisme kedaluwarsa otomatis (kartu tidak pernah hilang
+ * sendiri walau tanggalnya sudah lewat, lihat GET /pwo-schedule -- badge ini
+ * cuma indikator visual, bukan filter). */
+function isOverdue(scheduledDateIso: string): boolean {
+  const d = new Date(scheduledDateIso);
+  const scheduledOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return scheduledOnly.getTime() < todayOnly.getTime();
+}
+
 /** Kartu 1 jadwal dalam list hari -- draggable (pindah hari) + tombol ▲▼
  * (ubah urutan dalam hari yg sama, 2026-08-05 instruksi eksplisit user:
  * "nomor urutan"). SENGAJA tombol ▲▼ dipilih drpd drag-reorder halus dalam 1
@@ -129,6 +147,7 @@ function EventCard({
   onDelete,
   selected,
   onToggleSelect,
+  onOpenBooking,
 }: {
   ev: ScheduleEvent;
   seqDisplay: number;
@@ -142,6 +161,10 @@ function EventCard({
    * eksplisit user: pilih banyak Order sekaligus lalu drag bareng). */
   selected: boolean;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+  /** Double-click kartu -> buka popup booking tanki (buat baru kalau Order
+   * ini belum dibooking, atau edit kalau sudah -- lihat BookingEditModal.tsx,
+   * 2026-10-20 instruksi eksplisit user). */
+  onOpenBooking: (ev: ScheduleEvent) => void;
 }) {
   const dragId = buildEventDragId(ev.id);
   const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
@@ -164,7 +187,11 @@ function EventCard({
       {...listeners}
       {...attributes}
       onClick={(e) => onToggleSelect(dragId, e)}
-      title={`${ev.order} — ${ev.materialDescription ?? ""} (tarik utk pindah hari, Ctrl+Klik utk pilih banyak sekaligus, lepas Order lain di sini utk sisip sebelum ini)`}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onOpenBooking(ev);
+      }}
+      title={`${ev.order} — ${ev.materialDescription ?? ""} (tarik utk pindah hari, klik 2x utk booking tanki, Ctrl+Klik utk pilih banyak sekaligus, lepas Order lain di sini utk sisip sebelum ini)`}
       style={{
         background: color.bg,
         borderLeft: `3px solid ${isInsertTarget ? "#4338ca" : color.border}`,
@@ -208,6 +235,25 @@ function EventCard({
           <div style={{ fontSize: "0.64rem", color: color.text, opacity: 0.75, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             Today-ATP: {ev.todayAtp || "-"}
           </div>
+          {ev.codeTanki && (
+            <div style={{ fontSize: "0.64rem", color: color.text, opacity: 0.75, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              Tanki: {ev.codeTanki}
+            </div>
+          )}
+          <span
+            style={{
+              display: "inline-block",
+              marginTop: 2,
+              fontSize: "0.58rem",
+              fontWeight: 700,
+              padding: "1px 6px",
+              borderRadius: 999,
+              color: isOverdue(ev.scheduledDate) ? "#991b1b" : "#166534",
+              background: isOverdue(ev.scheduledDate) ? "#fee2e2" : "#dcfce7",
+            }}
+          >
+            {isOverdue(ev.scheduledDate) ? "Overdue" : "On Time"}
+          </span>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1, flex: "0 0 auto" }}>
           <button
@@ -256,6 +302,7 @@ function DayColumn({
   onReorder,
   selectedIds,
   onToggleSelect,
+  onOpenBooking,
 }: {
   date: Date;
   events: ScheduleEvent[];
@@ -263,6 +310,7 @@ function DayColumn({
   onReorder: (dayEvents: ScheduleEvent[]) => void;
   selectedIds: Set<string>;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+  onOpenBooking: (ev: ScheduleEvent) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: buildDayDropId(date) });
   const isToday = isSameDay(date, new Date());
@@ -300,6 +348,7 @@ function DayColumn({
           onDelete={onDelete}
           selected={selectedIds.has(buildEventDragId(ev.id))}
           onToggleSelect={onToggleSelect}
+          onOpenBooking={onOpenBooking}
         />
       ))}
       {sorted.length === 0 && <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", textAlign: "center", marginTop: 12 }}>-</div>}
@@ -331,6 +380,7 @@ export default function WeeklyScheduleCalendar({
   onReorderDay,
   selectedIds,
   onToggleSelect,
+  onOpenBooking,
 }: {
   events: ScheduleEvent[];
   onDelete?: (id: string) => void;
@@ -343,6 +393,9 @@ export default function WeeklyScheduleCalendar({
    * seleksi bisa lintas strip Queue & kalender ini sekaligus. */
   selectedIds: Set<string>;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+  /** Double-click kartu -> buka popup booking tanki (2026-10-20, instruksi
+   * eksplisit user). */
+  onOpenBooking: (ev: ScheduleEvent) => void;
 }) {
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const days = useMemo(() => Array.from({ length: 6 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -400,6 +453,7 @@ export default function WeeklyScheduleCalendar({
                   onReorder={onReorderDay}
                   selectedIds={selectedIds}
                   onToggleSelect={onToggleSelect}
+                  onOpenBooking={onOpenBooking}
                 />
               </div>
             );

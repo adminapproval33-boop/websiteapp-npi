@@ -168,21 +168,20 @@ premixAftermixRouter.get(
       premixLogs.filter((r): r is typeof r & { materialNumber: string } => r.materialNumber != null).map((r) => r.materialNumber)
     );
 
-    // Dedupe ke baris Premix PALING TERAKHIR per Order -- dipakai utk
-    // menyuguhkan formReceived-nya sendiri di kolom queue (bukan cuma
-    // referensi Master Data polos).
+    // Dedupe ke baris Premix PALING TERAKHIR per Order, lalu ambil yg
+    // Start-nya SUDAH terisi -- syarat #3 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun). Baris Form-Received-only
+    // (belum ada di set ini) tetap dipakai jg utk menyuguhkan formReceived-nya
+    // sendiri di kolom queue, bukan cuma referensi Master Data polos.
     const latestPremixByOrder = new Map<string, (typeof premixLogs)[number]>();
     for (const r of premixLogs) {
       if (!latestPremixByOrder.has(r.order)) latestPremixByOrder.set(r.order, r);
     }
-    // Order yg SUDAH py baris Premix apa pun -- langsung exclude dari antrian
-    // ini, tanpa syarat Start terisi (2026-10-20, revert instruksi eksplisit
-    // user: syarat "baru dikeluarkan kalau Start sudah terisi" sempat
-    // ditambahkan utk mendukung alur booking tanki lewat menu Input Premix,
-    // tapi sekarang booking tanki sudah py tombol khusus sendiri -- lihat
-    // lib/tankBooking.ts -- jadi syarat itu sudah tidak relevan lagi, sama
-    // spt revert di /aftermix-pwo-queue).
-    const startedPremixOrderSet = new Set(premixLogs.map((r) => r.order));
+    const startedPremixOrderSet = new Set(
+      Array.from(latestPremixByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
 
     const pastPremixOrderSet = new Set([
       ...millingOrders.map((r) => r.order),
@@ -322,18 +321,16 @@ function isMillingDoneForOrder(
 
 /**
  * "PWO Schedule & Queue" khusus AFTERMIX -- daftar PWO (Order) yang sudah
- * "Milling - DN" dan SEDANG MENUNGGU dikerjakan Aftermix. Pola SAMA PERSIS dgn
- * /colour-matching/pwo-queue:
- * 1) Order Milling - DN wajib Material Number-nya PERNAH py histori Aftermix
- *    (lintas Order/Batch manapun) -- Material yg memang tidak pernah lewat
- *    Aftermix tidak otomatis nyangkut di antrian ini.
- * 2) Order yg SUDAH py baris Aftermix apa pun (premixAftermixLog section
- *    AFTERMIX) langsung dikeluarkan dari antrian, TANPA syarat Start terisi
- *    (2026-10-20, revert instruksi eksplisit user: syarat "baru dikeluarkan
- *    kalau Start sudah terisi" sempat ditambahkan 2026-07-29 utk mendukung
- *    alur booking tanki lewat menu Input Aftermix, tapi sekarang booking
- *    tanki sudah py tombol khusus sendiri -- lihat lib/tankBooking.ts --
- *    jadi syarat itu sudah tidak relevan lagi).
+ * "Milling - DN" dan SEDANG MENUNGGU dikerjakan Aftermix, DIREVISI TOTAL
+ * 2026-07-29 sesuai instruksi eksplisit user (dari versi 2026-07-26), pola
+ * SAMA PERSIS dgn revisi /colour-matching/pwo-queue:
+ * 1) Order Milling - DN SEKARANG juga wajib Material Number-nya PERNAH py
+ *    histori Aftermix (lintas Order/Batch manapun) -- Material yg memang
+ *    tidak pernah lewat Aftermix tidak lagi otomatis nyangkut di antrian ini.
+ * 2) Order yg SUDAH py baris Aftermix (premixAftermixLog section AFTERMIX)
+ *    tapi Start-nya BELUM terisi (baru Form Received) TETAP di antrian ini --
+ *    SEBELUMNYA begitu ADA baris Aftermix sama sekali langsung dikeluarkan;
+ *    sekarang baru dikeluarkan begitu Start-nya terisi.
  * Order yg sudah masuk tahap SETELAH Aftermix (Colour Matching, Approval,
  * Packing) tetap dikeluarkan dari antrian spt sebelumnya. Diurutkan Finish
  * Milling paling awal duluan (FIFO).
@@ -356,13 +353,18 @@ premixAftermixRouter.get(
       aftermixLogs.filter((r): r is typeof r & { materialNumber: string } => r.materialNumber != null).map((r) => r.materialNumber)
     );
 
-    // Order yg SUDAH py baris Aftermix apa pun (section AFTERMIX) -- langsung
-    // exclude dari antrian ini, tanpa syarat Start terisi (2026-10-20, revert
-    // instruksi eksplisit user: syarat "Start harus terisi dulu" tadinya
-    // dibuat utk mendukung alur booking tanki lewat menu Input Aftermix,
-    // tapi sekarang booking tanki sudah py tombol khusus sendiri -- lihat
-    // lib/tankBooking.ts -- jadi syarat itu sudah tidak relevan lagi).
-    const startedAftermixOrderSet = new Set(aftermixLogs.map((r) => r.order));
+    // Dedupe ke baris Aftermix PALING TERAKHIR per Order, lalu ambil yg
+    // Start-nya SUDAH terisi -- syarat #2 di atas (beda dari sebelumnya yg
+    // langsung exclude begitu ADA baris apa pun).
+    const latestAftermixByOrder = new Map<string, (typeof aftermixLogs)[number]>();
+    for (const r of aftermixLogs) {
+      if (!latestAftermixByOrder.has(r.order)) latestAftermixByOrder.set(r.order, r);
+    }
+    const startedAftermixOrderSet = new Set(
+      Array.from(latestAftermixByOrder.values())
+        .filter((r) => r.start != null)
+        .map((r) => r.order)
+    );
 
     // Order yg sudah masuk tahap manapun SETELAH Aftermix -- dianggap sudah
     // "lewat" dari antrian menunggu Aftermix.

@@ -428,6 +428,40 @@ masterDataRouter.put(
   })
 );
 
+const updateTankTypeSchema = z.object({
+  typeTanki: z.string().trim().min(1, "Type Tanki wajib diisi."),
+});
+
+/// Edit "Type Tanki" per-baris langsung dari tabel (2026-10-21, instruksi
+/// eksplisit user -- sebelumnya kolom ini cuma bisa dikoreksi lewat upload
+/// ulang SELURUH file Excel; laporan lapangan nyata: tank TA.01800.014 (IU
+/// Plant 2 No.14) tercatat SOLID padahal fisiknya METALLIC, sehingga Order yg
+/// butuh tanki metallic tidak dapat tanki krn portal menganggapnya solid).
+/// SENGAJA `requireFullAccess` (BUKAN requireWrite spt toggle Damaged di
+/// bawah) -- Type Tanki menentukan rute produksi ke tanki fisik yg benar,
+/// kesalahan di sini dampaknya lebih luas drpd checkbox Damaged yg memang
+/// dipakai rutin shop-floor, jadi disamakan level aksesnya dgn /tanks/import.
+masterDataRouter.put(
+  "/tanks/:code/type",
+  requireFullAccess,
+  asyncRoute(async (req, res) => {
+    const parsed = updateTankTypeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const code = String(req.params.code);
+    const updated = await prisma.masterTank
+      .update({ where: { code }, data: { typeTanki: parsed.data.typeTanki } })
+      .catch(() => null);
+    if (!updated) {
+      res.status(404).json({ success: false, message: "Code Tanki tidak ditemukan." });
+      return;
+    }
+    res.json({ success: true, message: "Type Tanki berhasil diperbarui.", data: updated });
+  })
+);
+
 masterDataRouter.post(
   "/tanks/import",
   requireFullAccess,

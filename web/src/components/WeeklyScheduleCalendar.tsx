@@ -130,6 +130,17 @@ function isOverdue(scheduledDateIso: string): boolean {
   return scheduledOnly.getTime() < todayOnly.getTime();
 }
 
+/** Jumlah hari kalender yg sudah lewat dari `scheduledDateIso` sampai hari
+ * ini (>= 1 kalau Overdue, konvensi SAMA dgn isOverdue di atas). Dipakai
+ * label "N hari lewat" di OverdueBanner. */
+function daysOverdue(scheduledDateIso: string): number {
+  const d = new Date(scheduledDateIso);
+  const scheduledOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((todayOnly.getTime() - scheduledOnly.getTime()) / 86_400_000);
+}
+
 /** Kartu 1 jadwal dalam list hari -- draggable (pindah hari) + tombol ▲▼
  * (ubah urutan dalam hari yg sama, 2026-08-05 instruksi eksplisit user:
  * "nomor urutan"). SENGAJA tombol ▲▼ dipilih drpd drag-reorder halus dalam 1
@@ -356,6 +367,66 @@ function DayColumn({
   );
 }
 
+/** Banner "Overdue" DI LUAR grid minggu yg sedang dilihat (2026-10-21,
+ * bugfix instruksi eksplisit user -- laporan nyata lewat chat: kartu yg
+ * sudah lewat tanggal tapi belum dikerjakan dianggap "hilang dari website"
+ * krn Kalender ini per-minggu, kartu overdue biasanya nyangkut di minggu
+ * LALU yg tidak kelihatan kecuali user klik "Minggu Lalu" berkali-kali.
+ * Server TIDAK PERNAH menghapus kartu PwoSchedule otomatis -- lihat
+ * `isOverdue` di atas, "kartu tidak pernah hilang sendiri" -- jadi fix-nya
+ * di SINI: list semua kartu overdue lintas minggu manapun, SELALU tampil di
+ * atas grid apa pun minggu yg sedang dibuka, supaya lead time yg sudah lewat
+ * ketahuan tanpa perlu navigasi mundur. Klik 2x kartu ini sama spt kartu
+ * biasa (buka popup booking tanki yg sama -- bisa langsung geser Rencana
+ * Mulai dari situ kalau mau dijadwal ulang). */
+function OverdueBanner({ events, onOpenBooking }: { events: ScheduleEvent[]; onOpenBooking: (ev: ScheduleEvent) => void }) {
+  const overdue = useMemo(
+    () => events.filter((ev) => isOverdue(ev.scheduledDate)).sort((a, b) => daysOverdue(b.scheduledDate) - daysOverdue(a.scheduledDate)),
+    [events]
+  );
+  if (overdue.length === 0) return null;
+  return (
+    <div style={{ padding: "8px 14px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
+      <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>
+        ⚠ Overdue, belum dikerjakan ({overdue.length})
+      </div>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+        {overdue.map((ev) => (
+          <div
+            key={ev.id}
+            onDoubleClick={() => onOpenBooking(ev)}
+            title={`${ev.order} — ${ev.materialDescription ?? ""} (klik 2x utk booking tanki / jadwal ulang)`}
+            style={{
+              flex: "0 0 auto",
+              minWidth: 150,
+              maxWidth: 200,
+              background: "#fff",
+              border: "1px solid #fecaca",
+              borderLeft: "3px solid #dc2626",
+              borderRadius: 6,
+              padding: "5px 8px",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#7f1d1d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {ev.order}
+            </div>
+            <div style={{ fontSize: "0.64rem", color: "#7f1d1d", opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {ev.materialDescription ?? ev.batch ?? ""}
+            </div>
+            {ev.codeTanki && (
+              <div style={{ fontSize: "0.62rem", color: "#7f1d1d", opacity: 0.8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                Tanki: {ev.codeTanki}
+              </div>
+            )}
+            <div style={{ fontSize: "0.62rem", fontWeight: 700, color: "#dc2626", marginTop: 2 }}>{daysOverdue(ev.scheduledDate)} hari lewat</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Kalender mingguan "PWO Schedule & Queue" (2026-08-04, instruksi eksplisit
  * user, niru referensi Dribbble "Task Management Dashboard Schedule
@@ -428,6 +499,8 @@ export default function WeeklyScheduleCalendar({
           </button>
         </div>
       </div>
+
+      <OverdueBanner events={events} onOpenBooking={onOpenBooking} />
 
       <div style={{ overflowX: "auto" }}>
         <div style={{ minWidth: 900, display: "grid", gridTemplateColumns: "repeat(6, minmax(150px, 1fr))" }}>

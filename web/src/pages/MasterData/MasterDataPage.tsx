@@ -1,4 +1,4 @@
-import { ChangeEvent, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../api/client";
 import DataTable from "../../components/DataTable";
@@ -195,6 +195,46 @@ function EmailCell({
   );
 }
 
+/** Input "Type Tanki" inline di tabel Master Data > Tanki (2026-10-21,
+ * instruksi eksplisit user -- sebelumnya kolom ini cuma bisa dikoreksi lewat
+ * upload ulang SELURUH file Excel; laporan lapangan nyata: tank TA.01800.014
+ * tercatat SOLID padahal fisiknya METALLIC). Commit lewat onBlur, sama pola
+ * dgn EmailCell. `datalistId` menunjuk ke <datalist> berisi semua nilai Type
+ * Tanki yg SUDAH ADA di data saat ini (autocomplete, BUKAN daftar baku --
+ * field sumbernya bebas teks apa saja dari Excel, banyak varian: SOLID,
+ * METALLIC, SOLID PUTIH, FOR ALL TYPES STAINLESS, dst). */
+function TankTypeCell({
+  value,
+  datalistId,
+  disabled,
+  pending,
+  onCommit,
+}: {
+  value: string | null;
+  datalistId: string;
+  disabled?: boolean;
+  pending?: boolean;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => setDraft(value ?? ""), [value]);
+  return (
+    <input
+      list={datalistId}
+      value={draft}
+      disabled={disabled || pending}
+      placeholder="-"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const next = draft.trim();
+        if (next && next !== (value ?? "")) onCommit(next);
+        else setDraft(value ?? "");
+      }}
+      style={{ width: "100%", minWidth: 140, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4 }}
+    />
+  );
+}
+
 type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow";
 
 function ImportCard({
@@ -266,6 +306,11 @@ export default function MasterDataPage() {
    * administrator (FULL_ACCESS) yg boleh mengedit langsung dari tabel ini
    * (karyawan sendiri juga bisa isi emailnya lewat Settings > Profil). */
   const canEditEmployee = user?.access === "FULL_ACCESS";
+  /** Sama spt canEditFlow/canEditEmployee -- Type Tanki menentukan rute
+   * produksi ke tanki fisik yg benar (2026-10-21, instruksi eksplisit user:
+   * laporan lapangan tank TA.01800.014 salah tercatat SOLID padahal
+   * METALLIC), jadi dikunci FULL_ACCESS sama spt endpoint-nya di server. */
+  const canEditTankType = user?.access === "FULL_ACCESS";
   const [tab, setTab] = useState<Tab>("cooispi");
 
   const [orderResult, setOrderResult] = useState("");
@@ -487,6 +532,30 @@ export default function MasterDataPage() {
     onSettled: () => setPendingEmployeeCell(null),
   });
 
+  const [tankFieldError, setTankFieldError] = useState("");
+  const [pendingTankCell, setPendingTankCell] = useState<string | null>(null);
+
+  const updateTankType = useMutation({
+    mutationFn: ({ code, typeTanki }: { code: string; typeTanki: string }) =>
+      api.put<{ success: boolean; data: MasterTankRow }>(`/master-data/tanks/${encodeURIComponent(code)}/type`, { typeTanki }).then((r) => r.data),
+    onMutate: ({ code }) => {
+      setTankFieldError("");
+      setPendingTankCell(code);
+    },
+    onSuccess: (updatedRow, { code }) => {
+      queryClient.setQueryData<MasterTankRow[]>(["master-tanks-full", tankSearch], (old) =>
+        old?.map((r) => (r.code === code ? updatedRow : r))
+      );
+    },
+    onError: (err) => setTankFieldError(err instanceof ApiError ? err.message : "Gagal menyimpan Type Tanki."),
+    onSettled: () => setPendingTankCell(null),
+  });
+
+  const tankTypeOptions = useMemo(
+    () => Array.from(new Set((tanksQuery.data ?? []).map((r) => r.typeTanki).filter((v): v is string => Boolean(v)))).sort(),
+    [tanksQuery.data]
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -556,12 +625,23 @@ export default function MasterDataPage() {
             <div className="panel-header">Code Tanki Saat Ini ({tanksQuery.data?.length ?? 0} ditampilkan)</div>
             <div className="panel-body">
               <LastUpdatedNote value={lastUpdatedQuery.data?.tanki} />
+              {canEditTankType && (
+                <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  Kolom Type Tanki bisa dikoreksi langsung per-baris di sini (tidak perlu upload ulang file Excel).
+                </p>
+              )}
+              {tankFieldError && <p style={{ color: "var(--danger)", fontSize: "0.85rem" }}>{tankFieldError}</p>}
               <input
                 placeholder="Cari Code Tanki..."
                 value={tankSearch}
                 onChange={(e) => setTankSearch(e.target.value)}
                 style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
               />
+              <datalist id="tank-type-options">
+                {tankTypeOptions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
               <DataTable
                 rowKey={(r: MasterTankRow) => r.code}
                 exportFileName="master-tanki"
@@ -574,7 +654,21 @@ export default function MasterDataPage() {
                   { key: "tankCapacity", label: "Tank Capacity", render: (r) => r.tankCapacity ?? "-" },
                   { key: "newNumber", label: "New Number", render: (r) => r.newNumber ?? "-" },
                   { key: "locationPlant", label: "Location / Plant", render: (r) => r.locationPlant ?? "-" },
-                  { key: "typeTanki", label: "Type Tanki", render: (r) => r.typeTanki ?? "-" },
+                  {
+                    key: "typeTanki",
+                    label: "Type Tanki",
+                    render: (r) =>
+                      canEditTankType ? (
+                        <TankTypeCell
+                          value={r.typeTanki}
+                          datalistId="tank-type-options"
+                          pending={pendingTankCell === r.code}
+                          onCommit={(next) => updateTankType.mutate({ code: r.code, typeTanki: next })}
+                        />
+                      ) : (
+                        r.typeTanki ?? "-"
+                      ),
+                  },
                 ]}
               />
             </div>

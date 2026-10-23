@@ -1,10 +1,12 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute } from "../../middleware/errorHandler";
-import { requireAuth } from "../../middleware/auth";
+import { requireAuth, requireWrite, AuthedRequest } from "../../middleware/auth";
 import { evaluateSpec } from "../../lib/specEval";
 import { parseQtyNumber } from "../../lib/qty";
 import { parseBookingSection } from "../../lib/tankBooking";
+import { isValidTankCode } from "../../lib/tankCode";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -3449,5 +3451,119 @@ dashboardRouter.get(
         historyRows: rows,
       },
     });
+  })
+);
+
+const pindahTankiSchema = z.object({
+  order: z.string().trim().min(1, "Order wajib diisi."),
+  codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+});
+
+/** "Pindah Tanki" (2026-10-24, instruksi eksplisit user, REVISI dari versi
+ * awal -- laporan nyata Order 1050009192: tanki lama rusak, Order dipindah
+ * fisik). Versi awal (entri "+Input Manual" overlay terpisah) ditolak user:
+ * mau kolom "Sumber Data" tetap "Input Admin" (bukan "Manual"), DAN histori
+ * yg tersimpan menunjukkan tanki TERBARU, bukan yg lama. Jadi endpoint ini
+ * LANGSUNG MENIMPA Code Tanki di baris riwayat proses yg SAAT INI jadi
+ * acuan -- BUKAN menambah entri baru -- replikasi PERSIS urutan prioritas
+ * "Code Tanki" kolom GET /production-orders: Packing (kalau Order ini SUDAH
+ * py baris Packing sama sekali) menang mutlak; kalau belum, baris lain
+ * (Premix/Aftermix, Milling, Colour Matching, QC, Approval) dipilih yg
+ * momennya (Finish atau Start, fallback timestamp) PALING BARU, sama pola
+ * dgn `touches`/`latestTouchByOrder` di buildTankStatusMap. PERINGATAN: ini
+ * menimpa data histori asli (Code Tanki LAMA di baris itu tidak lagi
+ * tercatat di mana pun) -- SENGAJA, sesuai instruksi eksplisit user, beda
+ * dari "+Input Manual" biasa yg nambah catatan terpisah tanpa mengubah
+ * histori asli. Kalau Order ini belum py baris nyata SAMA SEKALI di tabel
+ * manapun, fallback ke ProductionOrderManualInput (mekanisme "+Input
+ * Manual" lama) krn tidak ada baris utk ditimpa. */
+dashboardRouter.post(
+  "/pindah-tanki",
+  requireWrite,
+  asyncRoute(async (req: AuthedRequest, res) => {
+    const parsed = pindahTankiSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const { order, codeTanki } = parsed.data;
+    if (!(await isValidTankCode(codeTanki))) {
+      res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
+      return;
+    }
+
+    // Packing menang mutlak begitu Order ini SUDAH py baris Packing sama
+    // sekali (sama pola dgn `packingRow ? packingRow.codeTanki : ...` di
+    // getProductionOrderRows).
+    const packingRow = await prisma.packingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } });
+    if (packingRow) {
+      await prisma.packingLog.update({ where: { id: packingRow.id }, data: { codeTanki } });
+      res.json({ success: true, message: "Code Tanki berhasil dipindahkan (baris Packing).", data: { table: "packing" } });
+      return;
+    }
+
+    const [premixAftermix, milling, colourMatching, checkResult, approval] = await Promise.all([
+      prisma.premixAftermixLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.millingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.colourMatchingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.checkResult.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+      prisma.approvalSchedule.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+    ]);
+
+    const candidates: { moment: number; table: string; apply: () => Promise<unknown> }[] = [];
+    if (premixAftermix) {
+      candidates.push({
+        moment: latestMoment(premixAftermix.start, premixAftermix.finish, premixAftermix.timestamp).getTime(),
+        table: premixAftermix.section === "PREMIX" ? "premix" : "aftermix",
+        apply: () => prisma.premixAftermixLog.update({ where: { id: premixAftermix.id }, data: { codeTanki } }),
+      });
+    }
+    if (milling && (milling.codeTanki1 || milling.codeTanki2)) {
+      // SENGAJA cuma codeTanki1 ("tanki utama"/Couple) yg ditimpa -- sama
+      // konvensi dgn pemakaian codeTanki1 di tempat lain (mis. buildProduktivitasData)
+      // saat cuma 1 nilai yg dibutuhkan utk mewakili tanki Order ini.
+      candidates.push({
+        moment: latestMoment(milling.start, milling.finish, milling.timestamp).getTime(),
+        table: "milling",
+        apply: () => prisma.millingLog.update({ where: { id: milling.id }, data: { codeTanki1: codeTanki } }),
+      });
+    }
+    if (colourMatching) {
+      candidates.push({
+        moment: latestMoment(colourMatching.start, colourMatching.finish, colourMatching.timestamp).getTime(),
+        table: "colourMatching",
+        apply: () => prisma.colourMatchingLog.update({ where: { id: colourMatching.id }, data: { codeTanki } }),
+      });
+    }
+    if (checkResult && checkResult.codeTanki) {
+      candidates.push({
+        moment: checkResult.timestamp.getTime(),
+        table: "checkResult",
+        apply: () => prisma.checkResult.update({ where: { checkId: checkResult.checkId }, data: { codeTanki } }),
+      });
+    }
+    if (approval && approval.codeTanki) {
+      candidates.push({
+        moment: latestMoment(null, approval.finishApp, approval.timestamp).getTime(),
+        table: "approval",
+        apply: () => prisma.approvalSchedule.update({ where: { approvalId: approval.approvalId }, data: { codeTanki } }),
+      });
+    }
+
+    if (candidates.length === 0) {
+      await prisma.productionOrderManualInput.create({
+        data: { order, codeTanki, spvProduksi: "", inputBy: req.auth!.nik },
+      });
+      res.json({
+        success: true,
+        message: "Code Tanki berhasil disimpan (Order ini belum punya histori proses apa pun).",
+        data: { table: "manual" },
+      });
+      return;
+    }
+
+    candidates.sort((a, b) => b.moment - a.moment);
+    await candidates[0].apply();
+    res.json({ success: true, message: "Code Tanki berhasil dipindahkan.", data: { table: candidates[0].table } });
   })
 );

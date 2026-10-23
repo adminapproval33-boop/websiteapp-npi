@@ -7,15 +7,16 @@ import { api, ApiError } from "../api/client";
 
 /** Popup ringkas "Pindah Tanki" (2026-10-24, instruksi eksplisit user --
  * laporan nyata Order 1050009192: tanki lama rusak, Order-nya dipindah fisik
- * ke tanki lain TANPA mengulang proses apa pun). Reuse endpoint "+Input
- * Manual" (POST /production-order-manual-input) yg SUDAH "menang mutlak" di
- * Tank Monitoring & (sejak 2026-10-24) Production Order Monitoring juga --
- * TAPI form penuhnya (ManualInputModal.tsx) kepanjangan utk sekadar pindah
- * tanki (wajib SPV Produksi/Leader/dll). Popup ini CUMA minta Code Tanki
- * baru. Field "Catatan" dikirim lewat kolom `spvProduksi` apa adanya
- * (SENGAJA -- tabel ProductionOrderManualInput tidak py kolom catatan
- * terpisah) supaya alasan pindah tetap tercatat di riwayat "Input Manual"
- * tanpa perlu migrasi skema baru.
+ * ke tanki lain TANPA mengulang proses apa pun). POST /dashboard/pindah-tanki
+ * LANGSUNG MENIMPA Code Tanki di baris riwayat proses yg SAAT INI jadi acuan
+ * Order ini (bukan menambah entri overlay terpisah spt versi awal) --
+ * instruksi eksplisit user: mau kolom "Sumber Data" tetap "Input Admin", dan
+ * histori yg tersimpan menunjukkan tanki TERBARU, bukan yg lama. Makanya
+ * TIDAK ada field "Catatan" di sini (beda dari versi awal) -- baris yg
+ * ditimpa bisa jadi baris riwayat proses APA SAJA (Premix/Milling/Aftermix/
+ * Colour Matching/QC/Approval/Packing), yg strukturnya tidak semua py kolom
+ * catatan yg konsisten, dan menimpa Code Tanki lama di situ memang SENGAJA
+ * tidak meninggalkan jejak terpisah (lihat peringatan di teks popup).
  *
  * `order` optional: kalau sudah diketahui dari konteks pemanggil (popup Info
  * Proses per-Order), field Order ditampilkan read-only. Kalau tidak (tombol
@@ -33,16 +34,15 @@ export default function PindahTankiModal({
   const { data: tanks } = useTankOptions();
   const [order, setOrder] = useState(initialOrder ?? "");
   const [codeTanki, setCodeTanki] = useState("");
-  const [catatan, setCatatan] = useState("");
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => api.post("/production-order-manual-input", { order: order.trim(), codeTanki, spvProduksi: catatan.trim() }),
+    mutationFn: () => api.post("/dashboard/pindah-tanki", { order: order.trim(), codeTanki }),
     onSuccess: () => {
       onSaved?.();
       onClose();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan pindah tanki."),
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal memindahkan tanki."),
   });
 
   function submit() {
@@ -61,8 +61,9 @@ export default function PindahTankiModal({
   return createPortal(
     <Modal title={initialOrder ? `Pindah Tanki — Order ${initialOrder}` : "Pindah Tanki"} onClose={onClose} width={460}>
       <p style={{ marginTop: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-        Memindahkan Order ini ke tanki baru -- tanki lama otomatis berhenti dianggap occupant Order ini (di Tank
-        Monitoring maupun Production Order Monitoring), tanpa perlu mengulang input proses apa pun.
+        Menimpa langsung Code Tanki di riwayat proses Order ini yang saat ini jadi acuan (Tank Monitoring, Production
+        Order Monitoring, maupun History-nya sendiri ikut menampilkan tanki baru ini). Code Tanki lama{" "}
+        <strong>tidak lagi tercatat di mana pun</strong> setelah ini -- pastikan tanki barunya sudah benar.
       </p>
       {!initialOrder && (
         <div className="field">
@@ -73,10 +74,6 @@ export default function PindahTankiModal({
       <div className="field" style={{ marginTop: initialOrder ? 0 : 10 }}>
         <label>Tanki Baru *</label>
         <TankSelect bare id="pindah-tanki-new" value={codeTanki} onChange={setCodeTanki} />
-      </div>
-      <div className="field" style={{ marginTop: 10 }}>
-        <label>Catatan (opsional)</label>
-        <input value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="Mis. tanki lama rusak" />
       </div>
       {error && (
         <p className="error-text" style={{ marginTop: 8 }}>

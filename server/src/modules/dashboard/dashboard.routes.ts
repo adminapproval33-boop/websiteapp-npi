@@ -3481,8 +3481,12 @@ const pindahTankiSchema = z.object({
  * buildTankStatusMap). Langkah 2: cari SEMUA baris di SEMUA tabel tahap utk
  * Order ini yg Code Tanki-nya SAMA PERSIS dgn tanki lama itu, timpa
  * semuanya ke tanki baru + tambah catatan di Remark. Kalau Order ini belum
- * py baris nyata SAMA SEKALI, fallback ke ProductionOrderManualInput
- * (mekanisme "+Input Manual" lama) krn tidak ada baris utk ditimpa. */
+ * py baris nyata SAMA SEKALI di tahap manapun, TOLAK (400) -- instruksi
+ * eksplisit user (2026-10-23): tidak ada yg bisa "dipindah" kalau memang
+ * belum pernah diinput di manapun, jadi TIDAK fallback ke
+ * ProductionOrderManualInput lagi (fallback lama itu diam-diam tidak ikut
+ * menyimpan `reason` sama sekali -- lebih baik ditolak jelas drpd diam-diam
+ * kehilangan data). User disuruh pakai menu Input biasa dulu. */
 dashboardRouter.post(
   "/pindah-tanki",
   requireWrite,
@@ -3538,13 +3542,10 @@ dashboardRouter.post(
       }
 
       if (candidates.length === 0) {
-        await prisma.productionOrderManualInput.create({
-          data: { order, codeTanki: newCodeTanki, spvProduksi: "", inputBy: req.auth!.nik },
-        });
-        res.json({
-          success: true,
-          message: "Code Tanki berhasil disimpan (Order ini belum punya histori proses apa pun).",
-          data: { table: "manual", rowsUpdated: 0 },
+        res.status(400).json({
+          success: false,
+          message:
+            "Order ini belum punya riwayat proses apa pun (belum pernah diinput di tahap manapun) -- tidak ada yang bisa dipindahkan.",
         });
         return;
       }

@@ -21,7 +21,11 @@ const saveSchema = z.object({
   codeTanki: z.string().optional(),
   start: notFutureDate(z.coerce.date().optional().nullable(), "Start"),
   finish: notFutureDate(z.coerce.date().optional().nullable(), "Finish"),
-  spvProduksi: z.string().trim().min(1, "SPV Produksi wajib diisi."),
+  // SENGAJA optional (bukan lagi wajib) -- dipakai bareng 2 form beda:
+  // "+Input Manual" penuh (frontend TETAP mewajibkan field ini sendiri utk
+  // form itu) & "Pindah Tanki" ringkas (2026-10-24, instruksi eksplisit user)
+  // yg cuma butuh Code Tanki, tanpa SPV/Leader/Member dkk.
+  spvProduksi: z.string().trim().optional().default(""),
   spvProduksiNik: z.string().trim().optional().nullable(),
   leader: z.string().optional(),
   leaderNik: z.string().trim().optional().nullable(),

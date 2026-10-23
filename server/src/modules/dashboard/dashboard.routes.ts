@@ -1806,6 +1806,24 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
   }
 
+  /** "Pindah Tanki" (2026-10-24, instruksi eksplisit user -- laporan nyata
+   * Order 1050009192: tanki lama rusak, dipindah via "+Input Manual" ke tanki
+   * baru, TAPI tanki lama tetap tampil "Terisi" jg -- `latestManualByTank` di
+   * atas cuma bikin entri manual MENANG di tanki BARU yg diklaim, TIDAK
+   * melepas tanki LAMA (itu tetap menang lewat sentuhan proses otomatis,
+   * ketangkep terpisah di `latestByTank` dari `activeTouches` di bawah).
+   * SENGAJA per-ORDER (bukan per-tank spt latestManualByTank) -- begitu
+   * Order py entri manual non-Booking PALING BARU ke tanki X, sentuhan
+   * otomatis Order itu di tanki MANAPUN SELAIN X harus berhenti dianggap
+   * occupant, supaya "pindah tanki" artinya betul2 PINDAH (bukan nambah
+   * klaim). Booking SENGAJA tidak ikut aturan ini -- itu baru rencana/
+   * reservasi, bukan pemindahan fisik yg sudah terjadi. */
+  const latestManualTankByOrder = new Map<string, string>();
+  for (const m of unifiedManualEntries) {
+    if (parseBookingSection(m.remark) != null) continue;
+    if (!latestManualTankByOrder.has(m.order)) latestManualTankByOrder.set(m.order, m.codeTanki);
+  }
+
   // Material Description/%GR SENGAJA di-lookup ulang dari Master Data Cooispi
   // (bukan snapshot History) -- sama alasannya dgn /production-orders. Query
   // ini dilakukan SEBELUM memilih pemenang per-tank (lihat
@@ -1929,7 +1947,12 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
 
     return packingOrders.has(order);
   }
-  const activeTouches = touches.filter((t) => !isOrderDone(t.order));
+  const activeTouches = touches.filter((t) => {
+    if (isOrderDone(t.order)) return false;
+    const movedTo = latestManualTankByOrder.get(t.order);
+    if (movedTo && movedTo !== t.code) return false; // lihat komentar "Pindah Tanki" di atas
+    return true;
+  });
 
   // Order yg SUDAH PINDAH TANKI (2026-09-29, instruksi eksplisit user -- root
   // cause laporan nyata: Order 1030062588 py Aftermix+Colour Matching di

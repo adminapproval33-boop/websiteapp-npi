@@ -33,6 +33,7 @@ const BOOKING_COL_ROWS: string[][] = [
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
+import PindahTankiModal from "../../components/PindahTankiModal";
 import type { OrderRefData } from "../../components/OrderLookup";
 
 interface MaterialFlowRow {
@@ -137,6 +138,10 @@ export default function MaterialFlowPanel({
   // dimulai. Disimpan lewat POST /tank-manual-input (Input Manual Tank
   // Monitoring): tanki langsung tampil "Terisi" (sumber "Manual") dgn Order
   // ini, TANPA membuat baris Premix/Aftermix (Start/Finish/Member belum ada).
+  // Tombol "Pindah Tanki" (2026-10-24, instruksi eksplisit user): cara
+  // ringkas memindahkan Order ini ke tanki lain (mis. tanki lama rusak)
+  // tanpa mengulang input proses apa pun -- lihat PindahTankiModal.tsx.
+  const [pindahTankiOpen, setPindahTankiOpen] = useState(false);
   const [bookingStage, setBookingStage] = useState<"Premix" | "Aftermix" | null>(null);
   const [bookingTank, setBookingTank] = useState("");
   const [bookingRemark, setBookingRemark] = useState("");
@@ -584,6 +589,13 @@ export default function MaterialFlowPanel({
         )}
         {checked && (
           <>
+            {order && canEdit && (
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                <button type="button" className="btn btn-outline" style={{ padding: "4px 10px", fontSize: "0.8rem" }} onClick={() => setPindahTankiOpen(true)}>
+                  Pindah Tanki
+                </button>
+              </div>
+            )}
             <div style={{ overflowX: "auto" }}>
               <table className="data-table mf-compact-table">
                 <thead>
@@ -747,6 +759,15 @@ export default function MaterialFlowPanel({
               </p>
             )}
           </>
+        )}
+        {pindahTankiOpen && order && (
+          <PindahTankiModal
+            order={order}
+            onClose={() => setPindahTankiOpen(false)}
+            onSaved={() => {
+              onFlowSaved?.();
+            }}
+          />
         )}
       </div>
     </div>

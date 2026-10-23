@@ -16,6 +16,7 @@ import ProductionLabelEntryPage from "../ProductionLabel/ProductionLabelEntryPag
 import MaterialFlowPanel from "./MaterialFlowPanel";
 import OrderLookup from "../../components/OrderLookup";
 import ManualInputModal from "./ManualInputModal";
+import PindahTankiModal from "../../components/PindahTankiModal";
 
 interface ProductionOrderRow {
   order: string;
@@ -391,6 +392,11 @@ export default function ProductionOrderDashboardPage() {
   // eksplisit user: "jangan buat aksesnya sampai ke Info Proses Material") --
   // langsung buka form Input Manual, tanpa gate popup apa pun.
   const [manualInputOpen, setManualInputOpen] = useState(false);
+  // Tombol "Pindah Tanki" (2026-10-24, instruksi eksplisit user): cara ringkas
+  // memindahkan Order ke tanki lain (mis. tanki lama rusak) tanpa mengulang
+  // input proses apa pun -- lihat PindahTankiModal.tsx utk detail kenapa ini
+  // TERPISAH dari "+Input Manual" penuh di atas.
+  const [pindahTankiOpen, setPindahTankiOpen] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -475,6 +481,9 @@ export default function ProductionOrderDashboardPage() {
             <>
               <button type="button" className="btn btn-outline" onClick={() => setManualInputOpen(true)}>
                 +Input Manual
+              </button>
+              <button type="button" className="btn btn-outline" onClick={() => setPindahTankiOpen(true)}>
+                Pindah Tanki
               </button>
               <button
                 type="button"
@@ -783,6 +792,10 @@ export default function ProductionOrderDashboardPage() {
         <Modal title="Input Manual" onClose={() => setManualInputOpen(false)} width={980}>
           <ManualInputModal />
         </Modal>
+      )}
+
+      {pindahTankiOpen && (
+        <PindahTankiModal onClose={() => setPindahTankiOpen(false)} onSaved={() => rowsQuery.refetch()} />
       )}
 
       {infoTarget && (

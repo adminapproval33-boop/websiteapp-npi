@@ -1142,6 +1142,31 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       const existing = lastRealTankByOrder.get(r.order);
       if (!existing || ms > existing.ms) lastRealTankByOrder.set(r.order, { code: r.codeTanki, ms });
     }
+
+    /** Override "Code Tanki" dari "+Input Manual" (2026-10-24, instruksi
+     * eksplisit user -- laporan nyata Order 1050009192: tanki hasil Colour
+     * Matching/QC-nya rusak, Order-nya dipindah fisik ke tanki lain TANPA
+     * mengulang proses apa pun -- edit Code Tanki lewat form Aftermix tidak
+     * pernah kelihatan di sini krn Aftermix itu TAHAP LAMA/sebelum Colour
+     * Matching, timestamp-nya tidak pernah "mengejar" sentuhan Colour
+     * Matching/QC yg lebih baru apa pun yg diisi di form Aftermix). SEBELUM
+     * INI, kolom Code Tanki di bawah TIDAK PUNYA jalur override ketika
+     * sentuhan proses asli Order-nya SUDAH terisi (`fallbackTankFor` cuma
+     * jalan kalau nilainya NULL) -- padahal "+Input Manual" SENDIRI SUDAH
+     * "menang mutlak" di Dashboard > Tank Monitoring (unifiedManualEntries,
+     * buildTankStatusMap), jadi user bisa salah kira sudah tersimpan krn Tank
+     * Monitoring ikut berubah, padahal di sini TIDAK. Disamakan: entri
+     * "+Input Manual" PALING BARU per Order (Code Tanki terisi) SELALU
+     * menang di sini juga -- bahkan menimpa Packing -- bukan cuma fallback. */
+    const manualTankOverrideRows = await prisma.productionOrderManualInput.findMany({
+      where: { codeTanki: { not: null } },
+      orderBy: { timestamp: "desc" },
+      select: { order: true, codeTanki: true },
+    });
+    const manualTankOverrideByOrder = new Map<string, string>();
+    for (const m of manualTankOverrideRows) {
+      if (m.codeTanki && !manualTankOverrideByOrder.has(m.order)) manualTankOverrideByOrder.set(m.order, m.codeTanki);
+    }
     const fallbackTankFor = (order: string): string | null =>
       currentTankByOrder.get(order) ?? lastRealTankByOrder.get(order)?.code ?? null;
 
@@ -1409,7 +1434,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
-        codeTanki: (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order),
+        codeTanki: manualTankOverrideByOrder.get(r.order) ?? (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order),
         leadTimeProses: computeLeadTimeProses(r.order, master?.materialNumber ?? null),
         stages,
         progressPercent,

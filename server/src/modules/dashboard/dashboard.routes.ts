@@ -3457,6 +3457,10 @@ dashboardRouter.get(
 const pindahTankiSchema = z.object({
   order: z.string().trim().min(1, "Order wajib diisi."),
   codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+  // Alasan pindah (2026-10-24, instruksi eksplisit user: "Despa rusak/mixer
+  // problem dst") -- optional di backend (frontend yg mewajibkan), ikut
+  // ditulis ke catatan Remark tiap baris yg ditimpa.
+  reason: z.string().trim().optional(),
 });
 
 /** "Pindah Tanki" (2026-10-24, instruksi eksplisit user, REVISI KE-2 --
@@ -3488,7 +3492,7 @@ dashboardRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    const { order, codeTanki: newCodeTanki } = parsed.data;
+    const { order, codeTanki: newCodeTanki, reason } = parsed.data;
     if (!(await isValidTankCode(newCodeTanki))) {
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
@@ -3558,7 +3562,7 @@ dashboardRouter.post(
     const userRow = employee ? null : await prisma.user.findUnique({ where: { nik: req.auth!.nik }, select: { name: true } });
     const displayName = employee?.fullName ?? userRow?.name ?? req.auth!.nik;
     const dateStr = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
-    const remarkNote = `[Pindah Tanki] ${oldCodeTanki} -> ${newCodeTanki} (${dateStr}, oleh ${displayName})`;
+    const remarkNote = `[Pindah Tanki] ${oldCodeTanki} -> ${newCodeTanki} (${dateStr}, oleh ${displayName})${reason ? ` - ${reason}` : ""}`;
     const appendRemark = (existing: string | null): string => (existing && existing.trim() ? `${existing}\n${remarkNote}` : remarkNote);
 
     const [paRows, millingRows, cmRows, crRows, apRows, pkRows] = await Promise.all([

@@ -3463,6 +3463,154 @@ const pindahTankiSchema = z.object({
   reason: z.string().trim().optional(),
 });
 
+/** "Langkah 1" endpoint POST /pindah-tanki (tentukan Code Tanki yg SAAT INI
+ * jadi acuan Order ini) -- diekstrak jadi fungsi sendiri (2026-10-27,
+ * instruksi eksplisit user: tampilkan "Tanki Awal" di popup Pindah Tanki
+ * SEBELUM user submit, bukan cuma dipakai diam-diam pas submit) supaya bisa
+ * dipakai ulang baik oleh POST /pindah-tanki (eksekusi) maupun
+ * GET /pindah-tanki/current-tank (preview, dipanggil frontend). PERSIS
+ * replikasi urutan prioritas kolom Code Tanki GET /production-orders --
+ * Packing menang mutlak kalau ada, kalau belum baris lain yg momennya paling
+ * baru. */
+async function resolveCurrentCodeTanki(order: string): Promise<string | null> {
+  const packingRow = await prisma.packingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } });
+  if (packingRow?.codeTanki) return packingRow.codeTanki;
+
+  const [premixAftermix, milling, colourMatching, checkResult, approval] = await Promise.all([
+    prisma.premixAftermixLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+    prisma.millingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+    prisma.colourMatchingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+    prisma.checkResult.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+    prisma.approvalSchedule.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
+  ]);
+
+  const candidates: { moment: number; codeTanki: string }[] = [];
+  if (premixAftermix) {
+    candidates.push({
+      moment: latestMoment(premixAftermix.start, premixAftermix.finish, premixAftermix.timestamp).getTime(),
+      codeTanki: premixAftermix.codeTanki,
+    });
+  }
+  // SENGAJA cuma codeTanki1 ("tanki utama"/Couple) yg dipakai mewakili tanki
+  // Order ini -- sama konvensi dgn pemakaian codeTanki1 di tempat lain.
+  if (milling?.codeTanki1) {
+    candidates.push({ moment: latestMoment(milling.start, milling.finish, milling.timestamp).getTime(), codeTanki: milling.codeTanki1 });
+  }
+  if (colourMatching) {
+    candidates.push({
+      moment: latestMoment(colourMatching.start, colourMatching.finish, colourMatching.timestamp).getTime(),
+      codeTanki: colourMatching.codeTanki,
+    });
+  }
+  if (checkResult?.codeTanki) {
+    candidates.push({ moment: checkResult.timestamp.getTime(), codeTanki: checkResult.codeTanki });
+  }
+  if (approval?.codeTanki) {
+    candidates.push({ moment: latestMoment(null, approval.finishApp, approval.timestamp).getTime(), codeTanki: approval.codeTanki });
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.moment - a.moment);
+  return candidates[0].codeTanki;
+}
+
+/** Preview "Tanki Awal" di popup Pindah Tanki, SEBELUM user submit (2026-10-27,
+ * instruksi eksplisit user) -- dipanggil frontend begitu Order diketik/dikenal,
+ * read-only, independen dari Referensi Order/PO (lihat komentar
+ * resolveCurrentCodeTanki). `codeTanki: null` berarti Order ini belum py
+ * riwayat proses apa pun -- frontend yg menampilkan pesannya, endpoint ini
+ * TETAP 200 (bukan 400 spt POST /pindah-tanki) krn ini cuma preview/baca. */
+dashboardRouter.get(
+  "/pindah-tanki/current-tank",
+  asyncRoute(async (req, res) => {
+    const order = String(req.query.order ?? "").trim();
+    if (!order) {
+      res.status(400).json({ success: false, message: "Order wajib diisi." });
+      return;
+    }
+    const codeTanki = await resolveCurrentCodeTanki(order);
+    res.json({ success: true, data: { codeTanki } });
+  })
+);
+
+/** Format baku catatan Pindah Tanki yg ditulis POST /pindah-tanki ke Remark:
+ * `[Pindah Tanki] OLD -> NEW (23 Oktober 2026, oleh Nama)` atau
+ * `... - alasan` kalau alasan diisi. Dipakai GET /pindah-tanki/history utk
+ * mem-parse-ulang baris Remark yg match, LINTAS SEMUA tabel tahap (satu
+ * aksi pindah tanki yg cascade ke banyak baris akan menulis catatan yg
+ * IDENTIK ke tiap baris yg ditimpa -- di-dedupe di bawah). */
+const PINDAH_TANKI_REMARK_RE = /^\[Pindah Tanki\] (\S+) -> (\S+) \(([^,]+), oleh ([^)]+)\)(?: - (.*))?$/;
+
+const INDONESIAN_MONTHS = [
+  "januari",
+  "februari",
+  "maret",
+  "april",
+  "mei",
+  "juni",
+  "juli",
+  "agustus",
+  "september",
+  "oktober",
+  "november",
+  "desember",
+];
+
+/** Parse "23 Oktober 2026" (format `toLocaleDateString("id-ID", {day,month,
+ * year})` yg dipakai POST /pindah-tanki) balik jadi Date, utk sortir riwayat
+ * terbaru-dulu di GET /pindah-tanki/history. Gagal parse -> null (baris tetap
+ * ditampilkan, cuma diurutkan paling akhir). */
+function parseIndonesianDate(label: string): Date | null {
+  const match = label.trim().match(/^(\d{1,2})\s+(\p{L}+)\s+(\d{4})$/u);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const monthIndex = INDONESIAN_MONTHS.indexOf(match[2].toLowerCase());
+  const year = Number(match[3]);
+  if (monthIndex === -1) return null;
+  return new Date(year, monthIndex, day);
+}
+
+/** Riwayat SEMUA perpindahan tanki yg pernah dilakukan lewat menu Pindah
+ * Tanki (2026-10-27, instruksi eksplisit user: "buatkan list hist no order
+ * yang berpindah tanki", ditampilkan di popup yg sama) -- scan kolom Remark
+ * di KESELURUHAN 6 tabel tahap utk baris yg cocok format baku
+ * PINDAH_TANKI_REMARK_RE, lalu DI-DEDUPE (satu aksi pindah tanki menulis
+ * catatan yg SAMA PERSIS ke tiap baris yg di-cascade, lihat POST
+ * /pindah-tanki) supaya 1 aksi pindah = 1 baris di riwayat ini, bukan
+ * sebanyak baris yg ditimpa. Diurutkan tanggal terbaru dulu. */
+dashboardRouter.get(
+  "/pindah-tanki/history",
+  asyncRoute(async (_req, res) => {
+    const [paRows, cmRows, crRows, apRows, pkRows, millingRows] = await Promise.all([
+      prisma.premixAftermixLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.colourMatchingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.checkResult.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.approvalSchedule.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.packingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.millingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+    ]);
+
+    const seen = new Set<string>();
+    const entries: { order: string; oldCodeTanki: string; newCodeTanki: string; dateLabel: string; by: string; reason: string | null; date: Date | null }[] =
+      [];
+    for (const row of [...paRows, ...cmRows, ...crRows, ...apRows, ...pkRows, ...millingRows]) {
+      if (!row.remark) continue;
+      for (const line of row.remark.split("\n")) {
+        const match = line.trim().match(PINDAH_TANKI_REMARK_RE);
+        if (!match) continue;
+        const [, oldCodeTanki, newCodeTanki, dateLabel, by, reason] = match;
+        const key = `${row.order}|${oldCodeTanki}|${newCodeTanki}|${dateLabel}|${by}|${reason ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ order: row.order, oldCodeTanki, newCodeTanki, dateLabel, by, reason: reason ?? null, date: parseIndonesianDate(dateLabel) });
+      }
+    }
+
+    entries.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
+    res.json({ success: true, data: entries });
+  })
+);
+
 /** "Pindah Tanki" (2026-10-24, instruksi eksplisit user, REVISI KE-2 --
  * laporan nyata Order 1050009192 & 1010166475: tanki lama rusak, Order
  * dipindah fisik). Revisi pertama cuma menimpa 1 baris "pemenang" (tahap
@@ -3503,54 +3651,13 @@ dashboardRouter.post(
     }
 
     // ===== Langkah 1: tentukan Code Tanki LAMA dari baris "pemenang" saat ini =====
-    const packingRow = await prisma.packingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } });
-    let oldCodeTanki: string | null = packingRow?.codeTanki ?? null;
-
+    const oldCodeTanki = await resolveCurrentCodeTanki(order);
     if (!oldCodeTanki) {
-      const [premixAftermix, milling, colourMatching, checkResult, approval] = await Promise.all([
-        prisma.premixAftermixLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
-        prisma.millingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
-        prisma.colourMatchingLog.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
-        prisma.checkResult.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
-        prisma.approvalSchedule.findFirst({ where: { order }, orderBy: { timestamp: "desc" } }),
-      ]);
-
-      const candidates: { moment: number; codeTanki: string }[] = [];
-      if (premixAftermix) {
-        candidates.push({
-          moment: latestMoment(premixAftermix.start, premixAftermix.finish, premixAftermix.timestamp).getTime(),
-          codeTanki: premixAftermix.codeTanki,
-        });
-      }
-      // SENGAJA cuma codeTanki1 ("tanki utama"/Couple) yg dipakai mewakili
-      // tanki Order ini -- sama konvensi dgn pemakaian codeTanki1 di tempat
-      // lain (mis. buildProduktivitasData) saat cuma 1 nilai yg dibutuhkan.
-      if (milling?.codeTanki1) {
-        candidates.push({ moment: latestMoment(milling.start, milling.finish, milling.timestamp).getTime(), codeTanki: milling.codeTanki1 });
-      }
-      if (colourMatching) {
-        candidates.push({
-          moment: latestMoment(colourMatching.start, colourMatching.finish, colourMatching.timestamp).getTime(),
-          codeTanki: colourMatching.codeTanki,
-        });
-      }
-      if (checkResult?.codeTanki) {
-        candidates.push({ moment: checkResult.timestamp.getTime(), codeTanki: checkResult.codeTanki });
-      }
-      if (approval?.codeTanki) {
-        candidates.push({ moment: latestMoment(null, approval.finishApp, approval.timestamp).getTime(), codeTanki: approval.codeTanki });
-      }
-
-      if (candidates.length === 0) {
-        res.status(400).json({
-          success: false,
-          message:
-            "Order ini belum punya riwayat proses apa pun (belum pernah diinput di tahap manapun) -- tidak ada yang bisa dipindahkan.",
-        });
-        return;
-      }
-      candidates.sort((a, b) => b.moment - a.moment);
-      oldCodeTanki = candidates[0].codeTanki;
+      res.status(400).json({
+        success: false,
+        message: "Order ini belum punya riwayat proses apa pun (belum pernah diinput di tahap manapun) -- tidak ada yang bisa dipindahkan.",
+      });
+      return;
     }
 
     if (oldCodeTanki === newCodeTanki) {

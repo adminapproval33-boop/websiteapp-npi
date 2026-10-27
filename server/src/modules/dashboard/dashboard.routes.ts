@@ -3754,38 +3754,6 @@ dashboardRouter.delete(
   })
 );
 
-const historyEditSchema = historyDeleteSchema.extend({
-  reason: z.string().trim().optional(),
-});
-
-/** Edit alasan 1 entri "Riwayat Pindah Tanki" (2026-10-27, instruksi
- * eksplisit user) -- tanki lama/baru/tanggal/oleh TIDAK bisa diedit lewat
- * sini (itu fakta historis apa yg BENERAN terjadi, bukan utk ditulis ulang),
- * cuma teks alasannya yg SENGAJA boleh dikoreksi (mis. typo). Re-parse
- * `noteText` lama (bukan percaya field terpisah dari body) utk menjamin
- * tanki/tanggal/oleh yg ditulis ulang PERSIS sama persis dgn yg lama. */
-dashboardRouter.put(
-  "/pindah-tanki/history",
-  requireWrite,
-  asyncRoute(async (req, res) => {
-    const parsed = historyEditSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
-      return;
-    }
-    const { locations, noteText, reason } = parsed.data;
-    const match = noteText.trim().match(PINDAH_TANKI_REMARK_RE);
-    if (!match) {
-      res.status(400).json({ success: false, message: "Format catatan Pindah Tanki tidak dikenali." });
-      return;
-    }
-    const [, oldCodeTanki, newCodeTanki, dateLabel, by] = match;
-    const newNoteText = `[Pindah Tanki] ${oldCodeTanki} -> ${newCodeTanki} (${dateLabel}, oleh ${by})${reason && reason.trim() ? ` - ${reason.trim()}` : ""}`;
-    const touched = await mutatePindahTankiHistoryLine(locations, noteText, newNoteText);
-    res.json({ success: true, message: `Riwayat berhasil diperbarui (${touched} baris diperbarui).`, data: { noteText: newNoteText } });
-  })
-);
-
 /** "Pindah Tanki" (2026-10-24, instruksi eksplisit user, REVISI KE-2 --
  * laporan nyata Order 1050009192 & 1010166475: tanki lama rusak, Order
  * dipindah fisik). Revisi pertama cuma menimpa 1 baris "pemenang" (tahap

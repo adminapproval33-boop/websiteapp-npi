@@ -75,11 +75,16 @@ interface PindahTankiHistoryEntry {
  * 6) Form "Pindahkan" & daftar "Riwayat" dipisah jadi 2 tab (sebelumnya
  *    ditumpuk 1 layar, kepanjangan/membingungkan) -- pola tab yg sama dgn
  *    menu lain di app ini (mis. "Input Aftermix"/"History"/"PWO Schedule").
- * 7) Kolom "Aksi" (Edit/Hapus) di tab History -- Edit CUMA alasan (tanki
- *    lama/baru/tanggal/oleh adalah fakta historis, bukan utk ditulis ulang,
- *    lihat komentar PUT /pindah-tanki/history di backend), Hapus menghapus
- *    baris catatannya dari Remark di SEMUA lokasi asalnya TANPA menyentuh
- *    Code Tanki yg sedang berlaku skrg (riwayat murni jejak/catatan).
+ * 7) Kolom "Aksi" (Edit/Hapus) di tab History -- Hapus menghapus baris
+ *    catatannya dari Remark di SEMUA lokasi asalnya TANPA menyentuh Code
+ *    Tanki yg sedang berlaku skrg (riwayat murni jejak/catatan). Edit
+ *    REVISI (2026-10-27, instruksi eksplisit user: percobaan pertama cuma
+ *    bisa koreksi teks Alasan di tempat, DITOLAK -- "code tanki baru yang
+ *    sudah diinput tidak bisa diedit, harusnya ... pindah ke menu input
+ *    (pindahkan) untuk diinput ulang") -- jadi Edit BUKAN menulis ulang teks
+ *    histori lama, tapi pindah ke tab "Pindahkan" dgn Order/Tanki Baru/Alasan
+ *    entri itu SUDAH terisi (lihat openInputForEdit), user tinggal ganti lalu
+ *    submit ULANG lewat POST /pindah-tanki yg sama (cascade + catatan baru).
  *
  * `order` optional: kalau sudah diketahui dari konteks pemanggil (popup Info
  * Proses per-Order), field Order ditampilkan read-only (lookup tetap jalan
@@ -104,11 +109,6 @@ export default function PindahTankiModal({
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Edit alasan 1 entri History -- inline (ganti teks alasan jadi input +
-  // Simpan/Batal), bukan popup bersarang. `editingNoteText` dipakai sbg kunci
-  // baris yg lagi diedit (unik per entri, lihat noteText di GET /history).
-  const [editingNoteText, setEditingNoteText] = useState<string | null>(null);
-  const [editReasonValue, setEditReasonValue] = useState("");
   const [historyError, setHistoryError] = useState("");
 
   // Lookup Referensi Order/PO -- 2 jalur: `initialOrder` (sudah pasti, dari
@@ -173,20 +173,35 @@ export default function PindahTankiModal({
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal memindahkan tanki."),
   });
 
-  const editHistoryMutation = useMutation({
-    mutationFn: (entry: PindahTankiHistoryEntry) =>
-      api.put<{ success: boolean; message: string }>("/dashboard/pindah-tanki/history", {
-        locations: entry.locations,
-        noteText: entry.noteText,
-        reason: editReasonValue.trim(),
-      }),
-    onSuccess: () => {
-      setEditingNoteText(null);
-      setHistoryError("");
-      queryClient.invalidateQueries({ queryKey: ["pindah-tanki-history"] });
-    },
-    onError: (err) => setHistoryError(err instanceof ApiError ? err.message : "Gagal memperbarui riwayat."),
-  });
+  // "Edit" di tab Riwayat (2026-10-27, revisi eksplisit user -- versi
+  // sebelumnya cuma bisa koreksi teks Alasan di tempat, user TIDAK mau itu:
+  // "code tanki baru yang sudah diinput tidak bisa diedit, harusnya ... pindah
+  // ke menu input (pindahkan) untuk diinput ulang"). Jadi "Edit" sekarang
+  // BUKAN nulis ulang teks histori lama, tapi pindah ke tab "Pindahkan" dgn
+  // Order + Tanki Baru + Alasan entri itu SUDAH terisi -- user tinggal ganti
+  // Tanki Baru (atau field lain) lalu submit ULANG lewat POST /pindah-tanki
+  // yg sama (cascade + catatan histori baru), BUKAN menimpa catatan lama.
+  // Sekalian jalankan lookup Referensi Order/PO (persis pola `handleSearch`
+  // di OrderLookup.tsx) supaya Material Number/dst & preview "Tanki Awal"
+  // langsung terisi, tidak perlu user ketik ulang/Enter lagi di field Order.
+  async function openInputForEdit(entry: PindahTankiHistoryEntry) {
+    setSuccessMessage("");
+    setError("");
+    setOrder(entry.order);
+    setCodeTanki(entry.newCodeTanki);
+    setReason(entry.reason ?? "");
+    setTab("input");
+    if (!initialOrder) {
+      try {
+        const data = await api.get<{ success: boolean; data: OrderRefData }>(`/master-data/orders/${encodeURIComponent(entry.order)}`).then((r) => r.data);
+        setTypedOrderRef(data);
+        setTypedOrderNotFound(false);
+      } catch {
+        setTypedOrderRef(null);
+        setTypedOrderNotFound(true);
+      }
+    }
+  }
 
   const deleteHistoryMutation = useMutation({
     mutationFn: (entry: PindahTankiHistoryEntry) =>
@@ -339,82 +354,45 @@ export default function PindahTankiModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {historyQuery.data.map((entry, i) => {
-                    const isEditing = editingNoteText === entry.noteText;
-                    return (
-                      <tr key={`${entry.noteText}-${i}`} style={{ borderTop: "1px solid var(--border-color, #e2e2e2)" }}>
-                        <td style={{ padding: "6px 8px" }}>{entry.order}</td>
-                        <td style={{ padding: "6px 8px" }}>{entry.oldCodeTanki}</td>
-                        <td style={{ padding: "6px 8px" }}>{entry.newCodeTanki}</td>
-                        <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{entry.dateLabel}</td>
-                        <td style={{ padding: "6px 8px" }}>{entry.by}</td>
-                        <td style={{ padding: "6px 8px" }}>
-                          {isEditing ? (
-                            <input
-                              value={editReasonValue}
-                              onChange={(e) => setEditReasonValue(e.target.value)}
-                              style={{ width: "100%", fontSize: "0.78rem" }}
-                              autoFocus
-                            />
-                          ) : (
-                            entry.reason ?? "-"
-                          )}
-                        </td>
-                        <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                          {isEditing ? (
-                            <div style={{ display: "flex", gap: 4 }}>
-                              <button
-                                type="button"
-                                className="btn"
-                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
-                                disabled={editHistoryMutation.isPending}
-                                onClick={() => editHistoryMutation.mutate(entry)}
-                              >
-                                Simpan
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline"
-                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
-                                onClick={() => setEditingNoteText(null)}
-                              >
-                                Batal
-                              </button>
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 4 }}>
-                              <button
-                                type="button"
-                                className="btn btn-outline"
-                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
-                                onClick={() => {
-                                  setHistoryError("");
-                                  setEditingNoteText(entry.noteText);
-                                  setEditReasonValue(entry.reason ?? "");
-                                }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-danger"
-                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
-                                disabled={deleteHistoryMutation.isPending}
-                                onClick={() => {
-                                  if (confirm(`Hapus riwayat pindah tanki Order ${entry.order} (${entry.oldCodeTanki} -> ${entry.newCodeTanki})?`)) {
-                                    setHistoryError("");
-                                    deleteHistoryMutation.mutate(entry);
-                                  }
-                                }}
-                              >
-                                Hapus
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {historyQuery.data.map((entry, i) => (
+                    <tr key={`${entry.noteText}-${i}`} style={{ borderTop: "1px solid var(--border-color, #e2e2e2)" }}>
+                      <td style={{ padding: "6px 8px" }}>{entry.order}</td>
+                      <td style={{ padding: "6px 8px" }}>{entry.oldCodeTanki}</td>
+                      <td style={{ padding: "6px 8px" }}>{entry.newCodeTanki}</td>
+                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{entry.dateLabel}</td>
+                      <td style={{ padding: "6px 8px" }}>{entry.by}</td>
+                      <td style={{ padding: "6px 8px" }}>{entry.reason ?? "-"}</td>
+                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            type="button"
+                            className="btn btn-outline"
+                            style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                            onClick={() => {
+                              setHistoryError("");
+                              openInputForEdit(entry);
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                            disabled={deleteHistoryMutation.isPending}
+                            onClick={() => {
+                              if (confirm(`Hapus riwayat pindah tanki Order ${entry.order} (${entry.oldCodeTanki} -> ${entry.newCodeTanki})?`)) {
+                                setHistoryError("");
+                                deleteHistoryMutation.mutate(entry);
+                              }
+                            }}
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

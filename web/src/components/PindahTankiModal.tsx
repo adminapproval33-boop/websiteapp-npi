@@ -15,6 +15,11 @@ function refField(label: string, value: string | null | undefined) {
   );
 }
 
+interface PindahTankiHistoryLocation {
+  table: "premixAftermix" | "milling" | "colourMatching" | "checkResult" | "approval" | "packing";
+  id: string;
+}
+
 interface PindahTankiHistoryEntry {
   order: string;
   oldCodeTanki: string;
@@ -22,6 +27,8 @@ interface PindahTankiHistoryEntry {
   dateLabel: string;
   by: string;
   reason: string | null;
+  noteText: string;
+  locations: PindahTankiHistoryLocation[];
 }
 
 /** Popup ringkas "Pindah Tanki" (2026-10-24, instruksi eksplisit user --
@@ -62,9 +69,17 @@ interface PindahTankiHistoryEntry {
  *    (GET /pindah-tanki/history) ditampilkan di popup yg SAMA (bukan popup
  *    terpisah) -- di-parse backend dari catatan Remark baku yg ditulis POST
  *    /pindah-tanki, di-dedupe per-aksi (1 aksi pindah bisa cascade ke banyak
- *    baris, tapi harus tetap 1 baris di riwayat ini). Selalu tampil (baik di
- *    state form maupun setelah submit berhasil) supaya pindah yg baru saja
- *    dilakukan langsung kelihatan masuk ke daftar.
+ *    baris, tapi harus tetap 1 baris di riwayat ini).
+ *
+ * REVISI (2026-10-27, instruksi eksplisit user lanjutan lagi):
+ * 6) Form "Pindahkan" & daftar "Riwayat" dipisah jadi 2 tab (sebelumnya
+ *    ditumpuk 1 layar, kepanjangan/membingungkan) -- pola tab yg sama dgn
+ *    menu lain di app ini (mis. "Input Aftermix"/"History"/"PWO Schedule").
+ * 7) Kolom "Aksi" (Edit/Hapus) di tab History -- Edit CUMA alasan (tanki
+ *    lama/baru/tanggal/oleh adalah fakta historis, bukan utk ditulis ulang,
+ *    lihat komentar PUT /pindah-tanki/history di backend), Hapus menghapus
+ *    baris catatannya dari Remark di SEMUA lokasi asalnya TANPA menyentuh
+ *    Code Tanki yg sedang berlaku skrg (riwayat murni jejak/catatan).
  *
  * `order` optional: kalau sudah diketahui dari konteks pemanggil (popup Info
  * Proses per-Order), field Order ditampilkan read-only (lookup tetap jalan
@@ -82,11 +97,19 @@ export default function PindahTankiModal({
   onSaved?: () => void;
 }) {
   const { data: tanks } = useTankOptions();
+  const [tab, setTab] = useState<"input" | "history">("input");
   const [order, setOrder] = useState(initialOrder ?? "");
   const [codeTanki, setCodeTanki] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Edit alasan 1 entri History -- inline (ganti teks alasan jadi input +
+  // Simpan/Batal), bukan popup bersarang. `editingNoteText` dipakai sbg kunci
+  // baris yg lagi diedit (unik per entri, lihat noteText di GET /history).
+  const [editingNoteText, setEditingNoteText] = useState<string | null>(null);
+  const [editReasonValue, setEditReasonValue] = useState("");
+  const [historyError, setHistoryError] = useState("");
 
   // Lookup Referensi Order/PO -- 2 jalur: `initialOrder` (sudah pasti, dari
   // Info Proses) pakai useQuery langsung; Order ketik-sendiri (toolbar) pakai
@@ -150,6 +173,34 @@ export default function PindahTankiModal({
     onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal memindahkan tanki."),
   });
 
+  const editHistoryMutation = useMutation({
+    mutationFn: (entry: PindahTankiHistoryEntry) =>
+      api.put<{ success: boolean; message: string }>("/dashboard/pindah-tanki/history", {
+        locations: entry.locations,
+        noteText: entry.noteText,
+        reason: editReasonValue.trim(),
+      }),
+    onSuccess: () => {
+      setEditingNoteText(null);
+      setHistoryError("");
+      queryClient.invalidateQueries({ queryKey: ["pindah-tanki-history"] });
+    },
+    onError: (err) => setHistoryError(err instanceof ApiError ? err.message : "Gagal memperbarui riwayat."),
+  });
+
+  const deleteHistoryMutation = useMutation({
+    mutationFn: (entry: PindahTankiHistoryEntry) =>
+      api.delete<{ success: boolean; message: string }>("/dashboard/pindah-tanki/history", {
+        locations: entry.locations,
+        noteText: entry.noteText,
+      }),
+    onSuccess: () => {
+      setHistoryError("");
+      queryClient.invalidateQueries({ queryKey: ["pindah-tanki-history"] });
+    },
+    onError: (err) => setHistoryError(err instanceof ApiError ? err.message : "Gagal menghapus riwayat."),
+  });
+
   function submit() {
     if (!order.trim()) {
       setError("Order wajib diisi.");
@@ -169,87 +220,97 @@ export default function PindahTankiModal({
 
   return createPortal(
     <Modal title={initialOrder ? `Pindah Tanki — Order ${initialOrder}` : "Pindah Tanki"} onClose={onClose} width={640}>
-      {successMessage ? (
-        <>
-          <p className="status-text" style={{ marginTop: 0 }}>
-            {successMessage}
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-            <button type="button" className="btn" onClick={onClose}>
-              Tutup
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p style={{ marginTop: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
-            Menimpa langsung Code Tanki di SEMUA baris riwayat proses Order ini yang kebetulan tercatat di tanki lama
-            yang sama (bukan cuma yang terakhir) -- Tank Monitoring, Production Order Monitoring, maupun History-nya
-            sendiri ikut menampilkan tanki baru ini. Tiap baris yang ditimpa otomatis dapat catatan di Remark-nya
-            supaya jejak pemindahan (dan alasannya) tetap kelihatan.
-          </p>
-          {!initialOrder && (
-            <OrderLookup
-              value={order}
-              onChange={setOrder}
-              onFound={(data) => {
-                setTypedOrderRef(data);
-                setTypedOrderNotFound(false);
-              }}
-              onNotFound={() => {
-                setTypedOrderRef(null);
-                setTypedOrderNotFound(true);
-              }}
-            />
-          )}
-          {orderNotFound && (
-            <p className="error-text" style={{ marginTop: -4, marginBottom: 10 }}>
-              Nomor Order ini tidak ada di data Cooispi -- periksa lagi, mungkin salah ketik. (Tetap bisa dipindah
-              kalau memang Order ini valid tapi belum/tidak ada di Referensi Order/PO.)
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button type="button" className={tab === "input" ? "btn" : "btn btn-outline"} onClick={() => setTab("input")}>
+          Pindahkan
+        </button>
+        <button type="button" className={tab === "history" ? "btn" : "btn btn-outline"} onClick={() => setTab("history")}>
+          Riwayat
+        </button>
+      </div>
+
+      {tab === "input" &&
+        (successMessage ? (
+          <>
+            <p className="status-text" style={{ marginTop: 0 }}>
+              {successMessage}
             </p>
-          )}
-          {orderRef && (
-            <div className="field-grid" style={{ marginBottom: 10 }}>
-              {refField("Material Number", orderRef.materialNumber)}
-              {refField("Material Description", orderRef.materialDescription)}
-              {refField("Batch", orderRef.batch)}
-              {refField("Order Qty", orderRef.orderQty)}
-              {refField("Plant", orderRef.plant)}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <button type="button" className="btn" onClick={onClose}>
+                Tutup
+              </button>
             </div>
-          )}
-          {tankLookupEnabled && (
-            <div style={{ marginTop: orderRef ? 0 : 10 }}>
-              {refField(
-                "Tanki Awal",
-                currentTankQuery.isFetching
-                  ? "Memuat..."
-                  : currentTankQuery.data?.codeTanki ?? "Order ini belum punya riwayat proses apa pun"
-              )}
-            </div>
-          )}
-          <div className="field" style={{ marginTop: 10 }}>
-            <label>Tanki Baru *</label>
-            <TankSelect bare id="pindah-tanki-new" value={codeTanki} onChange={setCodeTanki} />
-          </div>
-          <div className="field" style={{ marginTop: 10 }}>
-            <label>Alasan Pindah *</label>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mis. Despa rusak / mixer problem" />
-          </div>
-          {error && (
-            <p className="error-text" style={{ marginTop: 8 }}>
-              {error}
+          </>
+        ) : (
+          <>
+            <p style={{ marginTop: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              Menimpa langsung Code Tanki di SEMUA baris riwayat proses Order ini yang kebetulan tercatat di tanki lama
+              yang sama (bukan cuma yang terakhir) -- Tank Monitoring, Production Order Monitoring, maupun History-nya
+              sendiri ikut menampilkan tanki baru ini. Tiap baris yang ditimpa otomatis dapat catatan di Remark-nya
+              supaya jejak pemindahan (dan alasannya) tetap kelihatan.
             </p>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-            <button type="button" className="btn" disabled={mutation.isPending} onClick={submit}>
-              {mutation.isPending ? "Menyimpan..." : "Pindahkan"}
-            </button>
-          </div>
-        </>
-      )}
-      <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border-color, #e2e2e2)" }}>
-        <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: "0.85rem" }}>Riwayat Pindah Tanki</p>
-        {historyQuery.isLoading ? (
+            {!initialOrder && (
+              <OrderLookup
+                value={order}
+                onChange={setOrder}
+                onFound={(data) => {
+                  setTypedOrderRef(data);
+                  setTypedOrderNotFound(false);
+                }}
+                onNotFound={() => {
+                  setTypedOrderRef(null);
+                  setTypedOrderNotFound(true);
+                }}
+              />
+            )}
+            {orderNotFound && (
+              <p className="error-text" style={{ marginTop: -4, marginBottom: 10 }}>
+                Nomor Order ini tidak ada di data Cooispi -- periksa lagi, mungkin salah ketik. (Tetap bisa dipindah
+                kalau memang Order ini valid tapi belum/tidak ada di Referensi Order/PO.)
+              </p>
+            )}
+            {orderRef && (
+              <div className="field-grid" style={{ marginBottom: 10 }}>
+                {refField("Material Number", orderRef.materialNumber)}
+                {refField("Material Description", orderRef.materialDescription)}
+                {refField("Batch", orderRef.batch)}
+                {refField("Order Qty", orderRef.orderQty)}
+                {refField("Plant", orderRef.plant)}
+              </div>
+            )}
+            {tankLookupEnabled && (
+              <div style={{ marginTop: orderRef ? 0 : 10 }}>
+                {refField(
+                  "Tanki Awal",
+                  currentTankQuery.isFetching
+                    ? "Memuat..."
+                    : currentTankQuery.data?.codeTanki ?? "Order ini belum punya riwayat proses apa pun"
+                )}
+              </div>
+            )}
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Tanki Baru *</label>
+              <TankSelect bare id="pindah-tanki-new" value={codeTanki} onChange={setCodeTanki} />
+            </div>
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Alasan Pindah *</label>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mis. Despa rusak / mixer problem" />
+            </div>
+            {error && (
+              <p className="error-text" style={{ marginTop: 8 }}>
+                {error}
+              </p>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+              <button type="button" className="btn" disabled={mutation.isPending} onClick={submit}>
+                {mutation.isPending ? "Menyimpan..." : "Pindahkan"}
+              </button>
+            </div>
+          </>
+        ))}
+
+      {tab === "history" &&
+        (historyQuery.isLoading ? (
           <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Memuat riwayat...</p>
         ) : historyQuery.isError ? (
           <p className="error-text" style={{ fontSize: "0.8rem" }}>
@@ -258,34 +319,107 @@ export default function PindahTankiModal({
         ) : !historyQuery.data || historyQuery.data.length === 0 ? (
           <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Belum ada Order yang pernah dipindah tankinya.</p>
         ) : (
-          <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border-color, #e2e2e2)", borderRadius: 6 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
-              <thead>
-                <tr style={{ position: "sticky", top: 0, background: "var(--panel-bg, #fff)" }}>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Order</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanki Lama</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanki Baru</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanggal</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Oleh</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Alasan</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyQuery.data.map((entry, i) => (
-                  <tr key={`${entry.order}-${entry.dateLabel}-${i}`} style={{ borderTop: "1px solid var(--border-color, #e2e2e2)" }}>
-                    <td style={{ padding: "6px 8px" }}>{entry.order}</td>
-                    <td style={{ padding: "6px 8px" }}>{entry.oldCodeTanki}</td>
-                    <td style={{ padding: "6px 8px" }}>{entry.newCodeTanki}</td>
-                    <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{entry.dateLabel}</td>
-                    <td style={{ padding: "6px 8px" }}>{entry.by}</td>
-                    <td style={{ padding: "6px 8px" }}>{entry.reason ?? "-"}</td>
+          <>
+            {historyError && (
+              <p className="error-text" style={{ marginTop: -4, marginBottom: 8, fontSize: "0.8rem" }}>
+                {historyError}
+              </p>
+            )}
+            <div style={{ maxHeight: 400, overflow: "auto", border: "1px solid var(--border-color, #e2e2e2)", borderRadius: 6 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
+                <thead>
+                  <tr style={{ position: "sticky", top: 0, background: "var(--panel-bg, #fff)" }}>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Order</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanki Lama</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanki Baru</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Tanggal</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Oleh</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Alasan</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px" }}>Aksi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {historyQuery.data.map((entry, i) => {
+                    const isEditing = editingNoteText === entry.noteText;
+                    return (
+                      <tr key={`${entry.noteText}-${i}`} style={{ borderTop: "1px solid var(--border-color, #e2e2e2)" }}>
+                        <td style={{ padding: "6px 8px" }}>{entry.order}</td>
+                        <td style={{ padding: "6px 8px" }}>{entry.oldCodeTanki}</td>
+                        <td style={{ padding: "6px 8px" }}>{entry.newCodeTanki}</td>
+                        <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>{entry.dateLabel}</td>
+                        <td style={{ padding: "6px 8px" }}>{entry.by}</td>
+                        <td style={{ padding: "6px 8px" }}>
+                          {isEditing ? (
+                            <input
+                              value={editReasonValue}
+                              onChange={(e) => setEditReasonValue(e.target.value)}
+                              style={{ width: "100%", fontSize: "0.78rem" }}
+                              autoFocus
+                            />
+                          ) : (
+                            entry.reason ?? "-"
+                          )}
+                        </td>
+                        <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                          {isEditing ? (
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                                disabled={editHistoryMutation.isPending}
+                                onClick={() => editHistoryMutation.mutate(entry)}
+                              >
+                                Simpan
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline"
+                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                                onClick={() => setEditingNoteText(null)}
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 4 }}>
+                              <button
+                                type="button"
+                                className="btn btn-outline"
+                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                                onClick={() => {
+                                  setHistoryError("");
+                                  setEditingNoteText(entry.noteText);
+                                  setEditReasonValue(entry.reason ?? "");
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-danger"
+                                style={{ padding: "2px 8px", fontSize: "0.75rem" }}
+                                disabled={deleteHistoryMutation.isPending}
+                                onClick={() => {
+                                  if (confirm(`Hapus riwayat pindah tanki Order ${entry.order} (${entry.oldCodeTanki} -> ${entry.newCodeTanki})?`)) {
+                                    setHistoryError("");
+                                    deleteHistoryMutation.mutate(entry);
+                                  }
+                                }}
+                              >
+                                Hapus
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ))}
     </Modal>,
     document.body
   );

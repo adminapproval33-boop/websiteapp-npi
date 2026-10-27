@@ -3570,6 +3570,80 @@ function parseIndonesianDate(label: string): Date | null {
   return new Date(year, monthIndex, day);
 }
 
+/** Nama tabel pendek dipakai sbg "alamat" baris Remark yg jadi sumber 1
+ * entri riwayat Pindah Tanki -- supaya Edit/Hapus di GET /pindah-tanki/history
+ * bisa balik ke baris PERSIS yg benar (lintas 6 tabel beda PK: id Int vs
+ * checkId/approvalId String), TANPA perlu re-match ulang via field lain yg
+ * rawan ambigu (mis. 2 entri beda kebetulan py order+tanki+tanggal sama). */
+type PindahTankiHistoryTable = "premixAftermix" | "milling" | "colourMatching" | "checkResult" | "approval" | "packing";
+
+async function getHistoryRowRemark(table: PindahTankiHistoryTable, id: string): Promise<string | null> {
+  switch (table) {
+    case "premixAftermix":
+      return (await prisma.premixAftermixLog.findUnique({ where: { id: Number(id) }, select: { remark: true } }))?.remark ?? null;
+    case "milling":
+      return (await prisma.millingLog.findUnique({ where: { id: Number(id) }, select: { remark: true } }))?.remark ?? null;
+    case "colourMatching":
+      return (await prisma.colourMatchingLog.findUnique({ where: { id: Number(id) }, select: { remark: true } }))?.remark ?? null;
+    case "checkResult":
+      return (await prisma.checkResult.findUnique({ where: { checkId: id }, select: { remark: true } }))?.remark ?? null;
+    case "approval":
+      return (await prisma.approvalSchedule.findUnique({ where: { approvalId: id }, select: { remark: true } }))?.remark ?? null;
+    case "packing":
+      return (await prisma.packingLog.findUnique({ where: { id: Number(id) }, select: { remark: true } }))?.remark ?? null;
+  }
+}
+
+async function setHistoryRowRemark(table: PindahTankiHistoryTable, id: string, remark: string): Promise<void> {
+  switch (table) {
+    case "premixAftermix":
+      await prisma.premixAftermixLog.update({ where: { id: Number(id) }, data: { remark } });
+      return;
+    case "milling":
+      await prisma.millingLog.update({ where: { id: Number(id) }, data: { remark } });
+      return;
+    case "colourMatching":
+      await prisma.colourMatchingLog.update({ where: { id: Number(id) }, data: { remark } });
+      return;
+    case "checkResult":
+      await prisma.checkResult.update({ where: { checkId: id }, data: { remark } });
+      return;
+    case "approval":
+      await prisma.approvalSchedule.update({ where: { approvalId: id }, data: { remark } });
+      return;
+    case "packing":
+      await prisma.packingLog.update({ where: { id: Number(id) }, data: { remark } });
+      return;
+  }
+}
+
+/** Timpa/hapus 1 baris catatan Pindah Tanki (`matchLine`) di SEMUA lokasi
+ * (baris+tabel) yg terdaftar -- `replacement: null` = hapus baris itu dari
+ * Remark (sisa baris Remark lain, kalau ada, TETAP dipertahankan), string =
+ * ganti baris itu dgn teks baru (dipakai utk Edit alasan). Lokasi yg sudah
+ * tidak match lagi (mis. race condition, atau sudah dihapus org lain) SENGAJA
+ * dilewati diam-diam, bukan error -- selisihnya dilaporkan lewat jumlah
+ * baris yg benar2 ikut berubah. */
+async function mutatePindahTankiHistoryLine(
+  locations: { table: PindahTankiHistoryTable; id: string }[],
+  matchLine: string,
+  replacement: string | null
+): Promise<number> {
+  let touched = 0;
+  for (const loc of locations) {
+    const remark = await getHistoryRowRemark(loc.table, loc.id);
+    if (remark == null) continue;
+    const lines = remark.split("\n");
+    const idx = lines.findIndex((l) => l.trim() === matchLine.trim());
+    if (idx === -1) continue;
+    if (replacement === null) lines.splice(idx, 1);
+    else lines[idx] = replacement;
+    await setHistoryRowRemark(loc.table, loc.id, lines.join("\n"));
+    touched++;
+  }
+  return touched;
+}
+
 /** Riwayat SEMUA perpindahan tanki yg pernah dilakukan lewat menu Pindah
  * Tanki (2026-10-27, instruksi eksplisit user: "buatkan list hist no order
  * yang berpindah tanki", ditampilkan di popup yg sama) -- scan kolom Remark
@@ -3577,37 +3651,138 @@ function parseIndonesianDate(label: string): Date | null {
  * PINDAH_TANKI_REMARK_RE, lalu DI-DEDUPE (satu aksi pindah tanki menulis
  * catatan yg SAMA PERSIS ke tiap baris yg di-cascade, lihat POST
  * /pindah-tanki) supaya 1 aksi pindah = 1 baris di riwayat ini, bukan
- * sebanyak baris yg ditimpa. Diurutkan tanggal terbaru dulu. */
+ * sebanyak baris yg ditimpa -- SEMUA lokasi (tabel+id) yg jadi sumber 1 entri
+ * ikut dikumpulkan di `locations` (2026-10-27, instruksi eksplisit user lanjut:
+ * kolom Aksi utk Edit/Hapus di riwayat ini) supaya PUT/DELETE di bawah bisa
+ * menimpa/menghapus baris yg PERSIS benar di SEMUA lokasinya sekaligus.
+ * Diurutkan tanggal terbaru dulu. */
 dashboardRouter.get(
   "/pindah-tanki/history",
   asyncRoute(async (_req, res) => {
     const [paRows, cmRows, crRows, apRows, pkRows, millingRows] = await Promise.all([
-      prisma.premixAftermixLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
-      prisma.colourMatchingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
-      prisma.checkResult.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
-      prisma.approvalSchedule.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
-      prisma.packingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
-      prisma.millingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { order: true, remark: true } }),
+      prisma.premixAftermixLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { id: true, order: true, remark: true } }),
+      prisma.colourMatchingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { id: true, order: true, remark: true } }),
+      prisma.checkResult.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { checkId: true, order: true, remark: true } }),
+      prisma.approvalSchedule.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { approvalId: true, order: true, remark: true } }),
+      prisma.packingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { id: true, order: true, remark: true } }),
+      prisma.millingLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { id: true, order: true, remark: true } }),
     ]);
 
-    const seen = new Set<string>();
-    const entries: { order: string; oldCodeTanki: string; newCodeTanki: string; dateLabel: string; by: string; reason: string | null; date: Date | null }[] =
-      [];
-    for (const row of [...paRows, ...cmRows, ...crRows, ...apRows, ...pkRows, ...millingRows]) {
+    const taggedRows: { table: PindahTankiHistoryTable; id: string; order: string; remark: string | null }[] = [
+      ...paRows.map((r) => ({ table: "premixAftermix" as const, id: String(r.id), order: r.order, remark: r.remark })),
+      ...cmRows.map((r) => ({ table: "colourMatching" as const, id: String(r.id), order: r.order, remark: r.remark })),
+      ...crRows.map((r) => ({ table: "checkResult" as const, id: r.checkId, order: r.order, remark: r.remark })),
+      ...apRows.map((r) => ({ table: "approval" as const, id: r.approvalId, order: r.order, remark: r.remark })),
+      ...pkRows.map((r) => ({ table: "packing" as const, id: String(r.id), order: r.order, remark: r.remark })),
+      ...millingRows.map((r) => ({ table: "milling" as const, id: String(r.id), order: r.order, remark: r.remark })),
+    ];
+
+    const byKey = new Map<
+      string,
+      {
+        order: string;
+        oldCodeTanki: string;
+        newCodeTanki: string;
+        dateLabel: string;
+        by: string;
+        reason: string | null;
+        date: Date | null;
+        noteText: string;
+        locations: { table: PindahTankiHistoryTable; id: string }[];
+      }
+    >();
+    for (const row of taggedRows) {
       if (!row.remark) continue;
-      for (const line of row.remark.split("\n")) {
-        const match = line.trim().match(PINDAH_TANKI_REMARK_RE);
+      for (const rawLine of row.remark.split("\n")) {
+        const line = rawLine.trim();
+        const match = line.match(PINDAH_TANKI_REMARK_RE);
         if (!match) continue;
         const [, oldCodeTanki, newCodeTanki, dateLabel, by, reason] = match;
         const key = `${row.order}|${oldCodeTanki}|${newCodeTanki}|${dateLabel}|${by}|${reason ?? ""}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        entries.push({ order: row.order, oldCodeTanki, newCodeTanki, dateLabel, by, reason: reason ?? null, date: parseIndonesianDate(dateLabel) });
+        const existing = byKey.get(key);
+        if (existing) {
+          existing.locations.push({ table: row.table, id: row.id });
+          continue;
+        }
+        byKey.set(key, {
+          order: row.order,
+          oldCodeTanki,
+          newCodeTanki,
+          dateLabel,
+          by,
+          reason: reason ?? null,
+          date: parseIndonesianDate(dateLabel),
+          noteText: line,
+          locations: [{ table: row.table, id: row.id }],
+        });
       }
     }
 
+    const entries = Array.from(byKey.values());
     entries.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
     res.json({ success: true, data: entries });
+  })
+);
+
+const historyLocationSchema = z.object({
+  table: z.enum(["premixAftermix", "milling", "colourMatching", "checkResult", "approval", "packing"]),
+  id: z.string().min(1),
+});
+
+const historyDeleteSchema = z.object({
+  locations: z.array(historyLocationSchema).min(1),
+  noteText: z.string().min(1),
+});
+
+/** Hapus 1 entri "Riwayat Pindah Tanki" (2026-10-27, instruksi eksplisit
+ * user: kolom Aksi Edit/Hapus di menu History) -- CUMA menghapus baris
+ * catatan `[Pindah Tanki] ...` dari kolom Remark di SEMUA lokasi asalnya
+ * (lihat GET /pindah-tanki/history), TIDAK PERNAH menyentuh Code Tanki yg
+ * sedang berlaku skrg -- riwayat ini murni catatan/jejak, menghapusnya tidak
+ * membatalkan perpindahan yg sudah terjadi. */
+dashboardRouter.delete(
+  "/pindah-tanki/history",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const parsed = historyDeleteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const touched = await mutatePindahTankiHistoryLine(parsed.data.locations, parsed.data.noteText, null);
+    res.json({ success: true, message: `Riwayat berhasil dihapus (${touched} baris diperbarui).` });
+  })
+);
+
+const historyEditSchema = historyDeleteSchema.extend({
+  reason: z.string().trim().optional(),
+});
+
+/** Edit alasan 1 entri "Riwayat Pindah Tanki" (2026-10-27, instruksi
+ * eksplisit user) -- tanki lama/baru/tanggal/oleh TIDAK bisa diedit lewat
+ * sini (itu fakta historis apa yg BENERAN terjadi, bukan utk ditulis ulang),
+ * cuma teks alasannya yg SENGAJA boleh dikoreksi (mis. typo). Re-parse
+ * `noteText` lama (bukan percaya field terpisah dari body) utk menjamin
+ * tanki/tanggal/oleh yg ditulis ulang PERSIS sama persis dgn yg lama. */
+dashboardRouter.put(
+  "/pindah-tanki/history",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const parsed = historyEditSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const { locations, noteText, reason } = parsed.data;
+    const match = noteText.trim().match(PINDAH_TANKI_REMARK_RE);
+    if (!match) {
+      res.status(400).json({ success: false, message: "Format catatan Pindah Tanki tidak dikenali." });
+      return;
+    }
+    const [, oldCodeTanki, newCodeTanki, dateLabel, by] = match;
+    const newNoteText = `[Pindah Tanki] ${oldCodeTanki} -> ${newCodeTanki} (${dateLabel}, oleh ${by})${reason && reason.trim() ? ` - ${reason.trim()}` : ""}`;
+    const touched = await mutatePindahTankiHistoryLine(locations, noteText, newNoteText);
+    res.json({ success: true, message: `Riwayat berhasil diperbarui (${touched} baris diperbarui).`, data: { noteText: newNoteText } });
   })
 );
 

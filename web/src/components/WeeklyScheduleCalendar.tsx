@@ -561,7 +561,7 @@ export default function WeeklyScheduleCalendar({
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {overdueCount > 0 ? (
             <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b" }}>
-              ⚠ Overdue, belum dikerjakan ({overdueCount}), {fmtRangeLabel(weekStart)}
+              ⚠ Overdue, belum dikerjakan ({overdueCount}),<span style={{ marginLeft: 16 }}>{fmtRangeLabel(weekStart)}</span>
             </span>
           ) : (
             <span style={{ fontWeight: 700, color: "var(--text-main)" }}>{fmtRangeLabel(weekStart)}</span>

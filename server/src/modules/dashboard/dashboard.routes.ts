@@ -36,13 +36,20 @@ export interface ProductionOrderRow {
    * dgn "Long Time Proses" Tank Monitoring -- sudah berapa lama sejak
    * aktivitas terakhir Order ini, BUKAN durasi proses produksinya). */
   timestamp: Date;
-  /** Titik akhir hitungan "Long Time Proses", MENGGANTI "sekarang" (2026-11-03,
-   * instruksi eksplisit user) -- terisi (dari `MasterOrder.actEndDate` SAP)
-   * HANYA kalau `productionActions` sudah "Done"/"Teco" tapi Order ini tidak
-   * pernah py tahap lanjutan tercatat di app (jadi `timestamp` di atas nyangkut
-   * lama di tahap lama, mis. Milling - DN yg finish-nya berbulan2 lalu padahal
-   * Order-nya sendiri sudah tuntas sejak lama menurut SAP). Null = hitung
-   * seperti biasa sampai sekarang (kasus normal, Order masih proses beneran). */
+  /** Titik MULAI hitungan "Long Time Proses", MENGGANTI `timestamp` di atas
+   * (2026-11-03, instruksi eksplisit user) -- terisi (dari `earliestTouchByOrder`,
+   * touch PALING AWAL lintas semua tahap) HANYA utk Order "Teco": kalau titik
+   * mulainya tetap `timestamp` (touch TERAKHIR, sama dgn `longTimeProsesUntil`
+   * di bawah utk Teco), selisihnya selalu 0 -- tidak informatif. Null = pakai
+   * `timestamp` spt biasa (kasus normal & "Done", TIDAK diubah). */
+  longTimeProsesSince: Date | null;
+  /** Titik AKHIR hitungan "Long Time Proses", MENGGANTI "sekarang" (2026-11-03,
+   * instruksi eksplisit user) -- utk "Done" (%GR>95%) diisi `MasterOrder.actEndDate`
+   * SAP; utk "Teco" (%GR=9999%, actEndDate SAP hampir pasti kosong) diisi
+   * `timestamp` (touch TERAKHIR) itu sendiri -- dipasangkan dgn
+   * `longTimeProsesSince` (touch PALING AWAL) di atas supaya tetap dapat selisih
+   * yg berarti, bukan 0. Null = hitung seperti biasa sampai sekarang (kasus
+   * normal, Order masih proses beneran). */
   longTimeProsesUntil: Date | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
@@ -638,6 +645,30 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         .map((r) => r.order)
     );
 
+    /** Momen touch PALING AWAL Order ini, lintas SEMUA tahap/modul (2026-11-03,
+     * instruksi eksplisit user) -- dipakai KHUSUS Order "Teco" sbg titik MULAI
+     * "Long Time Proses" (gantikan `timestamp`/touch-terakhir yg kalau dipakai
+     * jadi titik mulai SEKALIGUS titik akhir, hasilnya selalu 0 -- lihat
+     * `longTimeProsesSince`). Order "Done" TIDAK pakai ini (`longTimeProsesSince`
+     * tetap null utk Done, titik mulainya tetap `timestamp` spt biasa). Ambil
+     * field "paling awal" tiap modul (Start/Form Received/dst, BUKAN
+     * Finish/timestamp Save), supaya mencerminkan kapan proses itu BENERAN
+     * mulai dikerjakan, bukan kapan baris itu diinput ke sistem.
+     */
+    const earliestTouchByOrder = new Map<string, Date>();
+    function considerEarliestTouch(order: string, moment: Date | null | undefined) {
+      if (!moment) return;
+      const cur = earliestTouchByOrder.get(order);
+      if (!cur || moment.getTime() < cur.getTime()) earliestTouchByOrder.set(order, moment);
+    }
+    for (const r of premixAftermix) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+    for (const r of milling) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+    for (const r of colourMatching) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+    for (const r of bongkaran) considerEarliestTouch(r.order, r.formReceived ?? r.timestamp);
+    for (const r of packing) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+    for (const r of checkResults) considerEarliestTouch(r.order, r.tanggalMasukQc ?? r.timestamp);
+    for (const r of approvals) considerEarliestTouch(r.order, r.prepareProduksi ?? r.timestamp);
+
     // Set per tahap (utk kolom "Proses Bar") -- dari data yg SAMA yg sudah
     // di-fetch di atas, tidak perlu query lagi.
     const premixOrders = new Set(premixAftermix.filter((r) => r.section === "PREMIX").map((r) => r.order));
@@ -1010,6 +1041,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       | "stages"
       | "progressPercent"
       | "productionActions"
+      | "longTimeProsesSince"
       | "longTimeProsesUntil"
     >[] = [
       ...premixAftermix.map((r) => ({
@@ -1332,11 +1364,17 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         productionActions,
         // Done/Teco tapi `timestamp` (touch terakhir) msh nyangkut di tahap
         // lama -> bekukan "Long Time Proses", BUKAN terus dihitung sampai
-        // sekarang. "Done" (%GR>95%) dibekukan di `actEndDate` SAP (tanggal
-        // Order itu benar2 selesai). "Teco" (%GR=9999%, sentinel SAP, 2026-11-03
-        // instruksi eksplisit user: `actEndDate` sentinel TECO tidak diandalkan)
-        // CUKUP dibekukan di `timestamp` itu sendiri -- "terakhir kali proses
-        // tersebut diinput", bukan tanggal lain, hasilnya selalu "< 1 jam".
+        // sekarang. "Done" (%GR>95%) dibekukan di `actEndDate` SAP (titik mulai
+        // TETAP `timestamp`/touch terakhir spt biasa, cuma titik akhirnya yg
+        // diganti). "Teco" (%GR=9999%, sentinel SAP, actEndDate hampir pasti
+        // kosong) PAKAI PASANGAN BEDA (2026-11-03, instruksi eksplisit user,
+        // ditemukan dari Order 1010165522: titik mulai & akhir yg SAMA
+        // `timestamp` selalu menghasilkan 0) -- titik mulai = touch PALING AWAL
+        // (`earliestTouchByOrder`, mis. Aftermix 27 Jul), titik akhir = touch
+        // PALING AKHIR (`timestamp` itu sendiri, mis. Approval 1 Sep), supaya
+        // "Long Time Proses" Teco mencerminkan SELURUH rentang proses yg
+        // tercatat, bukan 0.
+        longTimeProsesSince: productionActions === "Teco" ? earliestTouchByOrder.get(r.order) ?? null : null,
         longTimeProsesUntil:
           productionActions === "Teco" ? r.timestamp : productionActions === "Done" ? parseSapDate(master?.actEndDate) : null,
       };

@@ -379,7 +379,85 @@ function DayColumn({
  * ketahuan tanpa perlu navigasi mundur. Klik 2x kartu ini sama spt kartu
  * biasa (buka popup booking tanki yg sama -- bisa langsung geser Rencana
  * Mulai dari situ kalau mau dijadwal ulang). */
-function OverdueBanner({ events, onOpenBooking }: { events: ScheduleEvent[]; onOpenBooking: (ev: ScheduleEvent) => void }) {
+/** 1 kartu Overdue -- SENGAJA draggable persis spt EventCard (`useDraggable`
+ * + `buildEventDragId`, 2026-11-03 instruksi eksplisit user: "bisa digeser
+ * geser sama seperti di card KPI List antrian dan Kalender Schedule") --
+ * sebelumnya cuma double-click (buka popup Booking), tidak bisa ditarik
+ * langsung ke kolom hari spt kartu Kalender/chip antrian biasa. `ev.id`
+ * sudah ada (baris PwoSchedule asli yg SAMA dgn yg dipakai EventCard), jadi
+ * `onDragEnd` di PremixAftermixPage.tsx otomatis bisa menanganinya tanpa
+ * perubahan apa pun di sana -- id drag-nya sama persis. */
+function OverdueCard({
+  ev,
+  selected,
+  onToggleSelect,
+  onOpenBooking,
+}: {
+  ev: ScheduleEvent;
+  selected: boolean;
+  onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+  onOpenBooking: (ev: ScheduleEvent) => void;
+}) {
+  const dragId = buildEventDragId(ev.id);
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: dragId,
+    data: { type: "scheduled" as const, event: ev },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onClick={(e) => onToggleSelect(dragId, e)}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onOpenBooking(ev);
+      }}
+      title={`${ev.order} — ${ev.materialDescription ?? ""} (tarik utk jadwalkan ke minggu ini, klik 2x utk booking tanki, Ctrl+Klik utk pilih banyak sekaligus)`}
+      style={{
+        flex: "0 0 auto",
+        minWidth: 150,
+        maxWidth: 200,
+        background: "#fff",
+        border: "1px solid #fecaca",
+        borderLeft: "3px solid #dc2626",
+        borderRadius: 6,
+        padding: "5px 8px",
+        cursor: "grab",
+        touchAction: "none",
+        boxShadow: selected ? "0 0 0 2px #4338ca" : undefined,
+        opacity: isDragging ? 0.35 : 1,
+        zIndex: isDragging ? 20 : "auto",
+        transform: transform ? CSS.Translate.toString(transform) : undefined,
+      }}
+    >
+      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#7f1d1d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {ev.order}
+      </div>
+      <div style={{ fontSize: "0.64rem", color: "#7f1d1d", opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {ev.materialDescription ?? ev.batch ?? ""}
+      </div>
+      {ev.codeTanki && (
+        <div style={{ fontSize: "0.62rem", color: "#7f1d1d", opacity: 0.8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          Tanki: {ev.codeTanki}
+        </div>
+      )}
+      <div style={{ fontSize: "0.62rem", fontWeight: 700, color: "#dc2626", marginTop: 2 }}>{daysOverdue(ev.scheduledDate)} hari lewat</div>
+    </div>
+  );
+}
+
+function OverdueBanner({
+  events,
+  onOpenBooking,
+  selectedIds,
+  onToggleSelect,
+}: {
+  events: ScheduleEvent[];
+  onOpenBooking: (ev: ScheduleEvent) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+}) {
   const overdue = useMemo(
     () => events.filter((ev) => isOverdue(ev.scheduledDate)).sort((a, b) => daysOverdue(b.scheduledDate) - daysOverdue(a.scheduledDate)),
     [events]
@@ -392,35 +470,13 @@ function OverdueBanner({ events, onOpenBooking }: { events: ScheduleEvent[]; onO
       </div>
       <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
         {overdue.map((ev) => (
-          <div
+          <OverdueCard
             key={ev.id}
-            onDoubleClick={() => onOpenBooking(ev)}
-            title={`${ev.order} — ${ev.materialDescription ?? ""} (klik 2x utk booking tanki / jadwal ulang)`}
-            style={{
-              flex: "0 0 auto",
-              minWidth: 150,
-              maxWidth: 200,
-              background: "#fff",
-              border: "1px solid #fecaca",
-              borderLeft: "3px solid #dc2626",
-              borderRadius: 6,
-              padding: "5px 8px",
-              cursor: "pointer",
-            }}
-          >
-            <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#7f1d1d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {ev.order}
-            </div>
-            <div style={{ fontSize: "0.64rem", color: "#7f1d1d", opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {ev.materialDescription ?? ev.batch ?? ""}
-            </div>
-            {ev.codeTanki && (
-              <div style={{ fontSize: "0.62rem", color: "#7f1d1d", opacity: 0.8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                Tanki: {ev.codeTanki}
-              </div>
-            )}
-            <div style={{ fontSize: "0.62rem", fontWeight: 700, color: "#dc2626", marginTop: 2 }}>{daysOverdue(ev.scheduledDate)} hari lewat</div>
-          </div>
+            ev={ev}
+            selected={selectedIds.has(buildEventDragId(ev.id))}
+            onToggleSelect={onToggleSelect}
+            onOpenBooking={onOpenBooking}
+          />
         ))}
       </div>
     </div>
@@ -500,7 +556,7 @@ export default function WeeklyScheduleCalendar({
         </div>
       </div>
 
-      <OverdueBanner events={events} onOpenBooking={onOpenBooking} />
+      <OverdueBanner events={events} onOpenBooking={onOpenBooking} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
 
       <div style={{ overflowX: "auto" }}>
         <div style={{ minWidth: 900, display: "grid", gridTemplateColumns: "repeat(6, minmax(150px, 1fr))" }}>

@@ -721,6 +721,12 @@ premixAftermixRouter.get(
         ...r,
         todayAtp: todayAtpByOrder.get(r.order) ?? null,
         codeTanki: bookings.get(r.order)?.codeTanki ?? null,
+        // Badge "Cooispi ✅/⚠" di kartu (2026-11-03, instruksi eksplisit user:
+        // deteksi dini Order yg diketik manual tapi typo/belum kedapatan di
+        // Master Data COOISPI, lihat "+Input Manual Schedule") -- `.has()`
+        // (BUKAN cek todayAtp !== null) supaya tetap true walau kolom
+        // Today-ATP Order itu sendiri kebetulan kosong di Master Data.
+        foundInCooispi: todayAtpByOrder.has(r.order),
       })),
     });
   })

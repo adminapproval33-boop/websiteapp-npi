@@ -24,9 +24,42 @@ export interface ScheduleEvent {
    * PwoSchedule sendiri (2026-10-20, instruksi eksplisit user). `null` kalau
    * Order ini belum dibooking sama sekali. */
   codeTanki: string | null;
+  /** True kalau Order ini SUDAH kedapatan di Master Data COOISPI (2026-11-03,
+   * instruksi eksplisit user: badge "Cooispi ⚠/✅" di kartu) -- utk Order yg
+   * dijadwalkan lewat "+Input Manual Schedule" sebelum sempat di-import, jadi
+   * kelihatan kapan sudah tersambung ke data asli (bukan cek `todayAtp`
+   * langsung, krn field itu sendiri bisa kosong walau Order-nya SUDAH ada). */
+  foundInCooispi: boolean;
 }
 
 const DAY_LABELS = ["SEN", "SEL", "RAB", "KAM", "JUM", "SAB"];
+
+/** Badge "Cooispi ⚠/✅" (2026-11-03, instruksi eksplisit user) -- dipakai
+ * BARENG EventCard & OverdueCard, supaya kartu yg dijadwalkan lewat
+ * "+Input Manual Schedule" (sebelum sempat di-import COOISPI) kelihatan jelas
+ * kapan sudah ketemu Master Data aslinya (ciri khas Order-nya typo kalau
+ * tanda ⚠ ini TIDAK PERNAH berubah jadi ✅ walau sudah beberapa hari). */
+function CooispiBadge({ found }: { found: boolean }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 2,
+        marginTop: 2,
+        marginLeft: 4,
+        fontSize: "0.58rem",
+        fontWeight: 700,
+        padding: "1px 6px",
+        borderRadius: 999,
+        color: found ? "#166534" : "#92400e",
+        background: found ? "#dcfce7" : "#fef3c7",
+      }}
+    >
+      Cooispi {found ? "✅" : "⚠"}
+    </span>
+  );
+}
 
 /** Garis grid kalender mingguan (2026-11-03, instruksi eksplisit user: garis
  * kotak2 tabel-nya dibuat lebih jelas) -- SENGAJA warna sendiri (slate-400,
@@ -272,6 +305,7 @@ function EventCard({
           >
             {isOverdue(ev.scheduledDate) ? "Overdue" : "On Time"}
           </span>
+          <CooispiBadge found={ev.foundInCooispi} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1, flex: "0 0 auto" }}>
           <button
@@ -473,7 +507,10 @@ function OverdueCard({
           Tanki: {ev.codeTanki}
         </div>
       )}
-      <div style={{ fontSize: "0.62rem", fontWeight: 700, color: "#dc2626", marginTop: 2 }}>{daysOverdue(ev.scheduledDate)} hari lewat</div>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontSize: "0.62rem", fontWeight: 700, color: "#dc2626", marginTop: 2 }}>{daysOverdue(ev.scheduledDate)} hari lewat</span>
+        <CooispiBadge found={ev.foundInCooispi} />
+      </div>
     </div>
   );
 }

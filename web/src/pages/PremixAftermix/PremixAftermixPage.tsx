@@ -1288,7 +1288,7 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
-              <button type="button" className="btn btn-outline" onClick={() => setManualScheduleOpen(true)}>
+              <button type="button" className="btn" onClick={() => setManualScheduleOpen(true)}>
                 📝 +Input Manual Schedule
               </button>
             </div>
@@ -1460,7 +1460,7 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
-              <button type="button" className="btn btn-outline" onClick={() => setManualScheduleOpen(true)}>
+              <button type="button" className="btn" onClick={() => setManualScheduleOpen(true)}>
                 📝 +Input Manual Schedule
               </button>
             </div>

@@ -1288,6 +1288,9 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
+              <button type="button" className="btn btn-outline" onClick={() => setManualScheduleOpen(true)}>
+                📝 +Input Manual Schedule
+              </button>
             </div>
           </div>
           <div className="panel-body">
@@ -1320,13 +1323,8 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)" }}>
-                    📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
-                  </span>
-                  <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setManualScheduleOpen(true)}>
-                    📝 +Input Manual Schedule
-                  </button>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
+                  📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
                 </div>
                 <input
                   placeholder="Cari nomor Order..."
@@ -1462,6 +1460,9 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
+              <button type="button" className="btn btn-outline" onClick={() => setManualScheduleOpen(true)}>
+                📝 +Input Manual Schedule
+              </button>
             </div>
           </div>
           <div className="panel-body">
@@ -1486,13 +1487,8 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)" }}>
-                    📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
-                  </span>
-                  <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setManualScheduleOpen(true)}>
-                    📝 +Input Manual Schedule
-                  </button>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
+                  📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
                 </div>
                 <input
                   placeholder="Cari nomor Order..."

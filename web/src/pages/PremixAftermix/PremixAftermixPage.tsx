@@ -29,7 +29,7 @@ import Modal from "../../components/Modal";
 import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
 import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, todayDateValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
@@ -373,6 +373,46 @@ export default function PremixAftermixPage({
       queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
     },
     onError: (err) => setScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal."),
+  });
+
+  /** "+Input Manual Schedule" (2026-11-03, instruksi eksplisit user) -- Order
+   * yg sudah diputuskan MRP tapi BELUM kedapatan di Master Data COOISPI
+   * (COOISPI cuma di-import 2x/hari, jam 18:00 & 08:00, sedangkan MRP efektif
+   * menjadwal siang hari jam 10:00-16:00 -- ada jeda Order itu "tidak
+   * kelihatan" di app). Reuse endpoint POST /pwo-schedule yg SAMA dgn
+   * drag-drop/"Jadwalkan" (lihat scheduleSchema di premixAftermix.routes.ts:
+   * TIDAK mensyaratkan Order sudah ada di MasterOrder), bedanya di sini Order/
+   * Material Number/Material Description/Batch diketik manual (bukan dari
+   * baris antrian yg sudah ada). Begitu COOISPI sync berikutnya jalan & Order
+   * ini kedapatan di Master Data, Code Tanki/Today-ATP otomatis ikut muncul
+   * (live-join by Order, lihat GET /pwo-schedule) tanpa langkah tambahan.
+   */
+  const [manualScheduleOpen, setManualScheduleOpen] = useState(false);
+  const [manualScheduleForm, setManualScheduleForm] = useState({
+    order: "",
+    materialNumber: "",
+    materialDescription: "",
+    batch: "",
+    scheduledDate: todayDateValue(),
+  });
+  const [manualScheduleError, setManualScheduleError] = useState("");
+  const manualScheduleMutation = useMutation({
+    mutationFn: () =>
+      api.post("/premix-aftermix/pwo-schedule", {
+        order: manualScheduleForm.order.trim(),
+        section,
+        materialNumber: manualScheduleForm.materialNumber.trim(),
+        materialDescription: manualScheduleForm.materialDescription.trim(),
+        batch: manualScheduleForm.batch.trim(),
+        scheduledDate: manualScheduleForm.scheduledDate,
+      }),
+    onSuccess: () => {
+      setManualScheduleError("");
+      setManualScheduleOpen(false);
+      setManualScheduleForm({ order: "", materialNumber: "", materialDescription: "", batch: "", scheduledDate: todayDateValue() });
+      queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
+    },
+    onError: (err) => setManualScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal manual."),
   });
 
   const deleteScheduleMutation = useMutation({
@@ -1280,8 +1320,13 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
-                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
-                  📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)" }}>
+                    📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                  </span>
+                  <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setManualScheduleOpen(true)}>
+                    📝 +Input Manual Schedule
+                  </button>
                 </div>
                 <input
                   placeholder="Cari nomor Order..."
@@ -1441,8 +1486,13 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
-                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
-                  📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)" }}>
+                    📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                  </span>
+                  <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setManualScheduleOpen(true)}>
+                    📝 +Input Manual Schedule
+                  </button>
                 </div>
                 <input
                   placeholder="Cari nomor Order..."
@@ -1569,6 +1619,72 @@ export default function PremixAftermixPage({
             onClick={() => scheduleMutation.mutate()}
           >
             {scheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
+          </button>
+        </Modal>
+      )}
+
+      {manualScheduleOpen && (
+        <Modal
+          title={`Input Manual Schedule — ${title}`}
+          onClose={() => {
+            setManualScheduleOpen(false);
+            setManualScheduleError("");
+          }}
+          width={420}
+        >
+          <p style={{ marginTop: 0, marginBottom: 12, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            Khusus Order yang sudah diputuskan MRP hari ini tapi belum kedapatan di Master Data COOISPI (sync cuma
+            2x/hari) -- isi manual di sini supaya tetap bisa langsung dijadwalkan ke Kalender. Begitu COOISPI sync
+            berikutnya jalan, Code Tanki/Today-ATP Order ini otomatis ikut muncul tanpa langkah tambahan.
+          </p>
+          <div className="field-grid">
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>Order</label>
+              <input
+                value={manualScheduleForm.order}
+                onChange={(e) => setManualScheduleForm((f) => ({ ...f, order: e.target.value }))}
+                placeholder="Nomor Order"
+              />
+            </div>
+            <div className="field">
+              <label>Material Number</label>
+              <input
+                value={manualScheduleForm.materialNumber}
+                onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialNumber: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>Batch</label>
+              <input
+                value={manualScheduleForm.batch}
+                onChange={(e) => setManualScheduleForm((f) => ({ ...f, batch: e.target.value }))}
+              />
+            </div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>Material Description</label>
+              <input
+                value={manualScheduleForm.materialDescription}
+                onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialDescription: e.target.value }))}
+              />
+            </div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label>Tanggal</label>
+              <input
+                type="date"
+                value={manualScheduleForm.scheduledDate}
+                onChange={(e) => setManualScheduleForm((f) => ({ ...f, scheduledDate: e.target.value }))}
+              />
+            </div>
+          </div>
+          {manualScheduleError && <p className="error-text">{manualScheduleError}</p>}
+          <button
+            className="btn"
+            type="button"
+            style={{ marginTop: 12 }}
+            disabled={!manualScheduleForm.order.trim() || !manualScheduleForm.scheduledDate || manualScheduleMutation.isPending}
+            onClick={() => manualScheduleMutation.mutate()}
+          >
+            {manualScheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
           </button>
         </Modal>
       )}

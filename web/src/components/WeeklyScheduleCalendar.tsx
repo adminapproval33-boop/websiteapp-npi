@@ -399,11 +399,19 @@ function OverdueCard({
   selected,
   onToggleSelect,
   onOpenBooking,
+  onDelete,
 }: {
   ev: ScheduleEvent;
   selected: boolean;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
   onOpenBooking: (ev: ScheduleEvent) => void;
+  /** Tombol "✕" (2026-11-03, instruksi eksplisit user) -- hapus jadwalnya
+   * (baris PwoSchedule) sama spt tombol ✕ EventCard biasa. Order-nya BUKAN
+   * hilang dari sistem, cuma kembali "belum dijadwalkan" -- otomatis muncul
+   * lagi di strip "List Antrian" (lihat `scheduledOrders`, dibangun dari
+   * data PwoSchedule yg sama, jadi otomatis sinkron begitu baris ini
+   * terhapus). */
+  onDelete?: (id: string) => void;
 }) {
   const dragId = buildEventDragId(ev.id);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -438,8 +446,24 @@ function OverdueCard({
         transform: transform ? CSS.Translate.toString(transform) : undefined,
       }}
     >
-      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#7f1d1d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {ev.order}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 4 }}>
+        <div style={{ fontSize: "0.7rem", fontWeight: 700, color: "#7f1d1d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {ev.order}
+        </div>
+        {onDelete && (
+          <button
+            type="button"
+            title="Hapus jadwal (kembali ke List Antrian)"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(ev.id);
+            }}
+            style={{ border: "none", background: "none", cursor: "pointer", color: "#7f1d1d", fontSize: "0.7rem", lineHeight: 1, padding: 0, flex: "0 0 auto" }}
+          >
+            ✕
+          </button>
+        )}
       </div>
       <div style={{ fontSize: "0.64rem", color: "#7f1d1d", opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {ev.materialDescription ?? ev.batch ?? ""}
@@ -462,11 +486,13 @@ function OverdueBanner({
   onOpenBooking,
   selectedIds,
   onToggleSelect,
+  onDelete,
 }: {
   events: ScheduleEvent[];
   onOpenBooking: (ev: ScheduleEvent) => void;
   selectedIds: Set<string>;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
+  onDelete?: (id: string) => void;
 }) {
   const [overdueSearch, setOverdueSearch] = useState("");
   const overdue = useMemo(
@@ -494,6 +520,7 @@ function OverdueBanner({
             selected={selectedIds.has(buildEventDragId(ev.id))}
             onToggleSelect={onToggleSelect}
             onOpenBooking={onOpenBooking}
+            onDelete={onDelete}
           />
         ))}
         {filteredOverdue.length === 0 && (
@@ -587,7 +614,7 @@ export default function WeeklyScheduleCalendar({
         </div>
       </div>
 
-      <OverdueBanner events={events} onOpenBooking={onOpenBooking} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
+      <OverdueBanner events={events} onOpenBooking={onOpenBooking} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onDelete={onDelete} />
 
       <div style={{ overflowX: "auto" }}>
         <div style={{ minWidth: 900, display: "grid", gridTemplateColumns: "repeat(6, minmax(150px, 1fr))" }}>

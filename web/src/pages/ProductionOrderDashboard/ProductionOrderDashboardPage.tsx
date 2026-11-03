@@ -35,6 +35,11 @@ interface ProductionOrderRow {
    * (2026-11-03, instruksi eksplisit user: ganti "Lead Time Proses" yg
    * dirasa membingungkan, pakai ukuran yg SAMA dgn Tank Monitoring). */
   timestamp: string;
+  /** Titik akhir hitungan "Long Time Proses" (gantikan "sekarang") -- terisi
+   * HANYA kalau Order ini Done/Teco tapi tidak pernah py tahap lanjutan
+   * tercatat di app (lihat komentar backend). Null = hitung spt biasa sampai
+   * sekarang. */
+  longTimeProsesUntil: string | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing, TERPISAH dari kolom "Proses" -- sesuai instruksi
@@ -668,7 +673,7 @@ export default function ProductionOrderDashboardPage() {
                     title="Klik utk lihat lama proses di tiap tahapan"
                     style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
                   >
-                    {formatDuration(r.timestamp)}
+                    {formatDuration(r.timestamp, r.longTimeProsesUntil ?? undefined)}
                   </span>
                 ),
               csvValue: (r) =>
@@ -676,7 +681,7 @@ export default function ProductionOrderDashboardPage() {
                   ? isActuallyDone(r)
                     ? "0 Hari Kerja"
                     : "Belum Proses"
-                  : formatDuration(r.timestamp),
+                  : formatDuration(r.timestamp, r.longTimeProsesUntil ?? undefined),
             },
           ]}
         />

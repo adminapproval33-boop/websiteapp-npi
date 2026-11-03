@@ -36,6 +36,14 @@ export interface ProductionOrderRow {
    * dgn "Long Time Proses" Tank Monitoring -- sudah berapa lama sejak
    * aktivitas terakhir Order ini, BUKAN durasi proses produksinya). */
   timestamp: Date;
+  /** Titik akhir hitungan "Long Time Proses", MENGGANTI "sekarang" (2026-11-03,
+   * instruksi eksplisit user) -- terisi (dari `MasterOrder.actEndDate` SAP)
+   * HANYA kalau `productionActions` sudah "Done"/"Teco" tapi Order ini tidak
+   * pernah py tahap lanjutan tercatat di app (jadi `timestamp` di atas nyangkut
+   * lama di tahap lama, mis. Milling - DN yg finish-nya berbulan2 lalu padahal
+   * Order-nya sendiri sudah tuntas sejak lama menurut SAP). Null = hitung
+   * seperti biasa sampai sekarang (kasus normal, Order masih proses beneran). */
+  longTimeProsesUntil: Date | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing utk Order ini, TERPISAH dari kolom "Proses" --
@@ -994,7 +1002,15 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
 
     const rows: Omit<
       ProductionOrderRow,
-      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "orderType" | "stages" | "progressPercent" | "productionActions"
+      | "materialNumber"
+      | "materialDescription"
+      | "batch"
+      | "pctGR"
+      | "orderType"
+      | "stages"
+      | "progressPercent"
+      | "productionActions"
+      | "longTimeProsesUntil"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -1176,7 +1192,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
     const uniqueOrders = Array.from(latestByOrder.keys());
     const masterOrders = await prisma.masterOrder.findMany({
       where: { order: { in: uniqueOrders } },
-      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true, orderType: true, orderQty: true },
+      select: { order: true, materialNumber: true, materialDescription: true, batch: true, pctGR: true, orderType: true, orderQty: true, actEndDate: true },
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
@@ -1290,6 +1306,16 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       // TIDAK ada override -- History Packing-nya sendiri memang belum ada
       // apa-apa, jadi 3 kolom itu tetap ikut logika lama.
       const packingRow = latestPackingRow.get(r.order);
+      // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
+      // filter di atas jadi PASTI py histori nyata) -> "Teco", baru kalau
+      // bukan itu, %GR>95% -> "Done", baru fallback ke status Packing biasa.
+      const pctGRValue = parsePctGR(master?.pctGR);
+      const productionActions =
+        pctGRValue !== null && pctGRValue >= 9999
+          ? "Teco"
+          : (pctGRValue ?? 0) > 95
+            ? "Done"
+            : packingActionsByOrder.get(r.order) ?? null;
       return {
         ...r,
         materialNumber: master?.materialNumber ?? null,
@@ -1303,15 +1329,12 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         codeTanki: manualTankOverrideByOrder.get(r.order) ?? (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order),
         stages,
         progressPercent,
-        // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
-        // filter di atas jadi PASTI py histori nyata) -> "Teco", baru kalau
-        // bukan itu, %GR>95% -> "Done", baru fallback ke status Packing biasa.
-        productionActions: (() => {
-          const pctGRValue = parsePctGR(master?.pctGR);
-          if (pctGRValue !== null && pctGRValue >= 9999) return "Teco";
-          if ((pctGRValue ?? 0) > 95) return "Done";
-          return packingActionsByOrder.get(r.order) ?? null;
-        })(),
+        productionActions,
+        // Done/Teco tapi `timestamp` (touch terakhir) msh nyangkut di tahap
+        // lama -> bekukan "Long Time Proses" di `actEndDate` SAP (tanggal
+        // Order itu benar2 selesai), BUKAN terus dihitung sampai sekarang.
+        longTimeProsesUntil:
+          productionActions === "Done" || productionActions === "Teco" ? parseSapDate(master?.actEndDate) : null,
       };
     });
 
@@ -1406,6 +1429,30 @@ export function parsePctGR(raw: string | null | undefined): number | null {
   if (!raw) return null;
   const n = Number(raw.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+const SAP_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** Parse tanggal Master Data Cooispi format SAP "D-Mon-YY" (mis. "15-May-26")
+ * -- dipakai utk "Long Time Proses" kolom Production Order Monitoring
+ * (2026-11-03, instruksi eksplisit user): Order yg Production Actions-nya
+ * sudah "Done"/"Teco" tapi tahap lanjutannya tidak pernah diinput ke app
+ * (mis. 1010159468, cuma sampai Milling - DN) sebelumnya hitungan durasinya
+ * terus bertambah tiap hari (dihitung sampai "sekarang") walau Order-nya
+ * sendiri sudah tuntas sejak lama -- SEKARANG dibekukan pakai `actEndDate`
+ * asli dari SAP sbg titik akhir, bukan "sekarang" (lihat `longTimeProsesUntil`
+ * di ProductionOrderRow). Null kalau formatnya tidak dikenali (jangan sampai
+ * crash gara2 import COOISPI masa depan beda format). */
+export function parseSapDate(raw: string | null | undefined): Date | null {
+  if (!raw) return null;
+  const match = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(raw.trim());
+  if (!match) return null;
+  const day = Number(match[1]);
+  const monthIdx = SAP_MONTHS.indexOf(match[2].toLowerCase());
+  if (monthIdx === -1) return null;
+  const year = 2000 + Number(match[3]);
+  const d = new Date(year, monthIdx, day);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {

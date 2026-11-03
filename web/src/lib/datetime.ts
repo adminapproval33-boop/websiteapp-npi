@@ -69,9 +69,14 @@ export function formatRelativeTime(value: string | Date | null | undefined): str
  * Proses" (Tank Monitoring & Production Order Monitoring, 2026-11-03,
  * instruksi eksplisit user: dipakai di kedua tempat supaya ukurannya
  * konsisten) -- dihitung di client krn datanya cuma dipakai tampilan (tidak
- * perlu query ulang tiap detik). */
-export function formatDuration(since: string | Date): string {
-  const ms = Math.max(0, Date.now() - new Date(since).getTime());
+ * perlu query ulang tiap detik). `until` opsional (default "sekarang") --
+ * dipakai Production Order Monitoring utk Order yg sudah Done/Teco tapi
+ * tahap lanjutannya tidak pernah diinput ke app, supaya hitungannya dibekukan
+ * di `actEndDate` SAP, bukan terus bertambah tiap hari (lihat
+ * `longTimeProsesUntil` di backend). */
+export function formatDuration(since: string | Date, until?: string | Date): string {
+  const end = until ? new Date(until).getTime() : Date.now();
+  const ms = Math.max(0, end - new Date(since).getTime());
   const totalHours = Math.floor(ms / (1000 * 60 * 60));
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;

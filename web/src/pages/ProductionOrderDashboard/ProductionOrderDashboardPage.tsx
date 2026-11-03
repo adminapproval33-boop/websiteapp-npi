@@ -109,6 +109,19 @@ const STAGE_COLORS: Record<string, { bg: string; fg: string }> = {
 /** Urutan tahap kerja tetap (7 tahap, sama dgn yg dihitung backend utk Proses Bar). */
 const STAGE_SEQUENCE = ["Premix", "Milling", "Aftermix", "Colour Matching", "QC", "Approval", "Packing"] as const;
 
+/** Order "Belum Proses" (timestamp epoch, lihat kolom "Long Time Proses" di
+ * bawah) tapi ternyata % GR-nya sudah >95% ATAU Production Actions-nya sudah
+ * "Done" -- berarti Order itu SUDAH selesai (data GR/Done-nya datang dari
+ * Master Data SAP, bukan dari histori 7 tahap produksi di app ini), bukan
+ * "belum mulai sama sekali". Kasus spesifik ini ditampilkan "0 Hari Kerja",
+ * bukan "Belum Proses" (2026-11-03, instruksi eksplisit user). */
+function isActuallyDone(r: ProductionOrderRow): boolean {
+  if (r.productionActions === "Done") return true;
+  if (!r.pctGR) return false;
+  const pctGRValue = Number(r.pctGR.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(pctGRValue) && pctGRValue > 95;
+}
+
 /** Singkatan chip di kolom Proses Bar -- supaya baris gak melebar ke bawah. Nama
  * lengkapnya tetap muncul lewat tooltip (title) saat di-hover. */
 const STAGE_ABBR: Record<string, string> = {
@@ -648,7 +661,7 @@ export default function ProductionOrderDashboardPage() {
               // (2026-11-03, instruksi eksplisit user).
               render: (r) =>
                 new Date(r.timestamp).getTime() === 0 ? (
-                  "Belum Proses"
+                  isActuallyDone(r) ? "0 Hari Kerja" : "Belum Proses"
                 ) : (
                   <span
                     onClick={() => setLeadTimeDetailOrder(r.order)}
@@ -658,7 +671,12 @@ export default function ProductionOrderDashboardPage() {
                     {formatDuration(r.timestamp)}
                   </span>
                 ),
-              csvValue: (r) => (new Date(r.timestamp).getTime() === 0 ? "Belum Proses" : formatDuration(r.timestamp)),
+              csvValue: (r) =>
+                new Date(r.timestamp).getTime() === 0
+                  ? isActuallyDone(r)
+                    ? "0 Hari Kerja"
+                    : "Belum Proses"
+                  : formatDuration(r.timestamp),
             },
           ]}
         />

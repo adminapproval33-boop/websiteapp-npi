@@ -559,9 +559,12 @@ export default function WeeklyScheduleCalendar({
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--toolbar-bg)", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 700, color: "var(--text-main)" }}>{fmtRangeLabel(weekStart)}</span>
-          {overdueCount > 0 && (
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b" }}>⚠ Overdue, belum dikerjakan ({overdueCount})</span>
+          {overdueCount > 0 ? (
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b" }}>
+              ⚠ Overdue, belum dikerjakan ({overdueCount}), {fmtRangeLabel(weekStart)}
+            </span>
+          ) : (
+            <span style={{ fontWeight: 700, color: "var(--text-main)" }}>{fmtRangeLabel(weekStart)}</span>
           )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>

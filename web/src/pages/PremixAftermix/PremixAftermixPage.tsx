@@ -317,7 +317,11 @@ export default function PremixAftermixPage({
   // user: "menu jam tidak perlu, cukup list & nomor urutan") jadi drag-drop
   // Queue -> hari (tanpa jam), modal "Jadwalkan" TETAP ada sbg alternatif
   // non-drag tapi cuma pilih tanggal.
-  const [queueView, setQueueView] = useState<"list" | "calendar">("list");
+  // "?tab=queue" (lihat `tab` di atas) SEKALIGUS langsung buka versi
+  // "Kalender" (bukan default "List"), 2026-11-03 instruksi eksplisit user:
+  // tombol "PWO Schedule & Queue" di Production Order Monitoring harus
+  // langsung mentrigger versi Kalender, bukan List biasa.
+  const [queueView, setQueueView] = useState<"list" | "calendar">(() => (searchParams.get("tab") === "queue" ? "calendar" : "list"));
   const [scheduleTarget, setScheduleTarget] = useState<{
     order: string;
     materialNumber: string | null;

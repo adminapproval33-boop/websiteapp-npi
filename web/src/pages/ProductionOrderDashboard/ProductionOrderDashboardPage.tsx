@@ -513,24 +513,11 @@ export default function ProductionOrderDashboardPage() {
           freezeFirstColumn
           toolbarExtra={
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setManualInputOpen(true)}>
-                +Input Manual
-              </button>
               <button type="button" className="btn btn-outline" onClick={() => setPindahTankiOpen(true)}>
                 Pindah Tanki
               </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setNewOrderValue("");
-                  setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
-                }}
-              >
-                +New PO Produk
-              </button>
               <div style={{ position: "relative" }}>
-                <button type="button" className="btn btn-outline" onClick={() => setShowPwoQueueMenu((s) => !s)}>
+                <button type="button" className="btn btn-info" onClick={() => setShowPwoQueueMenu((s) => !s)}>
                   PWO Schedule &amp; Queue ▾
                 </button>
                 {showPwoQueueMenu && (
@@ -561,6 +548,19 @@ export default function ProductionOrderDashboardPage() {
                   </div>
                 )}
               </div>
+              <button type="button" className="btn" onClick={() => setManualInputOpen(true)}>
+                +Input Manual
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setNewOrderValue("");
+                  setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
+                }}
+              >
+                +New PO Produk
+              </button>
             </>
           }
           rows={rowsQuery.data ?? []}

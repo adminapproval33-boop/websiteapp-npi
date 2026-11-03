@@ -29,6 +29,11 @@ export interface ProductionOrderRow {
    * Code Tanki Packing sama spt Start/Finish/Remark (lihat packingRow di
    * bawah). 2026-07-31, instruksi eksplisit user. */
   codeTanki: string | null;
+  /** "Tank Type" (Master Data > Tanki, `MasterTank.typeTanki`) dari kode tanki
+   * UTAMA `codeTanki` di atas (2026-11-03, instruksi eksplisit user) -- null
+   * kalau Order ini belum py Code Tanki, ATAU kodenya tidak/belum terdaftar
+   * di Master Data Tanki. */
+  tankType: string | null;
   /** Momen touch PALING TERAKHIR Order ini (Start/Finish/timestamp Save
    * tahap manapun, lihat `latestMoment`) -- field INI yg dipakai frontend sbg
    * dasar kolom "Long Time Proses" (2026-11-03, instruksi eksplisit user:
@@ -1043,6 +1048,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       | "productionActions"
       | "longTimeProsesSince"
       | "longTimeProsesUntil"
+      | "tankType"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -1228,6 +1234,23 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
     });
     const masterByOrder = new Map(masterOrders.map((m) => [m.order, m]));
 
+    // "Tank Type" (Master Data > Tanki, lihat MasterTank.typeTanki) utk kolom
+    // "Tank Type" Production Order Monitoring (2026-11-03, instruksi eksplisit
+    // user) -- lookup terpisah dari tabel MasterTank, bukan dari log tahap
+    // manapun (codeTanki di baris Order ini cuma kode tanki-nya, tipe tanki-nya
+    // sendiri cuma ada di Master Data).
+    const masterTanks = await prisma.masterTank.findMany({ select: { code: true, typeTanki: true } });
+    const tankTypeByCode = new Map(masterTanks.map((t) => [t.code, t.typeTanki]));
+    /** `codeTanki` 1 baris Order bisa gabungan >1 kode (mis. Milling "TB.00800.185
+     * (Couple) / TB.00800.185 (Moving)", lihat komentar `codeTanki` di
+     * ProductionOrderRow) -- "Tank Type" ambil dari kode PERTAMA/utama saja
+     * (sama konvensi dgn "tanki utama/Couple" yg dipakai representasikan
+     * Milling di tempat lain, lihat `fallbackTankFor`/buildTankStatusMap). */
+    function primaryTankCode(codeTanki: string | null): string | null {
+      if (!codeTanki) return null;
+      return codeTanki.split(" / ")[0].replace(/\s*\(.*\)\s*$/, "").trim() || null;
+    }
+
     /**
      * Status "Selesai" per tahap produksi utk kolom "Status Order Ini" (Info
      * Proses popup) -- HARUS konsisten dgn lib/stageGate.ts (gerbang yg
@@ -1338,6 +1361,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       // TIDAK ada override -- History Packing-nya sendiri memang belum ada
       // apa-apa, jadi 3 kolom itu tetap ikut logika lama.
       const packingRow = latestPackingRow.get(r.order);
+      const codeTanki = manualTankOverrideByOrder.get(r.order) ?? (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order);
       // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
       // filter di atas jadi PASTI py histori nyata) -> "Teco", baru kalau
       // bukan itu, %GR>95% -> "Done", baru fallback ke status Packing biasa.
@@ -1358,7 +1382,8 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
-        codeTanki: manualTankOverrideByOrder.get(r.order) ?? (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order),
+        codeTanki,
+        tankType: tankTypeByCode.get(primaryTankCode(codeTanki) ?? "") ?? null,
         stages,
         progressPercent,
         productionActions,

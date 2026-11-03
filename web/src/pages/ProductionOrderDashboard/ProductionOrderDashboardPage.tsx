@@ -31,6 +31,10 @@ interface ProductionOrderRow {
   finish: string | null;
   remark: string | null;
   codeTanki: string | null;
+  /** "Tank Type" (Master Data > Tanki) dari Code Tanki utama Order ini
+   * (2026-11-03, instruksi eksplisit user). Null kalau belum py Code Tanki
+   * atau kodenya belum terdaftar di Master Data Tanki. */
+  tankType: string | null;
   /** Momen touch PALING TERAKHIR Order ini -- dasar kolom "Long Time Proses"
    * (2026-11-03, instruksi eksplisit user: ganti "Lead Time Proses" yg
    * dirasa membingungkan, pakai ukuran yg SAMA dgn Tank Monitoring). */
@@ -529,6 +533,7 @@ export default function ProductionOrderDashboardPage() {
             { key: "orderType", label: "Order Type", render: (r) => r.orderType ?? "-" },
             { key: "orderQty", label: "Qty/Liter", render: (r) => r.orderQty },
             { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki ?? "-" },
+            { key: "tankType", label: "Tank Type", render: (r) => r.tankType ?? "-" },
             { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
             {
               key: "progressBar",

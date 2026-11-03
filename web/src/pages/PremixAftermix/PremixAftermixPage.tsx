@@ -1251,32 +1251,27 @@ export default function PremixAftermixPage({
             </div>
           </div>
           <div className="panel-body">
-            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
-              PWO yang sudah "Milling - DN" dan sedang menunggu dikerjakan Aftermix -- diurutkan Finish Milling
-              paling awal duluan (FIFO). PWO otomatis hilang dari daftar ini begitu sudah ada input Aftermix utk
-              PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Aftermix (Colour Matching, Approval,
-              Packing).
-            </p>
             {queueView === "list" && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-                <input
-                  placeholder="Cari nomor Order..."
-                  value={queueSearch}
-                  onChange={(e) => setQueueSearch(e.target.value)}
-                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-                />
-              </div>
+              <>
+                <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
+                  PWO yang sudah "Milling - DN" dan sedang menunggu dikerjakan Aftermix -- diurutkan Finish Milling
+                  paling awal duluan (FIFO). PWO otomatis hilang dari daftar ini begitu sudah ada input Aftermix utk
+                  PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Aftermix (Colour Matching, Approval,
+                  Packing).
+                </p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                  <input
+                    placeholder="Cari nomor Order..."
+                    value={queueSearch}
+                    onChange={(e) => setQueueSearch(e.target.value)}
+                    style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+                  />
+                </div>
+              </>
             )}
 
             {queueView === "calendar" ? (
               <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                <p style={{ margin: "0 0 8px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  Tarik Order dari daftar di bawah ini ke kolom hari yang diinginkan di Kalender untuk menjadwalkan --
-                  kartu yang sudah terjadwal juga bisa ditarik ke hari lain utk pindah, atau pakai ▲▼ di kartunya utk
-                  ubah urutan. Order yang sudah dijadwalkan otomatis hilang dari daftar di bawah ini. Tahan{" "}
-                  <strong>Ctrl</strong> lalu klik beberapa Order (di daftar di bawah maupun kartu di Kalender) untuk
-                  pilih banyak sekaligus, lalu tarik salah satunya -- semuanya ikut pindah bareng.
-                </p>
                 {selectedIds.size > 0 && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.78rem" }}>
                     <span style={{ color: "var(--navy-dark)", fontWeight: 700 }}>{selectedIds.size} Order dipilih</span>

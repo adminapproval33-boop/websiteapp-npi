@@ -878,7 +878,7 @@ export default function QualityCheckReviewPage() {
         className={`btn ${showAgePanel || ageFilter.size > 0 ? "" : "btn-outline"}`}
         onClick={() => setShowAgePanel((s) => !s)}
       >
-        ☰ Lama Proses{ageFilter.size > 0 ? ` (${ageFilter.size})` : ""}
+        ☰ Lead Time Proses{ageFilter.size > 0 ? ` (${ageFilter.size})` : ""}
       </button>
       {showAgePanel && (
         <div className="panel" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 180, padding: 10 }}>
@@ -1181,7 +1181,7 @@ export default function QualityCheckReviewPage() {
         </div>
 
         <div>
-          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Lama Proses</div>
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8 }}>Lead Time Proses</div>
           {/* Sama pola dgn kartu Status di atas, tapi toggle ke `ageFilter`
               (state yg sama dgn tombol "☰ Lama Proses") -- 2 grup kartu ini
               SENGAJA independen (AND, bukan saling reset), sama spt 2 panel
@@ -1276,7 +1276,7 @@ export default function QualityCheckReviewPage() {
                 // cuma di sini ditampilkan sbg angka per-Order, bukan digroup
                 // ke bucket.
                 key: "ageDays",
-                label: "Lama Proses (Hari)",
+                label: "Lead Time Proses (Hari)",
                 render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
                 csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
               },
@@ -1547,7 +1547,7 @@ export default function QualityCheckReviewPage() {
                 },
                 {
                   key: "ageDays",
-                  label: "Lama Proses (Hari)",
+                  label: "Lead Time Proses (Hari)",
                   render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
                   csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
                 },

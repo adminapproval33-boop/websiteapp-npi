@@ -147,6 +147,14 @@
     @apply bg-sky-600 hover:bg-sky-700;
   }
 
+  /* Biru PERSIS sama dgn .topbar (bg-blue-800, lihat komentarnya di bawah) --
+     dipakai tombol "PWO Schedule & Queue" Production Order Monitoring
+     (2026-11-03, instruksi eksplisit user: samakan dgn biru header, BUKAN
+     biru .btn-info/sky yg beda shade). */
+  .btn-topbar-blue {
+    @apply bg-blue-800 hover:bg-blue-900;
+  }
+
   .btn-outline {
     @apply bg-white text-slate-700 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50 hover:text-rose-700;
   }

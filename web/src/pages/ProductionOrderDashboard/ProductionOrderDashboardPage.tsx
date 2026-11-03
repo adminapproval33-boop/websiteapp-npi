@@ -517,7 +517,7 @@ export default function ProductionOrderDashboardPage() {
                 Pindah Tanki
               </button>
               <div style={{ position: "relative" }}>
-                <button type="button" className="btn btn-info" onClick={() => setShowPwoQueueMenu((s) => !s)}>
+                <button type="button" className="btn btn-topbar-blue" onClick={() => setShowPwoQueueMenu((s) => !s)}>
                   PWO Schedule &amp; Queue ▾
                 </button>
                 {showPwoQueueMenu && (

@@ -738,6 +738,28 @@ export default function ProductionOrderDashboardPage() {
 
       {leadTimeDetailOrder && (
         <Modal title={`Start & Finish per Tahap — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
+          {(() => {
+            const row = rowsQuery.data?.find((r) => r.order === leadTimeDetailOrder);
+            if (!row?.longTimeProsesUntil) return null;
+            return (
+              <p
+                style={{
+                  marginTop: 0,
+                  marginBottom: 14,
+                  fontSize: "0.82rem",
+                  background: "var(--bg-subtle, #fff8e1)",
+                  border: "1px solid var(--border-color, #e0c46c)",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                }}
+              >
+                ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di actEndDate SAP</strong> (
+                {formatDateDDMMYYYY(row.longTimeProsesUntil)}) karena Order sudah berstatus Done/Teco (% GR &gt; 95%),
+                tapi tahap lanjutannya ({row.process}) tidak pernah diinput ke app sehingga tidak terus bertambah
+                tiap hari.
+              </p>
+            );
+          })()}
           {leadTimeDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
           {!leadTimeDetailQuery.isLoading && (leadTimeDetailQuery.data?.length ?? 0) === 0 && (
             <p style={{ color: "var(--text-muted)" }}>Belum ada tahapan proses yang punya data Start untuk Order ini.</p>

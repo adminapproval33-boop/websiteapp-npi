@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
-import { formatDateTime, formatDuration, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateDDMMYYYY, formatDateTime, formatDuration, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import PremixAftermixPage from "../PremixAftermix/PremixAftermixPage";
 import MillingPage from "../Milling/MillingPage";
@@ -670,7 +670,11 @@ export default function ProductionOrderDashboardPage() {
                 ) : (
                   <span
                     onClick={() => setLeadTimeDetailOrder(r.order)}
-                    title="Klik utk lihat lama proses di tiap tahapan"
+                    title={
+                      r.longTimeProsesUntil
+                        ? `Dibekukan di actEndDate SAP: ${formatDateDDMMYYYY(r.longTimeProsesUntil)} (Order sudah Done/Teco, tapi tahap lanjutannya tidak pernah diinput ke app). Klik utk lihat lama proses di tiap tahapan`
+                        : "Klik utk lihat lama proses di tiap tahapan"
+                    }
                     style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
                   >
                     {formatDuration(r.timestamp, r.longTimeProsesUntil ?? undefined)}

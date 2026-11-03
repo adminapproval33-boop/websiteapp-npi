@@ -159,7 +159,7 @@ export default function SmtpSettingsPage() {
         <div className="panel-header">Server SMTP</div>
         <div className="panel-body">
           <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: 16 }}>
-            Dipakai untuk email Notifikasi Order Macet. Ambang Lead Time Proses dan jam kirimnya diatur di bawah;
+            Dipakai untuk email Notifikasi Order Macet. Ambang Long Time Proses dan jam kirimnya diatur di bawah;
             karyawan sendiri hanya memilih tahap mana yang diikuti lewat menu Settings &gt; Notifikasi.
           </p>
           {settingsQuery.isLoading || !form ? (

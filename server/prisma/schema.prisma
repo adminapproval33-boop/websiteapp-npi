@@ -1135,9 +1135,11 @@ model SmtpSetting {
   pass         String?
   fromName     String?
   fromEmail    String?
-  /// Ambang Lead Time Proses (hari kerja) utk Notifikasi Order Macet -- GLOBAL,
-  /// cuma bisa diatur developer/admin di sini (2026-10-06, instruksi eksplisit
-  /// user: pindah dari "Ambang Lead Time Proses" personal di menu Settings >
+  /// Ambang Long Time Proses (hari kalender, BUKAN hari kerja -- 2026-11-03,
+  /// instruksi eksplisit user: ganti dari "Lead Time Proses" lama yg hari
+  /// kerja, lihat orderDelayAlertScheduler.ts) utk Notifikasi Order Macet --
+  /// GLOBAL, cuma bisa diatur developer/admin di sini (2026-10-06, instruksi
+  /// eksplisit user: pindah dari ambang personal di menu Settings >
   /// Notifikasi, supaya cuma developer yg menentukan data mana yg terkirim).
   /// Berlaku ke SEMUA karyawan yg opt-in notify* di MasterEmployee, lepas dari
   /// tahap yg mereka aktifkan.

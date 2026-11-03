@@ -56,7 +56,7 @@ export const env = {
   // Kosongkan kalau sudah ada di PATH (mis. di server Linux produksi).
   pgBinDir: process.env.PG_BIN_DIR ?? "",
   // Notifikasi Order Macet lewat email (2026-09-30, instruksi eksplisit user:
-  // email otomatis kalau Lead Time Proses order >= sekian hari kerja).
+  // email otomatis kalau Long Time Proses order >= sekian hari).
   // Sengaja TIDAK pakai required() -- kalau belum di-set, server
   // tetap boleh jalan normal, cuma pengiriman email yg akan gagal dgn pesan
   // jelas (lihat lib/mailer.ts) sampai kredensial SMTP kantor (Office 365/

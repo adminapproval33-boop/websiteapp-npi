@@ -994,7 +994,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
 
     const rows: Omit<
       ProductionOrderRow,
-      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "orderType" | "leadTimeProses" | "stages" | "progressPercent" | "productionActions"
+      "materialNumber" | "materialDescription" | "batch" | "pctGR" | "orderType" | "stages" | "progressPercent" | "productionActions"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,

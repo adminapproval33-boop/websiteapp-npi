@@ -150,7 +150,7 @@ function NotificationSection() {
           <p style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.65)", marginBottom: 12 }}>
             Pilih tahap proses mana saja yang ingin Anda terima notifikasinya lewat email -- lepas dari departemen
             Anda. Kalau Anda aktifkan mis. "Approval", Anda akan menerima email setiap ada order yang macet di tahap
-            Approval melebihi ambang Lead Time Proses (ditentukan developer/admin), order dari departemen mana pun.
+            Approval melebihi ambang Long Time Proses (ditentukan developer/admin), order dari departemen mana pun.
           </p>
           {!hasEmail && (
             <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.5)", marginBottom: 12 }}>

@@ -362,6 +362,12 @@ function MillingDetailTable({ detail }: { detail: MillingDetail }) {
 
 export default function ProductionOrderDashboardPage() {
   const [search, setSearch] = useState("");
+  // Dropdown tombol "PWO Schedule & Queue" (2026-11-03, instruksi eksplisit
+  // user) -- SENGAJA dropdown, bukan 1 klik buka 2 tab sekaligus: browser
+  // (Firefox, kadang Chrome tergantung setting) membatasi window.open() JS
+  // cuma 1x per klik, panggilan ke-2 dianggap popup mencurigakan & diblokir
+  // diam-diam (ditemukan dari laporan user: Aftermix tidak pernah kebuka).
+  const [showPwoQueueMenu, setShowPwoQueueMenu] = useState(false);
   const [qcDetailOrder, setQcDetailOrder] = useState<string | null>(null);
   const [leadTimeDetailOrder, setLeadTimeDetailOrder] = useState<string | null>(null);
   const [remarkDetailOrder, setRemarkDetailOrder] = useState<string | null>(null);
@@ -523,17 +529,38 @@ export default function ProductionOrderDashboardPage() {
               >
                 +New PO Produk
               </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                title="Buka PWO Schedule & Queue Premix dan Aftermix di tab baru"
-                onClick={() => {
-                  window.open("/planning/premix?tab=queue", "_blank", "noopener");
-                  window.open("/planning/aftermix?tab=queue", "_blank", "noopener");
-                }}
-              >
-                PWO Schedule &amp; Queue
-              </button>
+              <div style={{ position: "relative" }}>
+                <button type="button" className="btn btn-outline" onClick={() => setShowPwoQueueMenu((s) => !s)}>
+                  PWO Schedule &amp; Queue ▾
+                </button>
+                {showPwoQueueMenu && (
+                  <div
+                    className="panel"
+                    style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 160, padding: 6 }}
+                  >
+                    <a
+                      href="/planning/premix?tab=queue"
+                      target="_blank"
+                      rel="noopener"
+                      className="btn btn-outline"
+                      style={{ display: "block", textAlign: "left", marginBottom: 6 }}
+                      onClick={() => setShowPwoQueueMenu(false)}
+                    >
+                      Premix
+                    </a>
+                    <a
+                      href="/planning/aftermix?tab=queue"
+                      target="_blank"
+                      rel="noopener"
+                      className="btn btn-outline"
+                      style={{ display: "block", textAlign: "left" }}
+                      onClick={() => setShowPwoQueueMenu(false)}
+                    >
+                      Aftermix
+                    </a>
+                  </div>
+                )}
+              </div>
             </>
           }
           rows={rowsQuery.data ?? []}

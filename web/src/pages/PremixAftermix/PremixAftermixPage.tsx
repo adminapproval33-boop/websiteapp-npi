@@ -1281,6 +1281,9 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
+                  📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
@@ -1429,6 +1432,9 @@ export default function PremixAftermixPage({
                     </button>
                   </div>
                 )}
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
+                  📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />

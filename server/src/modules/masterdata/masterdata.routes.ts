@@ -106,12 +106,17 @@ masterDataRouter.get(
   "/orders",
   asyncRoute(async (req, res) => {
     const search = String(req.query.search ?? "").trim();
-    const orders = await prisma.masterOrder.findMany({
-      where: search ? { order: { contains: search, mode: "insensitive" } } : undefined,
-      orderBy: { order: "asc" },
-      take: 50,
-    });
-    res.json({ success: true, data: orders });
+    const where = search ? { order: { contains: search, mode: "insensitive" as const } } : undefined;
+    // `total` (2026-11-03, instruksi eksplisit user) -- endpoint ini SENGAJA
+    // dibatasi `take: 50` (preview, bukan daftar lengkap), tapi sebelumnya
+    // tidak ada cara sama sekali bagi user tahu berapa total baris SEBENARNYA
+    // di Master Data Cooispi (ditemukan dari pertanyaan user: label "(50
+    // ditampilkan)" dikira total, padahal cuma 50 baris teratas).
+    const [orders, total] = await Promise.all([
+      prisma.masterOrder.findMany({ where, orderBy: { order: "asc" }, take: 50 }),
+      prisma.masterOrder.count({ where }),
+    ]);
+    res.json({ success: true, data: orders, total });
   })
 );
 

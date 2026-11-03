@@ -338,8 +338,8 @@ export default function MasterDataPage() {
     queryKey: ["master-orders", orderSearch],
     queryFn: () =>
       api
-        .get<{ success: boolean; data: MasterOrderRow[] }>(`/master-data/orders?search=${encodeURIComponent(orderSearch)}`)
-        .then((r) => r.data),
+        .get<{ success: boolean; data: MasterOrderRow[]; total: number }>(`/master-data/orders?search=${encodeURIComponent(orderSearch)}`)
+        .then((r) => r),
   });
 
   const tanksQuery = useQuery({
@@ -588,7 +588,9 @@ export default function MasterDataPage() {
           />
 
           <div className="panel">
-            <div className="panel-header">Data Order Saat Ini ({ordersQuery.data?.length ?? 0} ditampilkan)</div>
+            <div className="panel-header">
+              Data Order Saat Ini ({ordersQuery.data?.data.length ?? 0} ditampilkan dari {ordersQuery.data?.total ?? 0} total)
+            </div>
             <div className="panel-body">
               <LastUpdatedNote value={lastUpdatedQuery.data?.cooispi} />
               <input
@@ -601,7 +603,7 @@ export default function MasterDataPage() {
                 rowKey={(r: MasterOrderRow) => r.order}
                 exportFileName="master-order-cooispi"
                 storageKey="master-order-cooispi"
-                rows={ordersQuery.data ?? []}
+                rows={ordersQuery.data?.data ?? []}
                 freezeFirstColumn
                 columns={ORDER_COLUMNS}
               />

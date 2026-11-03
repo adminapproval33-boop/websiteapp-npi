@@ -1276,7 +1276,7 @@ export default function QualityCheckReviewPage() {
                 // cuma di sini ditampilkan sbg angka per-Order, bukan digroup
                 // ke bucket.
                 key: "ageDays",
-                label: "Lead Time Proses (Hari)",
+                label: "Lead Time Proses",
                 render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
                 csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
               },
@@ -1547,7 +1547,7 @@ export default function QualityCheckReviewPage() {
                 },
                 {
                   key: "ageDays",
-                  label: "Lead Time Proses (Hari)",
+                  label: "Lead Time Proses",
                   render: (r) => (r.sinceQcEntry ? `${ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs))} hari` : "-"),
                   csvValue: (r) => (r.sinceQcEntry ? ageDaysSince(r.sinceQcEntry, rowAgeEndMs(r, nowMs)) : ""),
                 },

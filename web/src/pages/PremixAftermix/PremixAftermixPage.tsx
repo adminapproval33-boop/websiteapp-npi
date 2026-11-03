@@ -1248,12 +1248,14 @@ export default function PremixAftermixPage({
               Packing).
             </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-              <input
-                placeholder="Cari nomor Order..."
-                value={queueSearch}
-                onChange={(e) => setQueueSearch(e.target.value)}
-                style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-              />
+              {queueView === "list" && (
+                <input
+                  placeholder="Cari nomor Order..."
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+                />
+              )}
               <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
                 <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
                   📋 List
@@ -1284,6 +1286,12 @@ export default function PremixAftermixPage({
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
                   📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
                 </div>
+                <input
+                  placeholder="Cari nomor Order..."
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4, marginBottom: 8 }}
+                />
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
@@ -1406,12 +1414,14 @@ export default function PremixAftermixPage({
           <div className="panel-header">PWO Schedule &amp; Queue</div>
           <div className="panel-body">
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-              <input
-                placeholder="Cari nomor Order..."
-                value={queueSearch}
-                onChange={(e) => setQueueSearch(e.target.value)}
-                style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-              />
+              {queueView === "list" && (
+                <input
+                  placeholder="Cari nomor Order..."
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+                />
+              )}
               <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
                 <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
                   📋 List
@@ -1435,6 +1445,12 @@ export default function PremixAftermixPage({
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
                   📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
                 </div>
+                <input
+                  placeholder="Cari nomor Order..."
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4, marginBottom: 8 }}
+                />
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />

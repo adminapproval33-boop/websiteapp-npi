@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
-import { formatDateTime, toExcelDateTimeString } from "../../lib/datetime";
+import { formatDateTime, formatDuration, toExcelDateTimeString } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import PremixAftermixPage from "../PremixAftermix/PremixAftermixPage";
 import MillingPage from "../Milling/MillingPage";
@@ -31,10 +31,10 @@ interface ProductionOrderRow {
   finish: string | null;
   remark: string | null;
   codeTanki: string | null;
-  /** `null` = belum ada tahap apa pun yg selesai (tampil "Belum diproses") --
-   * dibedakan dari `0` (sudah py progres, cuma kebetulan selesai di hari
-   * kerja yg sama), 2026-09-28 instruksi eksplisit user. */
-  leadTimeProses: number | null;
+  /** Momen touch PALING TERAKHIR Order ini -- dasar kolom "Long Time Proses"
+   * (2026-11-03, instruksi eksplisit user: ganti "Lead Time Proses" yg
+   * dirasa membingungkan, pakai ukuran yg SAMA dgn Tank Monitoring). */
+  timestamp: string;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing, TERPISAH dari kolom "Proses" -- sesuai instruksi
@@ -457,8 +457,9 @@ export default function ProductionOrderDashboardPage() {
           acuannya nomor Order. Setiap Order hanya ditampilkan 1 baris, yaitu hasil inputan PALING TERAKHIR
           (proses apa pun) -- bukan seluruh riwayatnya. Material Number, Material Description, dan Batch selalu
           diambil langsung dari Master Data Cooispi terbaru (bukan snapshot lama), jadi otomatis ikut ter-update
-          kalau data di sana diubah. <strong>Lead Time Proses</strong> = jumlah hari kerja (Sabtu/Minggu tidak
-          dihitung) sejak Order ini pertama kali muncul di sistem (modul manapun) sampai hari ini.{" "}
+          kalau data di sana diubah. <strong>Long Time Proses</strong> = sudah berapa lama sejak aktivitas terakhir
+          Order ini (Start/Finish/input tahap manapun) sampai sekarang -- BUKAN durasi proses produksinya, ukuran
+          yang sama persis dengan kolom "Long Time Proses" di Tank Monitoring.{" "}
           <strong>Proses Bar</strong> = progres Order ini dari rangkaian tahap Material Number-nya (Premix, Milling,
           Aftermix, Colour Matching, QC, Approval, Packing -- hanya tahap yang PERNAH ada histori Material Number ini
           di Order manapun yang dicantumkan labelnya, karena tiap Material Number bisa punya rangkaian proses yang
@@ -637,24 +638,18 @@ export default function ProductionOrderDashboardPage() {
               csvValue: (r) => r.remark,
             },
             {
-              key: "leadTimeProses",
-              label: "Lead Time Proses",
+              key: "longTimeProses",
+              label: "Long Time Proses",
               render: (r) => (
                 <span
                   onClick={() => setLeadTimeDetailOrder(r.order)}
                   title="Klik utk lihat lama proses di tiap tahapan"
                   style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
                 >
-                  {r.leadTimeProses == null ? "Belum diproses" : `${r.leadTimeProses} hari kerja`}
+                  {formatDuration(r.timestamp)}
                 </span>
               ),
-              // Angka MENTAH (bukan teks "X hari kerja") -- `csvValue` ini
-              // JUGA dipakai DataTable sbg accessor filter/sort (lihat
-              // komentar di DataTable.tsx): dgn angka mentah + filter default
-              // `smartColumnFilter` yg baru, ketik "8" cuma cocok ke baris
-              // yg PERSIS 8 hari (bukan ikut ke 18/28/80 krn kebetulan
-              // mengandung digit "8", bug yg dilaporkan user 2026-10-07).
-              csvValue: (r) => (r.leadTimeProses == null ? "Belum diproses" : r.leadTimeProses),
+              csvValue: (r) => formatDuration(r.timestamp),
             },
           ]}
         />
@@ -736,8 +731,8 @@ export default function ProductionOrderDashboardPage() {
             </div>
           )}
           <p style={{ marginTop: 14, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-            Lead Time tiap tahapan dihitung hari kerja (Sabtu/Minggu tidak dihitung), sama seperti Lead Time Proses
-            total. Tahapan yang "Belum selesai" dihitung sampai hari ini.
+            Lead Time tiap tahapan dihitung hari kerja (Sabtu/Minggu tidak dihitung). Tahapan yang "Belum selesai"
+            dihitung sampai hari ini.
           </p>
         </Modal>
       )}

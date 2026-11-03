@@ -55,7 +55,7 @@ function currentStuckStage(row: ProductionOrderRow): string | null {
 }
 
 function digestHtml(
-  orders: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number; pctGR: string | null }[],
+  orders: { order: string; materialDescription: string | null; stage: string; daysStuck: number; pctGR: string | null }[],
   thresholdDays: number
 ) {
   const rows = orders
@@ -64,24 +64,37 @@ function digestHtml(
         `<tr><td style="padding:4px 10px;border:1px solid #ddd;">${o.order}</td><td style="padding:4px 10px;border:1px solid #ddd;">${
           o.materialDescription ?? "-"
         }</td><td style="padding:4px 10px;border:1px solid #ddd;">${o.stage}</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:right;">${
-          o.leadTimeProses
+          o.daysStuck
         } hari</td><td style="padding:4px 10px;border:1px solid #ddd;text-align:right;">${o.pctGR ?? "-"}</td></tr>`
     )
     .join("");
   return `
-    <p>Order berikut sudah macet &ge; ${thresholdDays} hari kerja (ambang ditentukan developer/admin lewat Pengaturan SMTP), di tahap yang Anda ikuti notifikasinya:</p>
+    <p>Order berikut sudah macet &ge; ${thresholdDays} hari (ambang ditentukan developer/admin lewat Pengaturan SMTP), di tahap yang Anda ikuti notifikasinya:</p>
     <table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">
       <thead><tr>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Order</th>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Material</th>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:left;">Tahap Macet</th>
-        <th style="padding:4px 10px;border:1px solid #ddd;text-align:right;">Lead Time Proses</th>
+        <th style="padding:4px 10px;border:1px solid #ddd;text-align:right;">Long Time Proses</th>
         <th style="padding:4px 10px;border:1px solid #ddd;text-align:right;">% GR</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <p style="margin-top:16px;color:#666;font-size:12px;">Email otomatis dari MES NPI -- dashboard Production Order Monitoring. Atur preferensi ini lewat Settings &gt; Notifikasi.</p>
   `;
+}
+
+/** Sudah berapa hari (kalender) sejak momen touch terakhir Order ini --
+ * "Long Time Proses" (2026-11-03, instruksi eksplisit user: Notifikasi Order
+ * Macet ikut pindah ke ukuran ini, GANTI "Lead Time Proses" lama yg dihapus
+ * dari dashboard krn dirasa membingungkan -- durasi proses produksi bisa
+ * pendek walau Order-nya sendiri sudah lama diam tanpa progres, kasus nyata
+ * Order 1040008512: Lead Time Proses cuma 1 hari kerja padahal sudah 83 hari
+ * tidak ada progres). Kalender (BUKAN hari kerja) -- sengaja konsisten dgn
+ * "Long Time Proses" Tank Monitoring, bukan dihitung ulang pakai
+ * countBusinessDaysElapsed. */
+function daysSinceTouch(timestamp: Date): number {
+  return Math.floor((Date.now() - timestamp.getTime()) / 86_400_000);
 }
 
 // Diekspor supaya bisa dipicu manual (mis. skrip verifikasi "kirim sekarang
@@ -114,7 +127,8 @@ export async function runOrderDelayAlertCheck() {
     // Kelompokkan order per tahap macetnya, hanya yg >= ambang GLOBAL.
     const ordersByStage = new Map<string, StuckOrder[]>();
     for (const r of rows) {
-      if (r.leadTimeProses === null || r.leadTimeProses < thresholdDays) continue;
+      const daysStuck = daysSinceTouch(r.timestamp);
+      if (daysStuck < thresholdDays) continue;
       // Order yg %GR-nya sudah >=95% dianggap selesai di sisi SAP -- jangan
       // ikut dianggap "macet" lagi di MES walau tahap internalnya belum
       // ditandai selesai (2026-10-12, instruksi eksplisit user, temuan dari
@@ -124,7 +138,7 @@ export async function runOrderDelayAlertCheck() {
       const stage = currentStuckStage(r);
       if (!stage || !STAGE_NOTIFY_FIELD[stage]) continue;
       const list = ordersByStage.get(stage) ?? [];
-      list.push({ order: r.order, materialDescription: r.materialDescription, leadTimeProses: r.leadTimeProses, pctGR: r.pctGR });
+      list.push({ order: r.order, materialDescription: r.materialDescription, daysStuck, pctGR: r.pctGR });
       ordersByStage.set(stage, list);
     }
 
@@ -170,7 +184,7 @@ export async function runOrderDelayAlertCheck() {
     let recipientsNotified = 0;
     const involvedOrders = new Set<string>();
     for (const emp of employees) {
-      const matched: { order: string; materialDescription: string | null; stage: string; leadTimeProses: number; pctGR: string | null }[] =
+      const matched: { order: string; materialDescription: string | null; stage: string; daysStuck: number; pctGR: string | null }[] =
         [];
       for (const [stage, field] of Object.entries(STAGE_NOTIFY_FIELD)) {
         if (!field || !emp[field]) continue;
@@ -188,7 +202,7 @@ export async function runOrderDelayAlertCheck() {
 
       await sendMail({
         to: [emp.email!],
-        subject: `[MES NPI] ${matched.length} Order macet >= ${thresholdDays} hari kerja`,
+        subject: `[MES NPI] ${matched.length} Order macet >= ${thresholdDays} hari`,
         html: digestHtml(matched, thresholdDays),
         attachments: attachment ? [attachment] : undefined,
       });

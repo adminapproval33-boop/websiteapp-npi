@@ -65,6 +65,20 @@ export function formatRelativeTime(value: string | Date | null | undefined): str
   return formatDateTime(d);
 }
 
+/** "2 hari 5 jam" sejak `since` sampai sekarang -- dipakai kolom "Long Time
+ * Proses" (Tank Monitoring & Production Order Monitoring, 2026-11-03,
+ * instruksi eksplisit user: dipakai di kedua tempat supaya ukurannya
+ * konsisten) -- dihitung di client krn datanya cuma dipakai tampilan (tidak
+ * perlu query ulang tiap detik). */
+export function formatDuration(since: string | Date): string {
+  const ms = Math.max(0, Date.now() - new Date(since).getTime());
+  const totalHours = Math.floor(ms / (1000 * 60 * 60));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days === 0 && hours === 0) return "< 1 jam";
+  return `${days} hari ${hours} jam`;
+}
+
 /** Format Date/ISO string (tanpa jam) ke dd-mm-yyyy -- dipakai Lot No & Exp
  * di Production Label (2026-08-04, instruksi eksplisit user: keduanya
  * harus seragam formatnya, pakai strip bukan garis miring). */

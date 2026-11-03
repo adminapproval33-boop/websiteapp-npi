@@ -4,7 +4,7 @@ import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import ProcessBadge from "../../components/ProcessBadge";
-import { formatDateTime } from "../../lib/datetime";
+import { formatDateTime, formatDuration } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import MaintenanceQuickModal from "../Maintenance/MaintenanceQuickModal";
 
@@ -82,18 +82,6 @@ function KpiCard({ label, value, color }: { label: string; value: number; color:
       <div style={{ fontSize: "1.8rem", fontWeight: 700, color: "var(--navy-dark)" }}>{value}</div>
     </div>
   );
-}
-
-/** "2 hari 5 jam" sejak `since` sampai sekarang -- format sama gayanya dgn
- * Processing Time di Approval Lot History, tapi dihitung di client krn
- * datanya cuma dipakai tampilan (tidak perlu query ulang tiap detik). */
-function formatDuration(since: string): string {
-  const ms = Math.max(0, Date.now() - new Date(since).getTime());
-  const totalHours = Math.floor(ms / (1000 * 60 * 60));
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  if (days === 0 && hours === 0) return "< 1 jam";
-  return `${days} hari ${hours} jam`;
 }
 
 type TaTbFilter = "TA" | "TB";

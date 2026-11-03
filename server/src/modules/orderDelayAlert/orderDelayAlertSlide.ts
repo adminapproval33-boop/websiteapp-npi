@@ -13,7 +13,12 @@ const MUTED = "8A7B68";
 export interface StuckOrder {
   order: string;
   materialDescription: string | null;
-  leadTimeProses: number;
+  /** Sudah berapa hari sejak aktivitas terakhir Order ini (kalender, BUKAN
+   * hari kerja) -- "Long Time Proses" (2026-11-03, instruksi eksplisit user:
+   * ganti dari "Lead Time Proses" lama, dirasa membingungkan krn durasi
+   * proses produksi bisa pendek walau Order-nya sendiri sudah lama diam
+   * nunggu tanpa progres -- kasus nyata Order 1040008512). */
+  daysStuck: number;
   pctGR: string | null;
 }
 
@@ -40,7 +45,7 @@ export async function buildOrderDelayAlertPptx(
 
   const allOrders = [...ordersByStage.entries()]
     .flatMap(([stage, orders]) => orders.map((o) => ({ ...o, stage })))
-    .sort((a, b) => b.leadTimeProses - a.leadTimeProses);
+    .sort((a, b) => b.daysStuck - a.daysStuck);
 
   // --- Slide 1: Ringkasan ---
   const summary = pres.addSlide();
@@ -134,7 +139,7 @@ export async function buildOrderDelayAlertPptx(
     { text: "Order", options: { bold: true, color: "FFFFFF", fill: { color: NAVY } } },
     { text: "Material", options: { bold: true, color: "FFFFFF", fill: { color: NAVY } } },
     { text: "Tahap Macet", options: { bold: true, color: "FFFFFF", fill: { color: NAVY } } },
-    { text: "Lead Time (hari)", options: { bold: true, color: "FFFFFF", fill: { color: NAVY }, align: "right" } },
+    { text: "Long Time Proses (hari)", options: { bold: true, color: "FFFFFF", fill: { color: NAVY }, align: "right" } },
     { text: "% GR", options: { bold: true, color: "FFFFFF", fill: { color: NAVY }, align: "right" } },
   ];
 
@@ -150,13 +155,13 @@ export async function buildOrderDelayAlertPptx(
     const rows: PptxGenJS.TableRow[] = [
       headerRow,
       ...chunk.map((o) => {
-        const severe = o.leadTimeProses >= thresholdDays * 1.5;
+        const severe = o.daysStuck >= thresholdDays * 1.5;
         const cellOpts = { color: severe ? RED : INK, bold: severe };
         return [
           { text: o.order, options: cellOpts },
           { text: o.materialDescription ?? "-", options: cellOpts },
           { text: o.stage, options: cellOpts },
-          { text: String(o.leadTimeProses), options: { ...cellOpts, align: "right" as const } },
+          { text: String(o.daysStuck), options: { ...cellOpts, align: "right" as const } },
           { text: o.pctGR ?? "-", options: { ...cellOpts, align: "right" as const } },
         ];
       }),

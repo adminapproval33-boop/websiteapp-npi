@@ -276,7 +276,7 @@ export default function SmtpSettingsPage() {
                 </p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                   <div className="field">
-                    <label>Ambang Lead Time Proses (hari kerja)</label>
+                    <label>Ambang Long Time Proses (hari)</label>
                     <input
                       type="number"
                       min={1}

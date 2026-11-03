@@ -504,6 +504,7 @@ export default function ProductionOrderDashboardPage() {
           rowKey={(r: ProductionOrderRow) => `${r.order}-${r.process}-${r.start}`}
           exportFileName="dashboard-production-orders"
           storageKey="dashboard-production-orders"
+          freezeFirstColumn
           toolbarExtra={
             <>
               <button type="button" className="btn btn-outline" onClick={() => setManualInputOpen(true)}>

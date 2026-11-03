@@ -640,16 +640,25 @@ export default function ProductionOrderDashboardPage() {
             {
               key: "longTimeProses",
               label: "Long Time Proses",
-              render: (r) => (
-                <span
-                  onClick={() => setLeadTimeDetailOrder(r.order)}
-                  title="Klik utk lihat lama proses di tiap tahapan"
-                  style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
-                >
-                  {formatDuration(r.timestamp)}
-                </span>
-              ),
-              csvValue: (r) => formatDuration(r.timestamp),
+              // Order yg belum py histori produksi apa pun (baris antrian dari
+              // Master Data, lihat komentar `queuePremixRows` di backend)
+              // sengaja diisi timestamp epoch (1970) sbg sentinel paling-lama --
+              // kalau ditampilkan apa adanya jadi angka ngawur "20760 hari".
+              // Deteksi sentinel itu di sini & tampilkan "Belum Proses" saja
+              // (2026-11-03, instruksi eksplisit user).
+              render: (r) =>
+                new Date(r.timestamp).getTime() === 0 ? (
+                  "Belum Proses"
+                ) : (
+                  <span
+                    onClick={() => setLeadTimeDetailOrder(r.order)}
+                    title="Klik utk lihat lama proses di tiap tahapan"
+                    style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
+                  >
+                    {formatDuration(r.timestamp)}
+                  </span>
+                ),
+              csvValue: (r) => (new Date(r.timestamp).getTime() === 0 ? "Belum Proses" : formatDuration(r.timestamp)),
             },
           ]}
         />

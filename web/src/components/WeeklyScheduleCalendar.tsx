@@ -447,6 +447,9 @@ function OverdueCard({
   );
 }
 
+/** Judul "⚠ Overdue, belum dikerjakan (N)" sendiri DIPINDAH ke header kalender
+ * (sejajar dgn label tanggal minggu, 2026-11-03 instruksi eksplisit user) --
+ * komponen ini SEKARANG cuma merender kotak cari + strip kartunya saja. */
 function OverdueBanner({
   events,
   onOpenBooking,
@@ -458,18 +461,26 @@ function OverdueBanner({
   selectedIds: Set<string>;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
 }) {
+  const [overdueSearch, setOverdueSearch] = useState("");
   const overdue = useMemo(
     () => events.filter((ev) => isOverdue(ev.scheduledDate)).sort((a, b) => daysOverdue(b.scheduledDate) - daysOverdue(a.scheduledDate)),
     [events]
   );
+  const filteredOverdue = useMemo(
+    () => overdue.filter((ev) => ev.order.toLowerCase().includes(overdueSearch.trim().toLowerCase())),
+    [overdue, overdueSearch]
+  );
   if (overdue.length === 0) return null;
   return (
     <div style={{ padding: "8px 14px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
-      <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>
-        ⚠ Overdue, belum dikerjakan ({overdue.length})
-      </div>
+      <input
+        placeholder="Cari nomor Order..."
+        value={overdueSearch}
+        onChange={(e) => setOverdueSearch(e.target.value)}
+        style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid #fecaca", borderRadius: 4, marginBottom: 8, background: "#fff" }}
+      />
       <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-        {overdue.map((ev) => (
+        {filteredOverdue.map((ev) => (
           <OverdueCard
             key={ev.id}
             ev={ev}
@@ -478,6 +489,9 @@ function OverdueBanner({
             onOpenBooking={onOpenBooking}
           />
         ))}
+        {filteredOverdue.length === 0 && (
+          <span style={{ fontSize: "0.8rem", color: "#991b1b" }}>Tidak ada Order overdue yang cocok dgn pencarian.</span>
+        )}
       </div>
     </div>
   );
@@ -539,10 +553,17 @@ export default function WeeklyScheduleCalendar({
     return map;
   }, [events, days]);
 
+  const overdueCount = useMemo(() => events.filter((ev) => isOverdue(ev.scheduledDate)).length, [events]);
+
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--toolbar-bg)" }}>
-        <div style={{ fontWeight: 700, color: "var(--text-main)" }}>{fmtRangeLabel(weekStart)}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--toolbar-bg)", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 700, color: "var(--text-main)" }}>{fmtRangeLabel(weekStart)}</span>
+          {overdueCount > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b" }}>⚠ Overdue, belum dikerjakan ({overdueCount})</span>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setWeekStart((w) => addDays(w, -7))}>
             ← Minggu Lalu

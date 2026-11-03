@@ -1239,7 +1239,17 @@ export default function PremixAftermixPage({
 
       {tab === "queue" && section === "AFTERMIX" && (
         <div className="panel">
-          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <span>PWO Schedule &amp; Queue</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
+                📋 List
+              </button>
+              <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
+                📅 Kalender
+              </button>
+            </div>
+          </div>
           <div className="panel-body">
             <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
               PWO yang sudah "Milling - DN" dan sedang menunggu dikerjakan Aftermix -- diurutkan Finish Milling
@@ -1247,24 +1257,16 @@ export default function PremixAftermixPage({
               PWO tersebut, atau begitu PWO itu sudah masuk tahap setelah Aftermix (Colour Matching, Approval,
               Packing).
             </p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-              {queueView === "list" && (
+            {queueView === "list" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <input
                   placeholder="Cari nomor Order..."
                   value={queueSearch}
                   onChange={(e) => setQueueSearch(e.target.value)}
                   style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
                 />
-              )}
-              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
-                <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
-                  📋 List
-                </button>
-                <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
-                  📅 Kalender
-                </button>
               </div>
-            </div>
+            )}
 
             {queueView === "calendar" ? (
               <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -1411,26 +1413,28 @@ export default function PremixAftermixPage({
 
       {tab === "queue" && section === "PREMIX" && (
         <div className="panel">
-          <div className="panel-header">PWO Schedule &amp; Queue</div>
+          <div className="panel-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <span>PWO Schedule &amp; Queue</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
+                📋 List
+              </button>
+              <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
+                📅 Kalender
+              </button>
+            </div>
+          </div>
           <div className="panel-body">
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-              {queueView === "list" && (
+            {queueView === "list" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <input
                   placeholder="Cari nomor Order..."
                   value={queueSearch}
                   onChange={(e) => setQueueSearch(e.target.value)}
                   style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
                 />
-              )}
-              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
-                <button type="button" className={`btn ${queueView === "list" ? "" : "btn-outline"}`} onClick={() => setQueueView("list")}>
-                  📋 List
-                </button>
-                <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
-                  📅 Kalender
-                </button>
               </div>
-            </div>
+            )}
 
             {queueView === "calendar" ? (
               <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>

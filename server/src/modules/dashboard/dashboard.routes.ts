@@ -1331,10 +1331,14 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         progressPercent,
         productionActions,
         // Done/Teco tapi `timestamp` (touch terakhir) msh nyangkut di tahap
-        // lama -> bekukan "Long Time Proses" di `actEndDate` SAP (tanggal
-        // Order itu benar2 selesai), BUKAN terus dihitung sampai sekarang.
+        // lama -> bekukan "Long Time Proses", BUKAN terus dihitung sampai
+        // sekarang. "Done" (%GR>95%) dibekukan di `actEndDate` SAP (tanggal
+        // Order itu benar2 selesai). "Teco" (%GR=9999%, sentinel SAP, 2026-11-03
+        // instruksi eksplisit user: `actEndDate` sentinel TECO tidak diandalkan)
+        // CUKUP dibekukan di `timestamp` itu sendiri -- "terakhir kali proses
+        // tersebut diinput", bukan tanggal lain, hasilnya selalu "< 1 jam".
         longTimeProsesUntil:
-          productionActions === "Done" || productionActions === "Teco" ? parseSapDate(master?.actEndDate) : null,
+          productionActions === "Teco" ? r.timestamp : productionActions === "Done" ? parseSapDate(master?.actEndDate) : null,
       };
     });
 

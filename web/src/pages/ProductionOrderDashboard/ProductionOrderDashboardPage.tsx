@@ -672,7 +672,9 @@ export default function ProductionOrderDashboardPage() {
                     onClick={() => setLeadTimeDetailOrder(r.order)}
                     title={
                       r.longTimeProsesUntil
-                        ? `Dibekukan di actEndDate SAP: ${formatDateDDMMYYYY(r.longTimeProsesUntil)} (Order sudah Done/Teco, tapi tahap lanjutannya tidak pernah diinput ke app). Klik utk lihat lama proses di tiap tahapan`
+                        ? r.productionActions === "Teco"
+                          ? "Dibekukan di input terakhir (Order sudah Teco, actEndDate SAP hampir pasti kosong utk status ini). Klik utk lihat lama proses di tiap tahapan"
+                          : `Dibekukan di actEndDate SAP: ${formatDateDDMMYYYY(r.longTimeProsesUntil)} (Order sudah Done, tapi tahap lanjutannya tidak pernah diinput ke app). Klik utk lihat lama proses di tiap tahapan`
                         : "Klik utk lihat lama proses di tiap tahapan"
                     }
                     style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
@@ -753,10 +755,21 @@ export default function ProductionOrderDashboardPage() {
                   padding: "8px 10px",
                 }}
               >
-                ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di actEndDate SAP</strong> (
-                {formatDateDDMMYYYY(row.longTimeProsesUntil)}) karena Order sudah berstatus Done/Teco (% GR &gt; 95%),
-                tapi tahap lanjutannya ({row.process}) tidak pernah diinput ke app sehingga tidak terus bertambah
-                tiap hari.
+                {row.productionActions === "Teco" ? (
+                  <>
+                    ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di input terakhir</strong> (
+                    {formatDateDDMMYYYY(row.longTimeProsesUntil)}) karena Order sudah berstatus <strong>Teco</strong>{" "}
+                    (% GR = 9999%) -- actEndDate SAP hampir pasti kosong utk status ini, jadi dibekukan cukup dari
+                    terakhir kali tahap ({row.process}) itu diinput, bukan terus dihitung sampai sekarang.
+                  </>
+                ) : (
+                  <>
+                    ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di actEndDate SAP</strong> (
+                    {formatDateDDMMYYYY(row.longTimeProsesUntil)}) karena Order sudah berstatus <strong>Done</strong>{" "}
+                    (% GR &gt; 95%), tapi tahap lanjutannya ({row.process}) tidak pernah diinput ke app sehingga tidak
+                    terus bertambah tiap hari.
+                  </>
+                )}
               </p>
             );
           })()}

@@ -1402,14 +1402,6 @@ export default function PremixAftermixPage({
         <div className="panel">
           <div className="panel-header">PWO Schedule &amp; Queue</div>
           <div className="panel-body">
-            <p style={{ marginTop: 0, marginBottom: 12, color: "var(--muted)", fontSize: "0.85rem" }}>
-              PWO dari Master Data Cooispi yang Material Number-nya pernah punya histori Premix, dan Start Premix-nya
-              belum diisi (termasuk yang baru Form Received) -- diurutkan sesuai urutan Master Data Cooispi. PWO
-              otomatis hilang dari daftar ini begitu Start Premix-nya sudah diisi, atau begitu PWO itu sudah masuk
-              tahap setelah Premix (Milling, Aftermix, Colour Matching, Approval, Packing). Material Number yang
-              memang tidak pernah lewat Premix (bukan bagian rangkaian proses material itu) tidak ikut ditampilkan di
-              sini.
-            </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
               <input
                 placeholder="Cari nomor Order..."
@@ -1429,13 +1421,6 @@ export default function PremixAftermixPage({
 
             {queueView === "calendar" ? (
               <DndContext sensors={dragSensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                <p style={{ margin: "0 0 8px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                  Tarik Order dari daftar di bawah ini ke kolom hari yang diinginkan di Kalender untuk menjadwalkan --
-                  kartu yang sudah terjadwal juga bisa ditarik ke hari lain utk pindah, atau pakai ▲▼ di kartunya utk
-                  ubah urutan. Order yang sudah dijadwalkan otomatis hilang dari daftar di bawah ini. Tahan{" "}
-                  <strong>Ctrl</strong> lalu klik beberapa Order (di daftar di bawah maupun kartu di Kalender) untuk
-                  pilih banyak sekaligus, lalu tarik salah satunya -- semuanya ikut pindah bareng.
-                </p>
                 {selectedIds.size > 0 && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: "0.78rem" }}>
                     <span style={{ color: "var(--navy-dark)", fontWeight: 700 }}>{selectedIds.size} Order dipilih</span>

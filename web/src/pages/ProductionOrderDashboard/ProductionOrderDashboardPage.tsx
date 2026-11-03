@@ -523,6 +523,17 @@ export default function ProductionOrderDashboardPage() {
               >
                 +New PO Produk
               </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                title="Buka PWO Schedule & Queue Premix dan Aftermix di tab baru"
+                onClick={() => {
+                  window.open("/planning/premix?tab=queue", "_blank", "noopener");
+                  window.open("/planning/aftermix?tab=queue", "_blank", "noopener");
+                }}
+              >
+                PWO Schedule &amp; Queue
+              </button>
             </>
           }
           rows={rowsQuery.data ?? []}

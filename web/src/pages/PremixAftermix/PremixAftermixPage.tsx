@@ -1,4 +1,5 @@
 import { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
 import { api, ApiError } from "../../api/client";
@@ -251,7 +252,15 @@ export default function PremixAftermixPage({
   const { data: memberSuggestions } = useNameSuggestions("premixAftermix", "member", section);
   const { data: tanks } = useTankOptions();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"input" | "history" | "queue">(() => (isViewOnly ? "history" : "input"));
+  // "?tab=queue" di URL (mis. "/planning/premix?tab=queue") langsung buka tab
+  // "PWO Schedule & Queue" begitu halaman dimuat (2026-11-03, instruksi
+  // eksplisit user: tombol di Production Order Monitoring yg buka tab baru
+  // langsung ke PWO Schedule & Queue Premix/Aftermix) -- tanpa param, perilaku
+  // lama (default "history" utk view-only, "input" utk yg lain) tidak berubah.
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<"input" | "history" | "queue">(() =>
+    searchParams.get("tab") === "queue" ? "queue" : isViewOnly ? "history" : "input"
+  );
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [memberNameInput, setMemberNameInput] = useState("");

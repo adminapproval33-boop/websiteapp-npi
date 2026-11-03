@@ -28,6 +28,13 @@ export interface ScheduleEvent {
 
 const DAY_LABELS = ["SEN", "SEL", "RAB", "KAM", "JUM", "SAB"];
 
+/** Garis grid kalender mingguan (2026-11-03, instruksi eksplisit user: garis
+ * kotak2 tabel-nya dibuat lebih jelas) -- SENGAJA warna sendiri (slate-400,
+ * lebih gelap dari `var(--border)`/slate-200 yg dipakai global), bukan ganti
+ * var(--border) global, supaya cuma kalender ini yg berubah, bagian lain app
+ * tidak ikut berubah. */
+const GRID_BORDER = "1px solid #94a3b8";
+
 /** Prefix ID drop target 1 kolom hari (2026-08-05) -- diexport supaya
  * pemanggil (PremixAftermixPage.tsx) bisa urai `over.id` dari
  * DndContext.onDragEnd tanpa duplikasi format string. */
@@ -556,8 +563,8 @@ export default function WeeklyScheduleCalendar({
   const overdueCount = useMemo(() => events.filter((ev) => isOverdue(ev.scheduledDate)).length, [events]);
 
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid var(--border)", background: "var(--toolbar-bg)", flexWrap: "wrap", gap: 8 }}>
+    <div style={{ border: GRID_BORDER, borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: GRID_BORDER, background: "var(--toolbar-bg)", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {overdueCount > 0 ? (
             <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#991b1b" }}>
@@ -587,10 +594,17 @@ export default function WeeklyScheduleCalendar({
           {days.map((d, i) => {
             const isToday = isSameDay(d, today);
             return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", borderRight: i < 5 ? "1px solid var(--border)" : undefined }}>
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  borderRight: i < 5 ? GRID_BORDER : undefined,
+                }}
+              >
                 <div
                   style={{
-                    borderBottom: "1px solid var(--border)",
+                    borderBottom: GRID_BORDER,
                     padding: "8px 10px",
                     textAlign: "center",
                     background: isToday ? "var(--panel-header)" : undefined,

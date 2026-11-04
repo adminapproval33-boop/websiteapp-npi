@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
-import { getLatestCrossModule, isValidTankCodeOrJoined } from "../../lib/productionLabelHelpers";
+import { getLatestCrossModule, isValidTankCodeOrJoined, buildYamahaCodeYm, parseLeadingNumber } from "../../lib/productionLabelHelpers";
 import { notFutureDDMMYYYY } from "../../lib/dateValidation";
 
 /// Label Entry FG (2026-08-20, instruksi eksplisit user) -- SAMA PERSIS
@@ -42,7 +42,36 @@ const saveSchema = z.object({
   /// "Jumlah /Per" (2026-08-21, instruksi eksplisit user, KHUSUS FG) -- lihat komentar kolom di schema.prisma.
   jumlahPer: z.string().optional(),
   remark: z.string().optional(),
+  /// Field QR Code Yamaha (2026-11-04, digabung ke Label Entry FG) --
+  /// `viskositas`/`sg` diterima apa adanya dari client, tapi `itemNoYamaha`
+  /// yg DITERIMA di sini DIABAIKAN & DIHITUNG ULANG server-side dari lookup
+  /// MasterPartYamaha (lihat handler POST/PUT di bawah) -- field ini cuma
+  /// ada di schema Zod supaya tidak di-strip percuma, bukan dipercaya
+  /// nilainya. Field "Qty Pack" terpisah SUDAH DIHAPUS (2026-11-04, instruksi
+  /// eksplisit user: redundant dgn Volume) -- kode gabungan sekarang ambil
+  /// angka dari `volume` (lihat computeYamahaFields).
+  viskositas: z.string().optional(),
+  sg: z.string().optional(),
+  itemNoYamaha: z.string().optional(),
 });
+
+/** Hitung itemNoYamaha/codeYm server-side dari lookup MasterPartYamaha
+ * (2026-11-04, instruksi eksplisit user) -- BEST EFFORT, TIDAK PERNAH
+ * memblokir Save/Update (beda dari behavior lama menu "QR Code Yamaha" yg
+ * menolak kalau Material belum terdaftar): mayoritas Order Label Entry FG
+ * BUKAN Yamaha, jadi kalau materialNumber tidak ketemu atau Lot/Volume belum
+ * lengkap, `itemNoYamaha`/`codeYm` cukup disimpan null, request tetap sukses
+ * spt FG biasa. Angka utk "000" di kode gabungan diambil dari isian Volume
+ * (2026-11-04, instruksi eksplisit user: field "Qty Pack" terpisah dihapus,
+ * dianggap redundant dgn Volume). */
+async function computeYamahaFields(materialNumber: string | undefined, lotNo: string | undefined, volume: string | undefined) {
+  const part = materialNumber ? await prisma.masterPartYamaha.findUnique({ where: { materialNumber } }) : null;
+  const qty = volume ? parseLeadingNumber(volume) : null;
+  if (!part || !lotNo || qty === null) {
+    return { itemNoYamaha: null as string | null, codeYm: null as string | null };
+  }
+  return { itemNoYamaha: part.itemNoYamaha, codeYm: buildYamahaCodeYm(lotNo, qty, part.itemNoYamaha) };
+}
 
 productionLabelFgRouter.get(
   "/latest-cross-module/:order",
@@ -80,6 +109,19 @@ productionLabelFgRouter.get(
   })
 );
 
+/** Lookup Item No./Item Name Yamaha dari Material Number (2026-11-04, dipakai
+ * form Label Entry FG begitu Order ditemukan) -- return null kalau tidak
+ * terdaftar di MasterPartYamaha, TIDAK PERNAH 404/error (mayoritas Order FG
+ * bukan Yamaha, form tetap jalan normal dgn field ini kosong). */
+productionLabelFgRouter.get(
+  "/lookup-part/:materialNumber",
+  asyncRoute(async (req, res) => {
+    const materialNumber = String(req.params.materialNumber).trim();
+    const part = materialNumber ? await prisma.masterPartYamaha.findUnique({ where: { materialNumber } }) : null;
+    res.json({ success: true, data: part });
+  })
+);
+
 productionLabelFgRouter.get(
   "/history",
   asyncRoute(async (_req, res) => {
@@ -104,8 +146,9 @@ productionLabelFgRouter.post(
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
+    const { itemNoYamaha, codeYm } = await computeYamahaFields(parsed.data.materialNumber, parsed.data.lotNo, parsed.data.volume);
     const created = await prisma.productionLabelFg.create({
-      data: { ...parsed.data, printedBy: req.auth!.nik },
+      data: { ...parsed.data, itemNoYamaha, codeYm, printedBy: req.auth!.nik },
     });
     res.status(201).json({ success: true, message: "Label berhasil dicetak & disimpan ke History.", data: created });
   })
@@ -132,7 +175,8 @@ productionLabelFgRouter.put(
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
-    const updated = await prisma.productionLabelFg.update({ where: { id }, data: parsed.data });
+    const { itemNoYamaha, codeYm } = await computeYamahaFields(parsed.data.materialNumber, parsed.data.lotNo, parsed.data.volume);
+    const updated = await prisma.productionLabelFg.update({ where: { id }, data: { ...parsed.data, itemNoYamaha, codeYm } });
     res.json({ success: true, message: "Data berhasil diperbarui.", data: updated });
   })
 );

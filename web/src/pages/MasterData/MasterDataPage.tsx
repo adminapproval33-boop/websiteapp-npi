@@ -67,6 +67,13 @@ const ORDER_COLUMNS = ORDER_COLUMN_DEFS.map((c) => ({
   render: (r: MasterOrderRow) => r[c.key] ?? "-",
 }));
 
+interface MasterPartYamahaRow {
+  id: number;
+  materialNumber: string;
+  itemNoYamaha: string;
+  itemName: string;
+}
+
 interface MasterTankRow {
   code: string;
   taTb: string | null;
@@ -109,6 +116,7 @@ interface LastUpdated {
   mesin: string | null;
   employee: string | null;
   flow: string | null;
+  partYamaha: string | null;
 }
 
 function LastUpdatedNote({ value }: { value: string | null | undefined }) {
@@ -235,7 +243,7 @@ function TankTypeCell({
   );
 }
 
-type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow";
+type Tab = "cooispi" | "tanki" | "mesin" | "employee" | "flow" | "partYamaha";
 
 function ImportCard({
   title,
@@ -328,6 +336,9 @@ export default function MasterDataPage() {
   const [flowResult, setFlowResult] = useState("");
   const [flowError, setFlowError] = useState("");
   const [flowSearch, setFlowSearch] = useState("");
+  const [partYamahaResult, setPartYamahaResult] = useState("");
+  const [partYamahaError, setPartYamahaError] = useState("");
+  const [partYamahaSearch, setPartYamahaSearch] = useState("");
 
   const lastUpdatedQuery = useQuery({
     queryKey: ["master-last-updated"],
@@ -348,6 +359,16 @@ export default function MasterDataPage() {
       api
         .get<{ success: boolean; data: MasterTankRow[] }>(`/master-data/tanks/full?search=${encodeURIComponent(tankSearch)}`)
         .then((r) => r.data),
+  });
+
+  const partYamahaQuery = useQuery({
+    queryKey: ["master-part-yamaha", partYamahaSearch],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: MasterPartYamahaRow[]; total: number }>(
+          `/master-data/part-yamaha?search=${encodeURIComponent(partYamahaSearch)}`
+        )
+        .then((r) => r),
   });
 
   const mesinQuery = useQuery({
@@ -402,6 +423,25 @@ export default function MasterDataPage() {
     onError: (err) => {
       setTankError(err instanceof ApiError ? err.message : "Gagal mengimpor Code Tanki.");
       setTankResult("");
+    },
+  });
+
+  const importPartYamaha = useMutation({
+    mutationFn: (payload: { file: File; mode: string }) => {
+      const formData = new FormData();
+      formData.append("file", payload.file);
+      formData.append("mode", payload.mode);
+      return api.post<{ message: string }>("/master-data/part-yamaha/import", formData);
+    },
+    onSuccess: (res) => {
+      setPartYamahaResult(res.message);
+      setPartYamahaError("");
+      queryClient.invalidateQueries({ queryKey: ["master-part-yamaha"] });
+      queryClient.invalidateQueries({ queryKey: ["master-last-updated"] });
+    },
+    onError: (err) => {
+      setPartYamahaError(err instanceof ApiError ? err.message : "Gagal mengimpor Master Part Yamaha.");
+      setPartYamahaResult("");
     },
   });
 
@@ -573,6 +613,9 @@ export default function MasterDataPage() {
         </button>
         <button className={`btn ${tab === "flow" ? "" : "btn-outline"}`} onClick={() => setTab("flow")}>
           Material Flow Proses
+        </button>
+        <button className={`btn ${tab === "partYamaha" ? "" : "btn-outline"}`} onClick={() => setTab("partYamaha")}>
+          Master Part Yamaha
         </button>
       </div>
 
@@ -863,6 +906,46 @@ export default function MasterDataPage() {
                     render: (r) => renderFlowCell(r, "packingRequired", true),
                     csvValue: (r) => (r.packingRequired ? "1" : "0"),
                   },
+                ]}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === "partYamaha" && (
+        <>
+          <ImportCard
+            title="Master Part Yamaha"
+            description='File wajib punya kolom header "CODE SAP" (boleh juga Material Number -- dicocokkan ke Material Number di Referensi Order/PO), "Item No." (boleh "Item No"), dan "Item Name". Dipakai menu "QR Code Yamaha" untuk mencari nomor part versi Yamaha dari Material Number Order.'
+            onImport={(file, mode) => importPartYamaha.mutate({ file, mode })}
+            isPending={importPartYamaha.isPending}
+            result={partYamahaResult}
+            error={partYamahaError}
+          />
+
+          <div className="panel">
+            <div className="panel-header">
+              Data Part Yamaha Saat Ini ({partYamahaQuery.data?.data.length ?? 0} ditampilkan dari {partYamahaQuery.data?.total ?? 0} total)
+            </div>
+            <div className="panel-body">
+              <LastUpdatedNote value={lastUpdatedQuery.data?.partYamaha} />
+              <input
+                placeholder="Cari Material Number / Item No. / Item Name..."
+                value={partYamahaSearch}
+                onChange={(e) => setPartYamahaSearch(e.target.value)}
+                style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+              />
+              <DataTable
+                rowKey={(r: MasterPartYamahaRow) => r.id}
+                exportFileName="master-part-yamaha"
+                storageKey="master-part-yamaha"
+                rows={partYamahaQuery.data?.data ?? []}
+                freezeFirstColumn
+                columns={[
+                  { key: "materialNumber", label: "Material Number (Code SAP)", render: (r) => r.materialNumber },
+                  { key: "itemNoYamaha", label: "Item No. Yamaha", render: (r) => r.itemNoYamaha },
+                  { key: "itemName", label: "Item Name", render: (r) => r.itemName },
                 ]}
               />
             </div>

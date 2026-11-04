@@ -947,10 +947,45 @@ model ProductionLabelFg {
   /// ada sumber otomatisnya di sistem manapun.
   jumlahPer           String?
   remark              String?
+  /// Field "Kode Gabungan QR Code Yamaha" (2026-11-04, instruksi eksplisit
+  /// user: menu "QR Code Yamaha" digabung ke Label Entry FG, bukan menu
+  /// terpisah lagi) -- SEMUA nullable & TIDAK memblokir Save biasa, krn
+  /// mayoritas Order Label Entry FG bukan Yamaha. Hanya terisi kalau
+  /// materialNumber-nya ketemu di MasterPartYamaha SAAT SIMPAN (server-side,
+  /// lihat productionLabelFg.routes.ts) -- `itemNoYamaha`/`codeYm` TIDAK
+  /// pernah dipercaya dari client.
+  itemNoYamaha        String?
+  /// Field "Ω" di Excel asli QRCODE YAMAHA APP.xlsm (artinya Viskositas).
+  viskositas          String?
+  sg                  String?
+  /// Kode gabungan hasil akhir (isi QR Yamaha), format
+  /// TEXT(lotNo,"DDMMYYYY") & TEXT(angka dari volume,"000") & itemNoYamaha
+  /// -- null kalau materialNumber bukan Yamaha atau Lot/Volume belum lengkap
+  /// (field "Qty Pack" terpisah SUDAH DIHAPUS, 2026-11-04, instruksi
+  /// eksplisit user: dianggap redundant dgn Volume, angkanya diambil dari
+  /// situ -- lihat `parseLeadingNumber` di productionLabelHelpers.ts).
+  codeYm              String?
   printedBy           String
 
   @@index([order])
   @@map("production_labels_fg")
+}
+
+/// Master Part Yamaha (2026-11-04, instruksi eksplisit user) -- pemetaan
+/// Material Number (SAP, "CODE SAP" di Excel aslinya) -> nomor part versi
+/// pelanggan Yamaha, dipakai nyusun "kode gabungan" (field `codeYm` di
+/// ProductionLabelFg -- menu "QR Code Yamaha" digabung ke Label Entry FG).
+/// Diimpor lewat Master Data > Master Part Yamaha (pola sama persis dgn
+/// Master Data Tanki/Mesin -- upload .xlsx/.csv, bukan recurring feed
+/// otomatis spt MasterOrder/COOISPI, krn sumbernya file internal, bukan SAP).
+model MasterPartYamaha {
+  id             Int      @id @default(autoincrement())
+  materialNumber String   @unique
+  itemNoYamaha   String
+  itemName       String
+  updatedAt      DateTime @updatedAt
+
+  @@map("master_part_yamaha")
 }
 
 /// Menu "Papan Info" (2026-08-08, instruksi eksplisit user) -- feed internal

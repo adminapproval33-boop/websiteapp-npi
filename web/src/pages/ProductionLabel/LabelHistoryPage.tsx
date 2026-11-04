@@ -31,6 +31,11 @@ interface LabelHistoryRow {
   orderQtyPcs?: string | null;
   remark: string | null;
   printedBy: string;
+  /// Field QR Code Yamaha (2026-11-04, digabung dari menu "QR Code Yamaha") -- kolom DB khusus ProductionLabelFg, undefined utk SFG.
+  itemNoYamaha?: string | null;
+  viskositas?: string | null;
+  sg?: string | null;
+  codeYm?: string | null;
 }
 
 interface EditField {
@@ -52,6 +57,7 @@ export default function LabelHistoryPage({
   showVolumeColumn = false,
   showJumlahPerColumn = false,
   showOrderQtyPcsColumn = false,
+  showYamahaColumns = false,
 }: {
   apiBase?: string;
   /** Kolom "Volume" di tabel History (2026-08-20, instruksi eksplisit user)
@@ -68,6 +74,11 @@ export default function LabelHistoryPage({
    * nya (`orderQty`) SUDAH ada sbg kolom "Quantity/LITER" tanpa gerbang ini --
    * kolom itu memang sudah lama tampil di History SFG maupun FG. */
   showOrderQtyPcsColumn?: boolean;
+  /** Kolom Item No. Yamaha/Viskositas/SG/Kode Gabungan (2026-11-04, instruksi
+   * eksplisit user -- menu "QR Code Yamaha" digabung ke Label Entry FG) --
+   * KHUSUS Label Entry FG (kolom DB cuma ada di ProductionLabelFg), default
+   * false (SFG tidak berubah). */
+  showYamahaColumns?: boolean;
 } = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -120,6 +131,12 @@ export default function LabelHistoryPage({
           { key: "pasteType", label: "Material Type" },
           { key: "drumColour", label: "Drum Colour" },
         ]),
+    // itemNoYamaha/codeYm SENGAJA TIDAK ikut diedit di sini (2026-11-04) --
+    // selalu dihitung ULANG server-side dari materialNumber/lotNo/volume
+    // saat PUT (lihat productionLabelFg.routes.ts), jadi nilai yg diketik
+    // manual di sini akan ditimpa lagi, cuma akan membingungkan kalau
+    // ditampilkan sbg field yg bisa diedit.
+    ...(showYamahaColumns ? [{ key: "viskositas", label: "Viskositas" }, { key: "sg", label: "SG" }] : []),
     { key: "remark", label: "Remark" },
   ];
 
@@ -142,6 +159,8 @@ export default function LabelHistoryPage({
       drumColour: row.drumColour ?? "",
       volume: row.volume ?? "",
       jumlahPer: row.jumlahPer ?? "",
+      viskositas: row.viskositas ?? "",
+      sg: row.sg ?? "",
       remark: row.remark ?? "",
     });
     setEditingRow(row);
@@ -206,6 +225,14 @@ export default function LabelHistoryPage({
                   { key: "pasteType", label: "Material Type", render: (r: LabelHistoryRow) => r.pasteType },
                   { key: "drumColour", label: "Drum Colour", render: (r: LabelHistoryRow) => r.drumColour },
                 ]),
+            ...(showYamahaColumns
+              ? [
+                  { key: "itemNoYamaha", label: "Item No. Yamaha", render: (r: LabelHistoryRow) => r.itemNoYamaha ?? null },
+                  { key: "viskositas", label: "Viskositas", render: (r: LabelHistoryRow) => r.viskositas ?? null },
+                  { key: "sg", label: "SG", render: (r: LabelHistoryRow) => r.sg ?? null },
+                  { key: "codeYm", label: "Kode Gabungan", render: (r: LabelHistoryRow) => r.codeYm ?? null },
+                ]
+              : []),
             { key: "remark", label: "Remark", render: (r) => r.remark },
             { key: "printedBy", label: "Printed By", render: (r) => r.printedBy },
             {

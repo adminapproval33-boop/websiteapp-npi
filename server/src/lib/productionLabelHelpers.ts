@@ -83,3 +83,31 @@ export async function isValidTankCodeOrJoined(value: string): Promise<boolean> {
   const results = await Promise.all(parts.map((p) => isValidTankCode(p)));
   return results.every(Boolean);
 }
+
+/** "Kode gabungan" QR Code Yamaha (2026-11-04, instruksi eksplisit user:
+ * menu "QR Code Yamaha" digabung ke Label Entry FG) -- PERSIS formula Excel
+ * asli QRCODE YAMAHA APP.xlsm sel E14: TEXT(LOT,"DDMMYYYY") &
+ * TEXT(qty,"000") & ItemNoYamaha. `lotNoDDMMYYYY` sudah dlm format string
+ * "dd-mm-yyyy" (lihat ProductionLabelFg.lotNo/notFutureDDMMYYYY) -- tinggal
+ * dibuang strip-nya, TIDAK perlu parse ulang ke Date. `qty` dibulatkan ke
+ * integer dulu (Excel format angka "000" tanpa desimal membulatkan) lalu
+ * di-pad MINIMAL 3 digit (bukan dipotong kalau >999) -- sumbernya field
+ * "Qty Pack" terpisah di awal, SEKARANG diambil dari angka pertama di
+ * kolom Volume (2026-11-04, instruksi eksplisit user: Qty Pack dihapus,
+ * dianggap redundant dgn Volume, lihat `parseLeadingNumber`). */
+export function buildYamahaCodeYm(lotNoDDMMYYYY: string, qty: number, itemNoYamaha: string): string {
+  const ddmmyyyy = lotNoDDMMYYYY.replace(/-/g, "");
+  const qtyPadded = String(Math.round(qty)).padStart(3, "0");
+  return `${ddmmyyyy}${qtyPadded}${itemNoYamaha}`;
+}
+
+/** Ambil angka pertama yg ketemu di isian Volume (2026-11-04, instruksi
+ * eksplisit user) -- field Volume isian bebas spt "1x5 Ltr", jadi ambil
+ * angka PERTAMA yg muncul, bukan parse seluruh string sbg angka. SAMA
+ * PERSIS logic client-side (`parseLeadingNumber` di ProductionLabelEntryPage.tsx). */
+export function parseLeadingNumber(value: string): number | null {
+  const match = value.match(/\d+(\.\d+)?/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : null;
+}

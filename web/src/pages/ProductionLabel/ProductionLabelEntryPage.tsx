@@ -23,6 +23,34 @@ function isKnownTankCodeOrJoined(tanks: string[] | undefined, value: string): bo
   return trimmed.split(" / ").every((part) => isKnownTankCode(tanks, part));
 }
 
+/** Ambil angka pertama yg ketemu di isian Volume (2026-11-04, instruksi
+ * eksplisit user: kolom "Qty Pack" dihapus, logic-nya PINDAH ke kolom Volume
+ * yg sudah ada -- field ini isian bebas spt "1x5 Ltr", jadi ambil angka
+ * PERTAMA yg muncul, bukan parse seluruh string sbg angka). */
+function parseLeadingNumber(value: string): number | null {
+  const match = value.match(/\d+(\.\d+)?/);
+  if (!match) return null;
+  const n = Number(match[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** "Kode gabungan" QR Code Yamaha, preview client-side (2026-11-04, KHUSUS
+ * `showYamahaQr`) -- SAMA PERSIS formula server (`buildYamahaCodeYm` di
+ * productionLabelHelpers.ts): TEXT(Lot,"DDMMYYYY") & TEXT(angka dari
+ * Volume,"000") & Item No. Yamaha. Cuma dipakai utk preview QR real-time di
+ * layar -- nilai yg BENERAN tersimpan ke History tetap dihitung ulang
+ * server-side saat Save, supaya tidak bisa dipalsukan lewat panggilan API
+ * langsung. */
+function buildYamahaCodeYmPreview(lotNo: string, volume: string, itemNoYamaha: string): string {
+  const lot = new Date(lotNo);
+  const qty = parseLeadingNumber(volume);
+  if (Number.isNaN(lot.getTime()) || qty === null || !itemNoYamaha) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const ddmmyyyy = `${pad(lot.getDate())}${pad(lot.getMonth() + 1)}${lot.getFullYear()}`;
+  const qtyPadded = String(Math.round(qty)).padStart(3, "0");
+  return `${ddmmyyyy}${qtyPadded}${itemNoYamaha}`;
+}
+
 interface CrossModuleData {
   codeTanki: string | null;
   iuPlant: string | null;
@@ -50,6 +78,14 @@ interface MillingTankOption {
   remark: string | null;
 }
 
+/** Hasil lookup `${apiBase}/lookup-part/:materialNumber` ke MasterPartYamaha
+ * (2026-11-04, KHUSUS `showYamahaQr` -- menu "QR Code Yamaha" digabung ke
+ * Label Entry FG) -- null kalau Material-nya bukan Yamaha. */
+interface PartYamaha {
+  itemNoYamaha: string;
+  itemName: string;
+}
+
 /** Kolom manual yg bisa disembunyikan per varian lewat prop `hiddenFields` -- lihat komentar propnya. */
 type ProductionLabelField = "materialType" | "drumColour" | "codeTanki" | "iuPlant";
 
@@ -65,7 +101,30 @@ type ProductionLabelExtraField =
   | "volume"
   | "jumlahPer"
   | "orderQtyLiter"
-  | "orderQtyPcs";
+  | "orderQtyPcs"
+  | "plant"
+  | "itemNoYamaha"
+  | "viskositas"
+  | "sg";
+
+/** Snapshot field manual yg dibandingkan utk `skipSaveIfUnchanged` (2026-11-04,
+ * instruksi eksplisit user) -- persis field2 yg dikirim ke History selain
+ * yg murni read-only dari Order Lookup (Material Number/Description/
+ * Quantity/Plant/Batch, di luar kendali operator, tidak relevan utk
+ * mendeteksi "operator mengubah sesuatu atau tidak"). */
+interface FieldSnapshot {
+  lotNo: string;
+  shelfLife: string;
+  pasteType: string;
+  drumColour: string;
+  volume: string;
+  jumlahPer: string;
+  viskositas: string;
+  sg: string;
+  codeTanki: string;
+  iuPlant: string;
+  remark: string;
+}
 
 /** Baris History Production Label TERAKHIR utk 1 Order (dari GET
  * /production-label/latest-by-order/:order) -- dipakai utk autofill semua
@@ -83,6 +142,9 @@ interface ProductionLabelHistoryRow {
   /// Cuma ada di ProductionLabelFg (kolom baru KHUSUS FG) -- undefined saat apiBase SFG, aman krn dibaca via `?? "" `.
   jumlahPer?: string | null;
   remark: string | null;
+  /// Cuma ada di ProductionLabelFg (kolom baru KHUSUS FG, field QR Code Yamaha) -- undefined saat apiBase SFG, aman krn dibaca via `?? "" `.
+  viskositas?: string | null;
+  sg?: string | null;
 }
 
 /** Lot No disimpan di DB sbg string "dd-mm-yyyy" (lihat `formatDateDDMMYYYY`
@@ -152,6 +214,10 @@ export default function ProductionLabelEntryPage({
   autofillLotFromAdminQc = false,
   autofillShelfLifeFromMaterial = false,
   autofillShelfLifeFromMaterialAndType = true,
+  showBatchSearch = false,
+  showYamahaQr = false,
+  resetFormAfterSave = false,
+  skipSaveIfUnchanged = false,
 }: {
   /** Mode ringkas dipakai pop-up "Info Proses Material" -> baris "Production
    * Label" setelah Packing (2026-08-11, instruksi eksplisit user: admin tidak
@@ -234,17 +300,67 @@ export default function ProductionLabelEntryPage({
    * ikut nyesuaikan begitu Material Type berubah/dipilih manual belakangan).
    * HANYA mengisi kalau Shelf Life masih kosong, tetap bisa diedit manual. */
   autofillShelfLifeFromMaterialAndType?: boolean;
+  /** Field "Batch" di sebelah Order, dgn pencarian saling fallback ke Order
+   * (2026-11-04, instruksi eksplisit user -- bagian dari penggabungan menu
+   * "QR Code Yamaha" ke Label Entry FG, tapi berlaku UMUM utk semua Order FG,
+   * bukan cuma Yamaha) -- diteruskan ke `OrderLookup`. Default false (SFG
+   * tidak berubah), FG nyalakan lewat ProductionLabelEntryFgPage.tsx. */
+  showBatchSearch?: boolean;
+  /** Lookup Item No. Yamaha + preview/download QR Code Yamaha (2026-11-04,
+   * instruksi eksplisit user) -- SELALU tampil kalau true (TIDAK ada toggle
+   * per-Order), tapi TIDAK PERNAH memblokir Save biasa kalau Material-nya
+   * bukan Yamaha (field2 terkait cukup kosong/disabled). Default false (SFG
+   * tidak berubah), FG nyalakan lewat ProductionLabelEntryFgPage.tsx. */
+  showYamahaQr?: boolean;
+  /** Kosongkan seluruh form (Order/Batch & semua field manual) otomatis
+   * begitu Save/Download QR berhasil (2026-11-04, instruksi eksplisit user,
+   * KHUSUS Label Entry FG) -- supaya operator langsung bisa cari Order
+   * berikutnya tanpa sisa data lama nyangkut. Pesan "Data tersimpan ke
+   * History." TETAP tampil (TIDAK ikut direset) sbg konfirmasi. Default
+   * false (SFG tidak berubah -- Preview Label SFG masih dipakai bareng
+   * tombol Cetak Label, mengosongkannya otomatis after-print akan
+   * menghilangkan preview yg baru dicetak, bukan itu yg diminta). */
+  resetFormAfterSave?: boolean;
+  /** Lewati POST ke History kalau TIDAK ADA perubahan input dari baris
+   * History TERAKHIR Order ini sendiri (2026-11-04, instruksi eksplisit
+   * user: "biar tidak boros baris" -- Order/Batch yg dicari sudah pernah
+   * masuk History, lalu operator langsung klik Save/Download tanpa
+   * mengubah apa pun field manualnya) -- KHUSUS Label Entry FG. Baseline
+   * diambil dari baris own-history yg sama persis dipakai utk autofill
+   * (lihat `ownHistoryBaseline` di handleOrderFound), dibandingkan ke semua
+   * field manual (Lot/Shelf Life/Volume/Viskositas/SG/Jumlah Per/dst,
+   * TERMASUK Remark) saat Save/Download diklik. Kalau SAMA PERSIS -> tidak
+   * ada baris History baru, cuma tampil pesan info (TIDAK dianggap error).
+   * Order yg BELUM PERNAH masuk History (baseline null) SELALU disimpan
+   * spt biasa -- validasi ini cuma mencegah DUPLIKAT, bukan mewajibkan
+   * perubahan utk entry pertama kali. Default false (SFG tidak berubah). */
+  skipSaveIfUnchanged?: boolean;
 } = {}) {
   const hidden = new Set(hiddenFields);
   const extra = new Set(extraFields);
   const { data: tanks } = useTankOptions();
   const [tab, setTab] = useState<"input" | "history">("input");
   const [order, setOrder] = useState("");
+  const [batch, setBatch] = useState("");
   const [data, setData] = useState<OrderRefData | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  // QR Code Yamaha (2026-11-04, KHUSUS `showYamahaQr`) -- lihat komentar
+  // panjang di useEffect kode gabungan di bawah.
+  const [part, setPart] = useState<PartYamaha | null>(null);
+  // Lookup MasterPartYamaha SUDAH selesai dicoba (2026-11-04, instruksi
+  // eksplisit user) -- true begitu Order ditemukan & lookup-nya
+  // selesai/dicek, TERLEPAS dari hasilnya ketemu atau tidak. Dipakai utk
+  // validasi "semua kolom wajib diisi": field Item No. Yamaha dianggap
+  // SUDAH TERISI begitu ini true (baik tampil Item No. Yamaha-nya ATAUPUN
+  // teks "Produk tidak pakai QR Code" -- keduanya jawaban yg lengkap).
+  const [yamahaLookupDone, setYamahaLookupDone] = useState(false);
+  const [viskositas, setViskositas] = useState("");
+  const [sg, setSg] = useState("");
+  const [qrYamahaDataUrl, setQrYamahaDataUrl] = useState("");
 
   const [lotNo, setLotNo] = useState("");
   const [exp, setExp] = useState("");
@@ -258,6 +374,12 @@ export default function ProductionLabelEntryPage({
   const [remark, setRemark] = useState("");
   const [tankOptions, setTankOptions] = useState<MillingTankOption[]>([]);
   const [selectedTankId, setSelectedTankId] = useState("");
+  // Snapshot field manual dari baris History TERAKHIR Order ini sendiri
+  // (2026-11-04, KHUSUS `skipSaveIfUnchanged`) -- null kalau Order ini
+  // BELUM PERNAH masuk History (selalu boleh disimpan) ATAU Order belum
+  // dicari sama sekali. Dibandingkan ke field saat ini saat Save/Download
+  // diklik -- lihat `saveLabel`.
+  const [ownHistoryBaseline, setOwnHistoryBaseline] = useState<FieldSnapshot | null>(null);
 
   // QR Code (2026-08-04, revisi ke-7, instruksi eksplisit user: dipersempit
   // dari 9 field jadi cuma 4 -- Material Number/Description/Lot No/Exp --
@@ -304,6 +426,63 @@ export default function ProductionLabelEntryPage({
       cancelled = true;
     };
   }, [data, lotNo, exp]);
+
+  // Kode gabungan + QR Code Yamaha (2026-11-04, KHUSUS `showYamahaQr`) --
+  // preview real-time di layar, format SAMA PERSIS `buildYamahaCodeYm` server
+  // (productionLabelHelpers.ts): TEXT(Lot,"DDMMYYYY") & TEXT(angka dari
+  // Volume,"000") & Item No. Yamaha (kolom "Qty Pack" terpisah SUDAH DIHAPUS,
+  // 2026-11-04, instruksi eksplisit user -- dianggap redundant dgn Volume,
+  // logic-nya pindah ke situ, lihat `parseLeadingNumber`). Kosong (tidak
+  // generate QR) kalau Lot/Volume/Item No. Yamaha belum lengkap -- TIDAK ada
+  // error block, field2 ini opsional dan mayoritas Order FG bukan Yamaha
+  // (Item No. Yamaha-nya memang akan selalu kosong utk Order non-Yamaha).
+  const codeYmPreview = showYamahaQr ? buildYamahaCodeYmPreview(lotNo, volume, part?.itemNoYamaha ?? "") : "";
+
+  // Validasi "semua kolom wajib diisi" (2026-11-04, instruksi eksplisit
+  // user, berlaku Label Entry SFG DAN FG) -- Save/Download baru aktif kalau
+  // SEMUA field manual yg operator isi langsung sudah terisi. KECUALI:
+  // Remark (boleh kosong, instruksi eksplisit user), field read-only hasil
+  // auto-lookup dari Order (Material Number/Description/Batch/Quantity/
+  // Plant -- bukan isian manual, nilainya ikut apa adanya dari Master Data
+  // Order, di luar kendali operator), dan Exp (turunan Lot+Shelf Life,
+  // otomatis terisi begitu keduanya terisi). Item No. Yamaha KHUSUS --
+  // dianggap terisi begitu `yamahaLookupDone` true (lihat komentar
+  // state-nya di atas: tampil Item No. Yamaha ATAUPUN teks "Produk tidak
+  // pakai QR Code", keduanya jawaban yg lengkap). Field yg disembunyikan
+  // lewat `hiddenFields`/tidak dinyalakan lewat `extraFields` utk varian ini
+  // (mis. Code Tanki di FG) otomatis TIDAK ikut disyaratkan.
+  const allRequiredFilled =
+    !!data &&
+    (hidden.has("materialType") || pasteType.trim() !== "") &&
+    shelfLife.trim() !== "" &&
+    lotNo.trim() !== "" &&
+    (hidden.has("codeTanki") || codeTanki.trim() !== "") &&
+    (hidden.has("iuPlant") || iuPlant.trim() !== "") &&
+    (hidden.has("drumColour") || drumColour.trim() !== "") &&
+    (!extra.has("jumlahPer") || jumlahPer.trim() !== "") &&
+    (!extra.has("volume") || volume.trim() !== "") &&
+    (!extra.has("viskositas") || viskositas.trim() !== "") &&
+    (!extra.has("sg") || sg.trim() !== "") &&
+    (!showYamahaQr || yamahaLookupDone);
+
+  useEffect(() => {
+    if (!codeYmPreview) {
+      setQrYamahaDataUrl("");
+      return;
+    }
+    let cancelled = false;
+    // Opsi SAMA PERSIS yg sudah dikalibrasi di useEffect QR SFG di atas.
+    toDataURL(codeYmPreview, { margin: 2, width: 300, errorCorrectionLevel: "L" })
+      .then((url) => {
+        if (!cancelled) setQrYamahaDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrYamahaDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [codeYmPreview]);
 
   // Exp = Lot No + Shelf Life (2026-08-04, instruksi eksplisit user) --
   // Shelf Life dalam bulan, dihitung otomatis begitu Lot No & Shelf Life
@@ -375,6 +554,13 @@ export default function ProductionLabelEntryPage({
     setRemark("");
     setTankOptions([]);
     setSelectedTankId("");
+    // Field QR Code Yamaha (2026-11-04, KHUSUS `showYamahaQr`) -- reset tiap
+    // Order baru dicari, sama pola dgn field manual lain di atas.
+    setPart(null);
+    setYamahaLookupDone(false);
+    setViskositas("");
+    setSg("");
+    setOwnHistoryBaseline(null);
     // Volume (2026-08-20, instruksi eksplisit user, KHUSUS extra.has("volume"))
     // -- default-nya dari Master Data Referensi Order/PO (SAP-COOISPI, sama
     // sumber dgn saran Volume di Packing), TAPI baris History Production
@@ -398,18 +584,42 @@ export default function ProductionLabelEntryPage({
       );
       if (own.data) {
         const latest = own.data;
-        setLotNo(parseDDMMYYYYToInputDate(latest.lotNo));
+        const baselineLotNo = parseDDMMYYYYToInputDate(latest.lotNo);
+        const baselineVolume = latest.volume || (found.volume ?? "");
+        setLotNo(baselineLotNo);
         setShelfLife(latest.shelfLife ?? "");
         setPasteType(latest.pasteType ?? "");
         setDrumColour(latest.drumColour ?? "");
         if (latest.volume) setVolume(latest.volume);
         if (latest.jumlahPer) setJumlahPer(latest.jumlahPer);
+        if (latest.viskositas) setViskositas(latest.viskositas);
+        if (latest.sg) setSg(latest.sg);
         ownCodeTanki = latest.codeTanki ?? "";
         ownIuPlant = latest.iuPlant ?? "";
         ownRemark = latest.remark ?? "";
         setCodeTanki(ownCodeTanki);
         setIuPlant(ownIuPlant);
         setRemark(ownRemark);
+        // Baseline utk `skipSaveIfUnchanged` (2026-11-04) -- field2 di sini
+        // PERSIS nilai akhir yg baru di-set di atas (volume pakai formula
+        // yg sama dgn `if (latest.volume) setVolume(...)`, field lain yg
+        // masih bisa ditambah fallback cross-module/material di bawah SELALU
+        // cuma mengisi kalau kosong, jadi aman -- kalau fallback itu
+        // mengubah sesuatu, snapshot saat Save nanti otomatis beda dari
+        // baseline ini & tetap dianggap "berubah").
+        setOwnHistoryBaseline({
+          lotNo: baselineLotNo,
+          shelfLife: latest.shelfLife ?? "",
+          pasteType: latest.pasteType ?? "",
+          drumColour: latest.drumColour ?? "",
+          volume: baselineVolume,
+          jumlahPer: latest.jumlahPer || "",
+          viskositas: latest.viskositas || "",
+          sg: latest.sg || "",
+          codeTanki: ownCodeTanki,
+          iuPlant: ownIuPlant,
+          remark: ownRemark,
+        });
       }
     } catch {
       /* Order ini belum pernah masuk History Production Label -- lanjut ke saran cross-module di bawah */
@@ -433,6 +643,26 @@ export default function ProductionLabelEntryPage({
       } catch {
         /* Order ini belum py Lot Passed di Admin QC -- biarkan kosong, operator isi manual */
       }
+    }
+
+    // Lookup Item No. Yamaha dari Material Number (2026-11-04, KHUSUS
+    // `showYamahaQr`) -- null kalau Material-nya bukan Yamaha, TIDAK ada
+    // error block, field ini memang opsional & mayoritas Order FG bukan
+    // Yamaha.
+    if (showYamahaQr) {
+      if (found.materialNumber) {
+        try {
+          const partRes = await api.get<{ success: boolean; data: PartYamaha | null }>(
+            `${apiBase}/lookup-part/${encodeURIComponent(found.materialNumber)}`
+          );
+          setPart(partRes.data);
+        } catch {
+          setPart(null);
+        }
+      } else {
+        setPart(null);
+      }
+      setYamahaLookupDone(true);
     }
 
     // Material Type/Drum Colour (SFG) & Shelf Life (FG, lewat
@@ -516,6 +746,35 @@ export default function ProductionLabelEntryPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded, initialOrder]);
 
+  /** Kosongkan seluruh form (2026-11-04, KHUSUS `resetFormAfterSave`) --
+   * dipanggil setelah Save/Download QR berhasil, SEMUA yg diketik operator
+   * direset (Order/Batch pencarian & semua field manual), sama pola reset
+   * dgn awal `handleOrderFound` tapi SEKALIGUS Order/Batch/data/part-nya
+   * sendiri ikut dikosongkan (beda dari `handleOrderFound` yg justru lagi
+   * MENGISI Order baru). `error`/`message` SENGAJA TIDAK direset di sini --
+   * biar pesan "Data tersimpan ke History." tetap kelihatan sbg konfirmasi. */
+  function resetForm() {
+    setOrder("");
+    setBatch("");
+    setData(null);
+    setPart(null);
+    setYamahaLookupDone(false);
+    setLotNo("");
+    setExp("");
+    setShelfLife("");
+    setCodeTanki("");
+    setIuPlant("");
+    setPasteType("");
+    setDrumColour("");
+    setVolume("");
+    setJumlahPer("");
+    setViskositas("");
+    setSg("");
+    setRemark("");
+    setTankOptions([]);
+    setSelectedTankId("");
+  }
+
   /** Simpan form ini sbg baris History baru (2026-08-20, instruksi eksplisit
    * user: tombol Save terpisah supaya jelas acuan "masuk History" itu
    * PERSIS saat tombol ini diklik) -- dipakai baik oleh tombol Save polos
@@ -524,7 +783,10 @@ export default function ProductionLabelEntryPage({
    * upsert/edit), lihat komentar POST / di productionLabel.routes.ts -- jadi
    * Save & Cetak Label yg diklik berurutan utk Order yg sama akan tercatat
    * sbg 2 baris History terpisah, sesuai desain "tiap cetak/simpan adalah
-   * kejadian terpisah". Return true kalau berhasil disimpan. */
+   * kejadian terpisah" -- KECUALI kalau `skipSaveIfUnchanged` aktif DAN tidak
+   * ada perubahan dari baseline (lihat blok di bawah), baru request POST-nya
+   * dilewati sama sekali. Return true kalau berhasil disimpan ATAU memang
+   * sengaja dilewati krn tidak ada perubahan (bukan error). */
   async function saveLabel(): Promise<boolean> {
     if (!data) return false;
     // Validasi Code Tanki dilewati kalau kolomnya disembunyikan (2026-08-20,
@@ -539,6 +801,36 @@ export default function ProductionLabelEntryPage({
     if (lotNoDateError) {
       setError(lotNoDateError);
       return false;
+    }
+    // "Biar tidak boros baris" (2026-11-04, instruksi eksplisit user, KHUSUS
+    // `skipSaveIfUnchanged`) -- Order/Batch yg dicari SUDAH PERNAH masuk
+    // History (`ownHistoryBaseline` tidak null) DAN semua field manual saat
+    // ini PERSIS SAMA dgn baris terakhir itu -> tidak perlu bikin baris
+    // History baru, cukup kasih tahu operator. Order yg BELUM PERNAH masuk
+    // History (baseline null) SELALU disimpan spt biasa -- ini cuma mencegah
+    // DUPLIKAT, bukan mewajibkan perubahan utk entry pertama.
+    if (skipSaveIfUnchanged && ownHistoryBaseline) {
+      const currentSnapshot: FieldSnapshot = {
+        lotNo,
+        shelfLife,
+        pasteType,
+        drumColour,
+        volume,
+        jumlahPer,
+        viskositas,
+        sg,
+        codeTanki,
+        iuPlant,
+        remark,
+      };
+      const unchanged = (Object.keys(currentSnapshot) as (keyof FieldSnapshot)[]).every(
+        (key) => currentSnapshot[key] === ownHistoryBaseline[key]
+      );
+      if (unchanged) {
+        setError("");
+        setMessage("Tidak ada perubahan input baru -- data tidak disimpan ulang ke History.");
+        return true;
+      }
     }
     setSaving(true);
     setError("");
@@ -568,8 +860,16 @@ export default function ProductionLabelEntryPage({
         volume,
         jumlahPer,
         remark,
+        // Field QR Code Yamaha (2026-11-04, KHUSUS `showYamahaQr`) -- aman
+        // dikirim apa adanya walau modul SFG tidak punya kolom ini di
+        // skemanya (Zod default STRIP nilai yg tidak dikenal, bukan error).
+        // `itemNoYamaha`/`codeYm` TIDAK dikirim -- selalu dihitung ulang
+        // server-side dari lookup MasterPartYamaha, bukan dipercaya dari sini.
+        viskositas,
+        sg,
       });
       setMessage("Data tersimpan ke History.");
+      if (resetFormAfterSave) resetForm();
       return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Gagal menyimpan data.");
@@ -588,6 +888,20 @@ export default function ProductionLabelEntryPage({
     if (!ok) return;
     setMessage("Label tersimpan ke History.");
     setTimeout(() => window.print(), 200);
+  }
+
+  /** Download QR Code Yamaha (2026-11-04, KHUSUS `showYamahaQr`) -- Save dulu
+   * (1 aksi = 1 baris History, sama prinsip dgn handlePrint di atas) baru
+   * trigger download PNG dari `qrYamahaDataUrl`. Tombolnya sendiri sudah
+   * disabled kalau `codeYmPreview` kosong (lihat JSX), jadi fungsi ini aman
+   * dipanggil tanpa validasi tambahan di sini. */
+  async function handleDownloadQr() {
+    const ok = await saveLabel();
+    if (!ok || !qrYamahaDataUrl || !codeYmPreview) return;
+    const a = document.createElement("a");
+    a.href = qrYamahaDataUrl;
+    a.download = `QR-${codeYmPreview}.png`;
+    a.click();
   }
 
   return (
@@ -609,6 +923,7 @@ export default function ProductionLabelEntryPage({
           showVolumeColumn={extra.has("volume")}
           showJumlahPerColumn={extra.has("jumlahPer")}
           showOrderQtyPcsColumn={extra.has("orderQtyPcs")}
+          showYamahaColumns={showYamahaQr}
         />
       )}
 
@@ -639,6 +954,9 @@ export default function ProductionLabelEntryPage({
                 volume: null,
               })
             }
+            showBatchSearch={showBatchSearch}
+            batchValue={batch}
+            onBatchChange={setBatch}
           />
 
           {/* Field manual SELALU tampil, tidak lagi menunggu Order ketemu dulu
@@ -717,6 +1035,24 @@ export default function ProductionLabelEntryPage({
               <label title="Otomatis: Lot No + Shelf Life">Exp</label>
               <input type="date" value={exp} disabled />
             </div>
+            {extra.has("volume") && (
+              <div className="field">
+                <label>Volume</label>
+                <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
+              </div>
+            )}
+            {extra.has("viskositas") && (
+              <div className="field">
+                <label>Viskositas</label>
+                <input value={viskositas} onChange={(e) => setViskositas(e.target.value)} />
+              </div>
+            )}
+            {extra.has("sg") && (
+              <div className="field">
+                <label>SG</label>
+                <input value={sg} onChange={(e) => setSg(e.target.value)} />
+              </div>
+            )}
             {extra.has("materialNumber") && (
               <div className="field">
                 <label>Material Number</label>
@@ -754,10 +1090,24 @@ export default function ProductionLabelEntryPage({
                 <input value={data?.orderQtyPcs ?? ""} disabled />
               </div>
             )}
-            {extra.has("volume") && (
+            {extra.has("plant") && (
               <div className="field">
-                <label>Volume</label>
-                <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
+                <label>Plant</label>
+                <input value={data?.plant ?? ""} disabled />
+              </div>
+            )}
+            {/* Item No. Yamaha (2026-11-04, instruksi eksplisit user -- bagian
+                dari penggabungan menu "QR Code Yamaha") -- read-only, dari
+                lookup MasterPartYamaha (lihat handleOrderFound). Begitu
+                lookup selesai (`yamahaLookupDone`) tapi Material-nya TIDAK
+                ketemu, tampilkan teks "Produk tidak pakai QR Code" (instruksi
+                eksplisit user) -- bukan kosong/error, field ini SELALU
+                tampil & TIDAK memblokir Save biasa, tapi dianggap "terisi"
+                utk validasi semua kolom wajib (lihat `allRequiredFilled`). */}
+            {extra.has("itemNoYamaha") && (
+              <div className="field">
+                <label title="Dari Master Part Yamaha, dicari otomatis dari Kode Material">Item No. Yamaha</label>
+                <input value={part ? part.itemNoYamaha : yamahaLookupDone ? "Produk tidak pakai QR Code" : ""} disabled />
               </div>
             )}
             {!hidden.has("codeTanki") && (
@@ -782,16 +1132,60 @@ export default function ProductionLabelEntryPage({
                 tombol Cetak Label & preview visual di sana. */}
             {!showPreview && (
               <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" type="button" disabled={saving || !data} onClick={handleSave}>
-                    {saving ? "Menyimpan..." : "💾 Save"}
-                  </button>
+                <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="btn" type="button" disabled={saving || !allRequiredFilled} onClick={handleSave}>
+                        {saving ? "Menyimpan..." : "💾 Save"}
+                      </button>
+                      {showYamahaQr && (
+                        <button
+                          className="btn btn-outline"
+                          type="button"
+                          disabled={saving || !allRequiredFilled || !qrYamahaDataUrl}
+                          onClick={handleDownloadQr}
+                        >
+                          {saving ? "Menyimpan..." : "⭳ Download QR"}
+                        </button>
+                      )}
+                    </div>
+                    {!data && (
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 0" }}>
+                        Cari nomor Order dulu di atas untuk mengaktifkan Save.
+                      </p>
+                    )}
+                    {/* Semua kolom wajib diisi (2026-11-04, instruksi eksplisit
+                        user, kecuali Remark) sblm Save/Download aktif -- lihat
+                        `allRequiredFilled`. */}
+                    {data && !allRequiredFilled && (
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 0" }}>
+                        Lengkapi semua kolom (kecuali Remark) dulu untuk mengaktifkan Save{showYamahaQr ? "/Download QR" : ""}.
+                      </p>
+                    )}
+                    {/* Download QR Code Yamaha (2026-11-04) -- disabled TANPA
+                        error block kalau Item No. Yamaha/Lot/Volume (angka)
+                        belum lengkap, cuma teks bantuan singkat (mayoritas
+                        Order FG memang bukan Yamaha, jadi tombol ini wajar
+                        nonaktif di situ). */}
+                    {showYamahaQr && data && allRequiredFilled && !qrYamahaDataUrl && (
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 0", maxWidth: 320 }}>
+                        Download QR tersedia kalau Item No. Yamaha, Lot, dan Volume (berisi angka) terisi (khusus Material yang terdaftar di Master Part Yamaha).
+                      </p>
+                    )}
+                  </div>
+                  {/* Preview QR Code Yamaha (2026-11-04, instruksi eksplisit
+                      user: tampilkan gambar QR-nya langsung, bukan cuma
+                      tombol download) -- ukuran sama persis spt panel
+                      "Preview QR" di menu "QR Code Yamaha" yg lama (220x220). */}
+                  {showYamahaQr && qrYamahaDataUrl && (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                      <img src={qrYamahaDataUrl} alt={`QR ${codeYmPreview}`} style={{ width: 220, height: 220 }} />
+                      <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)", wordBreak: "break-all", textAlign: "center", maxWidth: 220 }}>
+                        Kode: <strong>{codeYmPreview}</strong>
+                      </p>
+                    </div>
+                  )}
                 </div>
-                {!data && (
-                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "4px 0 0" }}>
-                    Cari nomor Order dulu di atas untuk mengaktifkan Save.
-                  </p>
-                )}
               </div>
             )}
             <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -820,11 +1214,11 @@ export default function ProductionLabelEntryPage({
           <div className="panel-header label-form-panel">Preview Label{data ? ` — Order ${data.order}` : ""}</div>
           <div className="panel-body">
             <div className="label-toolbar">
-              <button className={`btn ${showPrintButton ? "btn-outline" : ""}`} type="button" disabled={saving || !data} onClick={handleSave}>
+              <button className={`btn ${showPrintButton ? "btn-outline" : ""}`} type="button" disabled={saving || !allRequiredFilled} onClick={handleSave}>
                 {saving ? "Menyimpan..." : "💾 Save"}
               </button>
               {showPrintButton && (
-                <button className="btn" type="button" disabled={saving || !data} onClick={handlePrint}>
+                <button className="btn" type="button" disabled={saving || !allRequiredFilled} onClick={handlePrint}>
                   {saving ? "Menyimpan..." : "🖨️ Cetak Label"}
                 </button>
               )}
@@ -832,6 +1226,14 @@ export default function ProductionLabelEntryPage({
             {!data && (
               <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
                 Cari nomor Order dulu di atas untuk mengaktifkan {showPrintButton ? "Save/Cetak Label" : "Save"}.
+              </p>
+            )}
+            {/* Semua kolom wajib diisi (2026-11-04, instruksi eksplisit user,
+                kecuali Remark) sblm Save/Cetak Label aktif -- lihat
+                `allRequiredFilled`. */}
+            {data && !allRequiredFilled && (
+              <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                Lengkapi semua kolom (kecuali Remark) dulu untuk mengaktifkan {showPrintButton ? "Save/Cetak Label" : "Save"}.
               </p>
             )}
             {showPreview && (

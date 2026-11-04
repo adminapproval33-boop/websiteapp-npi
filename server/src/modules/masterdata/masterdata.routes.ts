@@ -80,12 +80,13 @@ async function parseWorkbook(buffer: Buffer, filename: string): Promise<unknown[
 masterDataRouter.get(
   "/last-updated",
   asyncRoute(async (_req, res) => {
-    const [orders, tanks, mesin, employees, flow] = await Promise.all([
+    const [orders, tanks, mesin, employees, flow, partYamaha] = await Promise.all([
       prisma.masterOrder.aggregate({ _max: { updatedAt: true } }),
       prisma.masterTank.aggregate({ _max: { updatedAt: true } }),
       prisma.masterMesin.aggregate({ _max: { updatedAt: true } }),
       prisma.masterEmployee.aggregate({ _max: { updatedAt: true } }),
       prisma.materialFlow.aggregate({ _max: { updatedAt: true } }),
+      prisma.masterPartYamaha.aggregate({ _max: { updatedAt: true } }),
     ]);
     res.json({
       success: true,
@@ -95,6 +96,7 @@ masterDataRouter.get(
         mesin: mesin._max.updatedAt,
         employee: employees._max.updatedAt,
         flow: flow._max.updatedAt,
+        partYamaha: partYamaha._max.updatedAt,
       },
     });
   })
@@ -126,6 +128,30 @@ masterDataRouter.get(
     const order = await prisma.masterOrder.findUnique({ where: { order: String(req.params.order).trim() } });
     if (!order) {
       res.status(404).json({ success: false, message: "Order tidak ditemukan pada data referensi." });
+      return;
+    }
+    res.json({ success: true, data: order });
+  })
+);
+
+/**
+ * Cari Order berdasarkan No Batch (bukan No PO) -- dipakai modul QR Code
+ * Yamaha (2026-11-04, instruksi eksplisit user): operator packing kadang
+ * cuma pegang No Batch fisik di drum/jerigen, bukan No PO. `batch` TIDAK
+ * unique di MasterOrder, jadi kalau ada lebih dari satu Order dgn Batch yang
+ * sama, ambil yang Order-nya paling besar (asumsi: Order terbaru/terakhir
+ * diinput utk batch fisik itu).
+ */
+masterDataRouter.get(
+  "/orders/by-batch/:batch",
+  asyncRoute(async (req, res) => {
+    const batch = String(req.params.batch).trim();
+    const order = await prisma.masterOrder.findFirst({
+      where: { batch },
+      orderBy: { order: "desc" },
+    });
+    if (!order) {
+      res.status(404).json({ success: false, message: "Batch tidak ditemukan pada data referensi." });
       return;
     }
     res.json({ success: true, data: order });
@@ -547,6 +573,108 @@ masterDataRouter.post(
     }
 
     res.json({ success: true, message: `${records.length} Code Tanki berhasil diimpor (mode: ${mode}).` });
+  })
+);
+
+// ===================== Master Part Yamaha =====================
+// Sumber: file "PART NO YAMAHA MOTOR.xlsx" (2026-11-04, instruksi eksplisit
+// user) -- pemetaan Material Number (SAP, "CODE SAP" di file aslinya) ke
+// nomor part versi pelanggan Yamaha, dipakai nyusun "kode gabungan" di menu
+// QR Code Yamaha. Pola import SAMA PERSIS dgn Master Data Tanki di atas
+// (upload .xlsx/.csv, mode replace/append) -- bedanya `materialNumber` unik
+// jadi kunci upsert/dedup, bukan `code`.
+
+masterDataRouter.get(
+  "/part-yamaha",
+  asyncRoute(async (req, res) => {
+    const search = String(req.query.search ?? "").trim();
+    const where = search
+      ? {
+          OR: [
+            { materialNumber: { contains: search, mode: "insensitive" as const } },
+            { itemNoYamaha: { contains: search, mode: "insensitive" as const } },
+            { itemName: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : undefined;
+    const [data, total] = await Promise.all([
+      prisma.masterPartYamaha.findMany({ where, orderBy: { materialNumber: "asc" }, take: 50 }),
+      prisma.masterPartYamaha.count({ where }),
+    ]);
+    res.json({ success: true, data, total });
+  })
+);
+
+masterDataRouter.post(
+  "/part-yamaha/import",
+  requireFullAccess,
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: "File wajib diunggah." });
+      return;
+    }
+    const mode = req.body.mode === "append" ? "append" : "replace";
+
+    const rows = await parseWorkbook(req.file.buffer, req.file.originalname);
+    if (rows.length < 2) {
+      res.status(400).json({ success: false, message: "File kosong atau tidak berisi data." });
+      return;
+    }
+
+    // File aslinya py 2 baris header (judul + header kolom beneran di baris
+    // ke-2, lihat "PART NO YAMAHA MOTOR.xlsx": baris 1 = "PART NO YAMAHA",
+    // baris 2 = "ORDER By/Item No./CODE SAP/Item Name") -- cari baris header
+    // yg beneran dgn cek baris mana yg punya kolom "code sap" dulu, supaya
+    // tidak mengandalkan posisi baris tetap (lebih tahan banting kalau format
+    // file export-nya sedikit beda).
+    let headerRowIdx = 0;
+    let headers = rows[0].map(normalizeHeader);
+    let col = { materialNumber: findColumn(headers, "code sap", "material number"), itemNo: findColumn(headers, "item no.", "item no"), itemName: findColumn(headers, "item name") };
+    if (col.materialNumber === -1 && rows.length > 1) {
+      headerRowIdx = 1;
+      headers = rows[1].map(normalizeHeader);
+      col = { materialNumber: findColumn(headers, "code sap", "material number"), itemNo: findColumn(headers, "item no.", "item no"), itemName: findColumn(headers, "item name") };
+    }
+    if (col.materialNumber === -1) {
+      res.status(400).json({ success: false, message: 'File wajib punya kolom header "CODE SAP" (boleh juga "Item No." dan "Item Name").' });
+      return;
+    }
+
+    const rawRecords = rows
+      .slice(headerRowIdx + 1)
+      .map((row) => ({
+        materialNumber: String(row[col.materialNumber] ?? "").trim(),
+        itemNoYamaha: col.itemNo !== -1 ? String(row[col.itemNo] ?? "").trim() : "",
+        itemName: col.itemName !== -1 ? String(row[col.itemName] ?? "").trim() : "",
+      }))
+      .filter((r) => r.materialNumber.length > 0);
+
+    if (rawRecords.length === 0) {
+      res.status(400).json({ success: false, message: "Tidak ada Material Number yang valid pada file." });
+      return;
+    }
+
+    const dedupMap = new Map<string, (typeof rawRecords)[number]>();
+    for (const record of rawRecords) dedupMap.set(record.materialNumber, record);
+    const records = Array.from(dedupMap.values());
+
+    if (mode === "replace") {
+      await prisma.masterPartYamaha.deleteMany({});
+      for (const batch of chunk(records, 5000)) {
+        await prisma.masterPartYamaha.createMany({ data: batch, skipDuplicates: true });
+      }
+    } else {
+      for (const batch of chunk(records, 200)) {
+        await Promise.all(
+          batch.map((record) =>
+            prisma.masterPartYamaha.upsert({ where: { materialNumber: record.materialNumber }, create: record, update: record })
+          )
+        );
+      }
+    }
+
+    res.json({ success: true, message: `${records.length} Material Number berhasil diimpor (mode: ${mode}).` });
   })
 );
 

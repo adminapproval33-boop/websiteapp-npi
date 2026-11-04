@@ -1,5 +1,24 @@
 import ProductionLabelEntryPage from "./ProductionLabelEntryPage";
 
+/** Field QR Code Yamaha + pencarian by Batch (2026-11-04, instruksi eksplisit
+ * user) -- menu "QR Code Yamaha" yg tadinya terpisah DIGABUNG ke sini: field
+ * Item No. Yamaha/Viskositas/SG + tombol Download QR SELALU tampil (tidak
+ * ada toggle Customer: Yamaha), tapi TIDAK memblokir Save biasa kalau
+ * Material-nya bukan Yamaha -- lihat `showYamahaQr` di ProductionLabelEntryPage.tsx.
+ * `showBatchSearch` (field Batch di sebelah Order, saling fallback) berlaku
+ * UMUM utk semua Order FG, bukan cuma Yamaha. `"batch"` dihapus dari
+ * `extraFields` lama (dulu display read-only di grid) krn sekarang Batch
+ * sudah jadi field pencarian aktif di atas, redundant kalau dobel. Field
+ * "Qty Pack" terpisah (2026-11-04) DIHAPUS lagi -- logic-nya PINDAH ke
+ * kolom Volume yg sudah ada (ambil angka pertama di isiannya), instruksi
+ * eksplisit user: dianggap redundant dgn Volume. `resetFormAfterSave`
+ * (2026-11-04, instruksi eksplisit user, KHUSUS FG) -- form dikosongkan
+ * total begitu Save/Download QR berhasil, biar operator langsung bisa cari
+ * Order berikutnya tanpa sisa data lama. `skipSaveIfUnchanged` (2026-11-04,
+ * instruksi eksplisit user: "biar tidak boros baris") -- kalau Order/Batch
+ * yg dicari sudah pernah masuk History & TIDAK ADA field manual yg diubah
+ * dari baris terakhirnya, Save/Download TIDAK bikin baris History baru. */
+
 /** Label Entry FG (2026-08-20, instruksi eksplisit user) -- tampilan &
  * logika SAMA dgn Label Entry SFG (ProductionLabelEntryPage.tsx): beda
  * `apiBase` (History-nya TERPISAH TOTAL, tabel Prisma sendiri
@@ -44,11 +63,26 @@ export default function ProductionLabelEntryFgPage() {
       showPrintButton={false}
       showPreview={false}
       hiddenFields={["materialType", "drumColour", "codeTanki", "iuPlant"]}
-      extraFields={["materialNumber", "materialDescription", "batch", "orderQtyLiter", "orderQtyPcs", "volume", "jumlahPer"]}
+      extraFields={[
+        "materialNumber",
+        "materialDescription",
+        "orderQtyLiter",
+        "orderQtyPcs",
+        "plant",
+        "itemNoYamaha",
+        "volume",
+        "jumlahPer",
+        "viskositas",
+        "sg",
+      ]}
       lotNoLabel="Lot Passed"
       autofillLotFromAdminQc
       autofillShelfLifeFromMaterial
       autofillShelfLifeFromMaterialAndType={false}
+      showBatchSearch
+      showYamahaQr
+      resetFormAfterSave
+      skipSaveIfUnchanged
     />
   );
 }

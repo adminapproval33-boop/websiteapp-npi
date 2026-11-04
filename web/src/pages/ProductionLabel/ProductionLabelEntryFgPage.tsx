@@ -28,9 +28,13 @@ import ProductionLabelEntryPage from "./ProductionLabelEntryPage";
  * `hiddenFields` -- kolom Material Type/Drum Colour/Code Tanki/IU Plant
  * tidak relevan utk FG, DAN `extraFields` -- Material Number/Description/
  * Batch (read-only, krn Preview yg dulu menampilkannya sudah tidak ada),
- * Volume (auto-saran dari Referensi Order/PO, editable, tersimpan ke
- * History -- kolom DB `volume` khusus ada di ProductionLabelFg), & Jumlah
- * /Per (2026-08-21, isian bebas format "1/200", tidak ada sumber otomatis --
+ * Volume -- label tampil "Qty Pack" (diganti 2026-11-04, instruksi eksplisit
+ * user, kolom DB `volume` TIDAK berubah) -- editable, auto-saran HANYA dari
+ * baris History Production Label Order ini sendiri kalau ada (saran dari
+ * Referensi Order/PO SAP-COOISPI SUDAH DIHAPUS, 2026-11-04, instruksi
+ * eksplisit user), tersimpan ke History -- kolom DB `volume` khusus ada di
+ * ProductionLabelFg, & Jumlah /Per (2026-08-21, isian bebas format
+ * "1/200", tidak ada sumber otomatis --
  * kolom DB `jumlahPer` khusus ada di ProductionLabelFg), & Order quantity
  * (GMEIN)/LITER + Order quantity (GMEIN) (2026-08-21, read-only, langsung
  * dari Referensi Order/PO SAP-COOISPI -- varian /LITER `orderQty` sudah lama
@@ -47,8 +51,17 @@ import ProductionLabelEntryPage from "./ProductionLabelEntryPage";
  * `autofillShelfLifeFromMaterial` (2026-08-27, instruksi eksplisit user) --
  * kolom "Shelf Life (bulan)" KHUSUS di FG ini disambungkan ke Material Number
  * yg SAMA di History Label FG (bukan Order yg sama -- lintas Order, krn Shelf
- * Life properti Material). HANYA Shelf Life, TIDAK ada field lain yg ikut
- * (instruksi eksplisit user: "hanya kolom Shelf Life saja yang auto fill").
+ * Life properti Material). Awalnya HANYA Shelf Life yg ikut (instruksi
+ * eksplisit user 2026-08-27: "hanya kolom Shelf Life saja yang auto fill"),
+ * TAPI 2026-11-04 user minta "Qty Pack" (`volume`) pakai acuan PERSIS sama --
+ * lihat `autofillVolumeFromMaterial` di bawah (fallback TERPISAH, bukan
+ * menimpa batasan lama ini -- Material Type/Drum Colour SFG tetap tidak
+ * ikut Qty Pack).
+ * `autofillVolumeFromMaterial` (2026-11-04, instruksi eksplisit user) --
+ * sama persis pola `autofillShelfLifeFromMaterial` di atas, tapi utk kolom
+ * "Qty Pack" (`volume`): utama by No Order dulu (own-history, lihat
+ * `handleOrderFound`), BARU fallback by Material Number lintas Order kalau
+ * Order ini belum pernah masuk History.
  * `autofillShelfLifeFromMaterialAndType={false}` (2026-08-27) -- varian BARU
  * Shelf Life (materialNumber + Material Type, KHUSUS Label Entry SFG, lihat
  * komentar propnya di ProductionLabelEntryPage.tsx) SENGAJA dimatikan di FG
@@ -78,6 +91,7 @@ export default function ProductionLabelEntryFgPage() {
       lotNoLabel="Lot Passed"
       autofillLotFromAdminQc
       autofillShelfLifeFromMaterial
+      autofillVolumeFromMaterial
       autofillShelfLifeFromMaterialAndType={false}
       showBatchSearch
       showYamahaQr

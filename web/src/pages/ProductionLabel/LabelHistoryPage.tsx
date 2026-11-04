@@ -60,9 +60,10 @@ export default function LabelHistoryPage({
   showYamahaColumns = false,
 }: {
   apiBase?: string;
-  /** Kolom "Volume" di tabel History (2026-08-20, instruksi eksplisit user)
-   * -- KHUSUS Label Entry FG (kolom DB `volume` cuma ada di ProductionLabelFg),
-   * default false (SFG tidak berubah). */
+  /** Kolom "Qty Pack" di tabel History (2026-08-20, instruksi eksplisit user;
+   * label diganti dari "Volume" 2026-11-04) -- KHUSUS Label Entry FG (kolom
+   * DB `volume` cuma ada di ProductionLabelFg, nama kolom DB TIDAK berubah,
+   * cuma label tampilannya), default false (SFG tidak berubah). */
   showVolumeColumn?: boolean;
   /** Kolom "Jumlah /Per" di tabel History (2026-08-21, instruksi eksplisit
    * user) -- KHUSUS Label Entry FG (kolom DB `jumlahPer` cuma ada di
@@ -115,7 +116,7 @@ export default function LabelHistoryPage({
     { key: "materialNumber", label: "Material Number" },
     { key: "materialDescription", label: "Material Description" },
     { key: "batch", label: "Batch" },
-    ...(showVolumeColumn ? [{ key: "volume", label: "Volume" }] : []),
+    ...(showVolumeColumn ? [{ key: "volume", label: "Qty Pack" }] : []),
     ...(showJumlahPerColumn ? [{ key: "jumlahPer", label: "Jumlah /Per" }] : []),
     { key: "orderQty", label: "Quantity/LITER" },
     ...(showOrderQtyPcsColumn ? [{ key: "orderQtyPcs", label: "Quantity/PCS" }] : []),
@@ -202,7 +203,7 @@ export default function LabelHistoryPage({
             { key: "materialNumber", label: "Material Number", render: (r) => r.materialNumber },
             { key: "materialDescription", label: "Material Description", render: (r) => r.materialDescription },
             { key: "batch", label: "Batch", render: (r) => r.batch },
-            ...(showVolumeColumn ? [{ key: "volume", label: "Volume", render: (r: LabelHistoryRow) => r.volume ?? null }] : []),
+            ...(showVolumeColumn ? [{ key: "volume", label: "Qty Pack", render: (r: LabelHistoryRow) => r.volume ?? null }] : []),
             ...(showJumlahPerColumn ? [{ key: "jumlahPer", label: "Jumlah /Per", render: (r: LabelHistoryRow) => r.jumlahPer ?? null }] : []),
             { key: "orderQty", label: "Quantity/LITER", render: (r) => r.orderQty },
             ...(showOrderQtyPcsColumn

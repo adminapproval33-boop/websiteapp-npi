@@ -213,6 +213,7 @@ export default function ProductionLabelEntryPage({
   lotNoLabel = "Lot No",
   autofillLotFromAdminQc = false,
   autofillShelfLifeFromMaterial = false,
+  autofillVolumeFromMaterial = false,
   autofillShelfLifeFromMaterialAndType = true,
   showBatchSearch = false,
   showYamahaQr = false,
@@ -286,6 +287,17 @@ export default function ProductionLabelEntryPage({
    * mengisi kalau shelfLife masih kosong), krn Order-spesifik lebih akurat
    * drpd disamakan lintas Order. Tetap bisa diedit manual, murni saran. */
   autofillShelfLifeFromMaterial?: boolean;
+  /** Autofill "Qty Pack" (`volume`) dari Material Number yg SAMA di Order
+   * LAIN (2026-11-04, instruksi eksplisit user: pakai acuan yg SAMA persis
+   * dgn Shelf Life -- utama by No Order dulu lewat own-history [lihat
+   * `handleOrderFound`], BARU fallback by Material Number lintas Order kalau
+   * Order ini belum pernah masuk History) -- KHUSUS Label Entry FG. Sama
+   * sumber `${apiBase}/latest-by-material/:materialNumber` dgn Shelf Life/
+   * Material Type/Drum Colour di atas, HANYA mengisi kalau `volume` masih
+   * kosong (kalah prioritas dari own-history Order), tetap bisa diedit
+   * manual. Default false (SFG tidak berubah -- field ini memang tidak ada
+   * di SFG). */
+  autofillVolumeFromMaterial?: boolean;
   /** Autofill "Shelf Life (bulan)" dari kombinasi Material Number + Material
    * Type yg SAMA di Order LAIN (2026-08-27, instruksi eksplisit user, KHUSUS
    * Label Entry SFG -- default true krn ini varian default komponen ini,
@@ -331,9 +343,12 @@ export default function ProductionLabelEntryPage({
    * field manual (Lot/Shelf Life/Volume/Viskositas/SG/Jumlah Per/dst,
    * TERMASUK Remark) saat Save/Download diklik. Kalau SAMA PERSIS -> tidak
    * ada baris History baru, cuma tampil pesan info (TIDAK dianggap error).
-   * Order yg BELUM PERNAH masuk History (baseline null) SELALU disimpan
-   * spt biasa -- validasi ini cuma mencegah DUPLIKAT, bukan mewajibkan
-   * perubahan utk entry pertama kali. Default false (SFG tidak berubah). */
+   * Form TETAP ikut dikosongkan lagi kalau `resetFormAfterSave` aktif
+   * (2026-11-04, instruksi eksplisit user), WALAU tidak ada baris History
+   * baru yg dibikin. Order yg BELUM PERNAH masuk History (baseline null)
+   * SELALU disimpan spt biasa -- validasi ini cuma mencegah DUPLIKAT, bukan
+   * mewajibkan perubahan utk entry pertama kali. Default false (SFG tidak
+   * berubah). */
   skipSaveIfUnchanged?: boolean;
 } = {}) {
   const hidden = new Set(hiddenFields);
@@ -561,12 +576,13 @@ export default function ProductionLabelEntryPage({
     setViskositas("");
     setSg("");
     setOwnHistoryBaseline(null);
-    // Volume (2026-08-20, instruksi eksplisit user, KHUSUS extra.has("volume"))
-    // -- default-nya dari Master Data Referensi Order/PO (SAP-COOISPI, sama
-    // sumber dgn saran Volume di Packing), TAPI baris History Production
-    // Label sendiri utk Order ini (kalau ada, lihat blok `own.data` di bawah)
-    // lebih diutamakan krn itu nilai yg BENAR-BENAR dipakai admin terakhir.
-    setVolume(found.volume ?? "");
+    // Qty Pack/`volume` (2026-08-20, instruksi eksplisit user, KHUSUS
+    // extra.has("volume")) -- SATU-SATUNYA sumber auto-fill-nya adalah baris
+    // History Production Label sendiri utk Order ini (kalau ada, lihat blok
+    // `own.data` di bawah) -- default dari Master Data Referensi Order/PO
+    // (SAP-COOISPI) SUDAH DIHAPUS (2026-11-04, instruksi eksplisit user),
+    // jadi di sini cukup direset kosong spt field manual murni lainnya.
+    setVolume("");
 
     // Order yang SUDAH PERNAH masuk History Production Label INI SENDIRI
     // (2026-08-20, instruksi eksplisit user) -- semua kolom manual yg pernah
@@ -585,7 +601,7 @@ export default function ProductionLabelEntryPage({
       if (own.data) {
         const latest = own.data;
         const baselineLotNo = parseDDMMYYYYToInputDate(latest.lotNo);
-        const baselineVolume = latest.volume || (found.volume ?? "");
+        const baselineVolume = latest.volume || "";
         setLotNo(baselineLotNo);
         setShelfLife(latest.shelfLife ?? "");
         setPasteType(latest.pasteType ?? "");
@@ -665,16 +681,18 @@ export default function ProductionLabelEntryPage({
       setYamahaLookupDone(true);
     }
 
-    // Material Type/Drum Colour (SFG) & Shelf Life (FG, lewat
-    // `autofillShelfLifeFromMaterial`) dari Material Number yg SAMA di Order
-    // LAIN (2026-08-25 & 2026-08-27, instruksi eksplisit user: mempercepat
-    // input admin) -- KALAH prioritas dari saran Order-spesifik di atas (skip
-    // kalau `own` sudah mengisi salah satunya), krn ketiganya properti
-    // Material, bukan Order, jadi wajar disamakan lintas Order. Tetap bisa
-    // diedit manual spt biasa (state biasa, bukan read-only).
+    // Material Type/Drum Colour (SFG) & Shelf Life/Qty Pack (FG, lewat
+    // `autofillShelfLifeFromMaterial`/`autofillVolumeFromMaterial`) dari
+    // Material Number yg SAMA di Order LAIN (2026-08-25, 2026-08-27 &
+    // 2026-11-04, instruksi eksplisit user: mempercepat input admin, Qty
+    // Pack SENGAJA disamakan acuannya dgn Shelf Life) -- KALAH prioritas
+    // dari saran Order-spesifik di atas (skip kalau `own` sudah mengisi
+    // salah satunya), krn semuanya properti Material, bukan Order, jadi
+    // wajar disamakan lintas Order. Tetap bisa diedit manual spt biasa
+    // (state biasa, bukan read-only).
     if (
       found.materialNumber &&
-      (!hidden.has("materialType") || !hidden.has("drumColour") || autofillShelfLifeFromMaterial)
+      (!hidden.has("materialType") || !hidden.has("drumColour") || autofillShelfLifeFromMaterial || autofillVolumeFromMaterial)
     ) {
       try {
         const matRes = await api.get<{ success: boolean; data: ProductionLabelHistoryRow | null }>(
@@ -684,6 +702,7 @@ export default function ProductionLabelEntryPage({
           if (!hidden.has("materialType")) setPasteType((v) => v || matRes.data!.pasteType || "");
           if (!hidden.has("drumColour")) setDrumColour((v) => v || matRes.data!.drumColour || "");
           if (autofillShelfLifeFromMaterial) setShelfLife((v) => v || matRes.data!.shelfLife || "");
+          if (autofillVolumeFromMaterial) setVolume((v) => v || matRes.data!.volume || "");
         }
       } catch {
         /* Material ini belum pernah masuk History Production Label -- biarkan kosong, operator isi manual */
@@ -829,6 +848,11 @@ export default function ProductionLabelEntryPage({
       if (unchanged) {
         setError("");
         setMessage("Tidak ada perubahan input baru -- data tidak disimpan ulang ke History.");
+        // Form TETAP dikosongkan lagi (2026-11-04, instruksi eksplisit user)
+        // walau TIDAK ada baris History baru yg dibikin -- sama alasan dgn
+        // Save yg beneran berhasil (resetFormAfterSave): operator sudah
+        // selesai dgn Order ini, langsung bisa cari Order berikutnya.
+        if (resetFormAfterSave) resetForm();
         return true;
       }
     }
@@ -1037,7 +1061,13 @@ export default function ProductionLabelEntryPage({
             </div>
             {extra.has("volume") && (
               <div className="field">
-                <label>Volume</label>
+                {/* Label "Qty Pack" (2026-11-04, instruksi eksplisit user) --
+                    field/state/kolom DB di baliknya TETAP `volume`, cuma
+                    teks yg ditampilkan ke user yg berubah (sama pola dgn
+                    `lotNoLabel`) -- formula kode gabungan QR Yamaha
+                    (`parseLeadingNumber`) TIDAK berubah, masih baca field
+                    yg sama ini. */}
+                <label>Qty Pack</label>
                 <input value={volume} onChange={(e) => setVolume(e.target.value)} placeholder="mis. 1x5 Ltr" />
               </div>
             )}

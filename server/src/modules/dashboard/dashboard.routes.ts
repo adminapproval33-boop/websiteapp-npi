@@ -1462,6 +1462,13 @@ export interface TankStatusInfo {
      * `process` -- sesuai instruksi eksplisit user (2026-07-28). Lihat
      * latestPackingLabelByOrder. */
     productionActions: string | null;
+    /** Titik MULAI/AKHIR hitungan "Long Time Proses" di frontend, MENGGANTI
+     * `since`/"sekarang" (2026-11-04, instruksi eksplisit user: terapkan jg
+     * perbaikan Production Order Monitoring ke Tank Monitoring) -- null =
+     * hitung spt biasa (Order masih proses beneran). Lihat
+     * `longTimeProsesRange` di buildTankStatusMap. */
+    longTimeProsesSince: Date | null;
+    longTimeProsesUntil: Date | null;
     /** "Input Admin" = okupansi tank ini hasil hitungan otomatis (histori
      * proses biasa). "Manual" = okupansi ini ditimpa dari tab "Input Manual"
      * (2026-07-31, instruksi eksplisit user) -- kolom "Proses"/
@@ -1815,13 +1822,46 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   );
   const masterOrders = await prisma.masterOrder.findMany({
     where: { order: { in: orderNumbers } },
-    select: { order: true, materialDescription: true, pctGR: true, orderType: true, materialNumber: true, orderQty: true },
+    select: { order: true, materialDescription: true, pctGR: true, orderType: true, materialNumber: true, orderQty: true, actEndDate: true },
   });
   const descByOrder = new Map(masterOrders.map((m) => [m.order, m.materialDescription]));
   const pctGRByOrder = new Map(masterOrders.map((m) => [m.order, m.pctGR]));
   const orderTypeByOrder = new Map(masterOrders.map((m) => [m.order, m.orderType]));
   const masterOrderQtyByOrder = new Map(masterOrders.map((m) => [m.order, m.orderQty]));
+  const actEndDateByOrder = new Map(masterOrders.map((m) => [m.order, m.actEndDate]));
   const packingActionsByOrder = latestPackingLabelByOrder(latestPackingRowByOrder(packing));
+
+  /** Momen touch PALING AWAL per Order, lintas semua tahap (2026-11-04,
+   * instruksi eksplisit user: terapkan jg perbaikan "Long Time Proses"
+   * Production Order Monitoring ke Tank Monitoring) -- SAMA PERSIS pola
+   * `earliestTouchByOrder` di getProductionOrderRows, dipakai KHUSUS Order
+   * "Teco" sbg titik MULAI "Long Time Proses" (lihat `longTimeProsesSince`
+   * di bawah). */
+  const earliestTouchByOrder = new Map<string, Date>();
+  function considerEarliestTouch(order: string, moment: Date | null | undefined) {
+    if (!moment) return;
+    const cur = earliestTouchByOrder.get(order);
+    if (!cur || moment.getTime() < cur.getTime()) earliestTouchByOrder.set(order, moment);
+  }
+  for (const r of premixAftermix) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+  for (const r of milling) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+  for (const r of colourMatching) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+  for (const r of packing) considerEarliestTouch(r.order, r.start ?? r.formReceived ?? r.timestamp);
+  for (const r of checkResults) considerEarliestTouch(r.order, r.timestamp);
+  for (const r of approvals) considerEarliestTouch(r.order, r.prepareProduksi ?? r.timestamp);
+
+  /** Titik MULAI/AKHIR hitungan "Long Time Proses" -- SAMA PERSIS logika
+   * `longTimeProsesSince`/`longTimeProsesUntil` di getProductionOrderRows.
+   * "Done" (%GR>95%) dibekukan di `actEndDate` SAP (titik mulai tetap
+   * `since`/touch terakhir spt biasa). "Teco" (%GR=9999%, actEndDate SAP
+   * hampir pasti kosong) pakai pasangan beda: titik mulai = touch PALING
+   * AWAL, titik akhir = touch PALING AKHIR (`since` itu sendiri) -- supaya
+   * tidak selalu menghasilkan 0 ("< 1 jam"). */
+  function longTimeProsesRange(order: string, productionActions: string | null, since: Date): { since: Date | null; until: Date | null } {
+    if (productionActions === "Teco") return { since: earliestTouchByOrder.get(order) ?? null, until: since };
+    if (productionActions === "Done") return { since: null, until: parseSapDate(actEndDateByOrder.get(order)) };
+    return { since: null, until: null };
+  }
 
   // Milling "beneran selesai" scr kuantitas (2026-09-22, instruksi eksplisit
   // user -- laporan: Order dgn beberapa tanki turunan, baru turunan 1 yg
@@ -2003,6 +2043,8 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       // Manual MENANG mutlak -- tank ini langsung "Terisi" pakai data manual,
       // tidak perlu cek touch/pctGR/Teco otomatis sama sekali (lihat komentar
       // di atas Promise.all).
+      const manualProductionActions = productionActionsFor(manual.order);
+      const manualRange = longTimeProsesRange(manual.order, manualProductionActions, manual.timestamp);
       map.set(tank.code, {
         code: tank.code,
         taTb: tank.taTb,
@@ -2028,7 +2070,9 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
           start: latestTouchByOrder.get(manual.order)?.start ?? null,
           finish: latestTouchByOrder.get(manual.order)?.finish ?? null,
           since: manual.timestamp,
-          productionActions: productionActionsFor(manual.order),
+          productionActions: manualProductionActions,
+          longTimeProsesSince: manualRange.since,
+          longTimeProsesUntil: manualRange.until,
           source: "Manual",
         },
       });
@@ -2054,22 +2098,28 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       status: occupied ? "occupied" : "empty",
       occupant:
         occupied && touch
-          ? {
-              order: touch.order,
-              materialNumber: touch.materialNumber,
-              materialDescription: descByOrder.get(touch.order) ?? null,
-              batch: touch.batch,
-              orderQty: touch.orderQty,
-              pctGR: pctGRByOrder.get(touch.order) ?? null,
-              orderType: orderTypeByOrder.get(touch.order) ?? null,
-              remark: touch.remark,
-              process: touch.process,
-              start: touch.start,
-              finish: touch.finish,
-              since: touch.moment,
-              productionActions: productionActionsFor(touch.order),
-              source: "Input Admin",
-            }
+          ? (() => {
+              const touchProductionActions = productionActionsFor(touch.order);
+              const touchRange = longTimeProsesRange(touch.order, touchProductionActions, touch.moment);
+              return {
+                order: touch.order,
+                materialNumber: touch.materialNumber,
+                materialDescription: descByOrder.get(touch.order) ?? null,
+                batch: touch.batch,
+                orderQty: touch.orderQty,
+                pctGR: pctGRByOrder.get(touch.order) ?? null,
+                orderType: orderTypeByOrder.get(touch.order) ?? null,
+                remark: touch.remark,
+                process: touch.process,
+                start: touch.start,
+                finish: touch.finish,
+                since: touch.moment,
+                productionActions: touchProductionActions,
+                longTimeProsesSince: touchRange.since,
+                longTimeProsesUntil: touchRange.until,
+                source: "Input Admin",
+              };
+            })()
           : null,
     });
   }

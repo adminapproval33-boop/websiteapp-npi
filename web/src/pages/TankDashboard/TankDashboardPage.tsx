@@ -4,7 +4,7 @@ import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import ProcessBadge from "../../components/ProcessBadge";
-import { formatDateTime, formatDuration } from "../../lib/datetime";
+import { formatDateDDMMYYYY, formatDateTime, formatDuration } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import MaintenanceQuickModal from "../Maintenance/MaintenanceQuickModal";
 
@@ -24,6 +24,11 @@ interface TankOccupant {
   /** Label Proses Packing, TERPISAH dari `process` -- sesuai instruksi
    * eksplisit user (2026-07-28). */
   productionActions: string | null;
+  /** Titik MULAI/AKHIR hitungan "Long Time Proses", MENGGANTI `since`/
+   * "sekarang" (2026-11-04, instruksi eksplisit user: terapkan jg perbaikan
+   * Production Order Monitoring ke Tank Monitoring). Null = hitung spt biasa. */
+  longTimeProsesSince: string | null;
+  longTimeProsesUntil: string | null;
   /** "Input Admin" = okupansi dihitung otomatis dari histori proses biasa.
    * "Manual" = okupansi ini dari tab "Input Manual" -- `process`/
    * `productionActions` di atas TETAP logika otomatis Order ybs walau
@@ -442,15 +447,24 @@ export default function TankDashboardPage() {
                   r.occupant ? (
                     <span
                       onClick={() => setLeadTimeDetailOrder(r.occupant!.order)}
-                      title="Klik utk lihat lama proses di tiap tahapan"
+                      title={
+                        r.occupant.longTimeProsesUntil
+                          ? r.occupant.productionActions === "Teco"
+                            ? `Dihitung dari touch paling awal (${formatDateDDMMYYYY(r.occupant.longTimeProsesSince)}) sampai touch paling akhir (${formatDateDDMMYYYY(r.occupant.longTimeProsesUntil)}) -- Order sudah Teco, actEndDate SAP hampir pasti kosong utk status ini. Klik utk lihat lama proses di tiap tahapan`
+                            : `Dibekukan di actEndDate SAP: ${formatDateDDMMYYYY(r.occupant.longTimeProsesUntil)} (Order sudah Done, tapi tahap lanjutannya tidak pernah diinput ke app). Klik utk lihat lama proses di tiap tahapan`
+                          : "Klik utk lihat lama proses di tiap tahapan"
+                      }
                       style={{ cursor: "pointer", textDecoration: "underline", fontWeight: 600 }}
                     >
-                      {formatDuration(r.occupant.since)}
+                      {formatDuration(r.occupant.longTimeProsesSince ?? r.occupant.since, r.occupant.longTimeProsesUntil ?? undefined)}
                     </span>
                   ) : (
                     "-"
                   ),
-                csvValue: (r) => (r.occupant ? formatDuration(r.occupant.since) : "-"),
+                csvValue: (r) =>
+                  r.occupant
+                    ? formatDuration(r.occupant.longTimeProsesSince ?? r.occupant.since, r.occupant.longTimeProsesUntil ?? undefined)
+                    : "-",
               },
             ]}
           />
@@ -504,6 +518,39 @@ export default function TankDashboardPage() {
 
       {leadTimeDetailOrder && (
         <Modal title={`Start & Finish per Tahap — Order ${leadTimeDetailOrder}`} onClose={() => setLeadTimeDetailOrder(null)} width={640}>
+          {(() => {
+            const row = tankQuery.data?.find((r) => r.occupant?.order === leadTimeDetailOrder);
+            if (!row?.occupant?.longTimeProsesUntil) return null;
+            const occ = row.occupant;
+            return (
+              <p
+                style={{
+                  marginTop: 0,
+                  marginBottom: 14,
+                  fontSize: "0.82rem",
+                  background: "var(--bg-subtle, #fff8e1)",
+                  border: "1px solid var(--border-color, #e0c46c)",
+                  borderRadius: 6,
+                  padding: "8px 10px",
+                }}
+              >
+                {occ.productionActions === "Teco" ? (
+                  <>
+                    ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di touch paling awal-akhir</strong> (
+                    {formatDateDDMMYYYY(occ.longTimeProsesSince)} s/d {formatDateDDMMYYYY(occ.longTimeProsesUntil)}) karena Order
+                    sudah berstatus <strong>Teco</strong> (% GR = 9999%) -- actEndDate SAP hampir pasti kosong utk status ini.
+                  </>
+                ) : (
+                  <>
+                    ⓘ Kolom "Long Time Proses" Order ini sudah <strong>dibekukan di actEndDate SAP</strong> (
+                    {formatDateDDMMYYYY(occ.longTimeProsesUntil)}) karena Order sudah berstatus <strong>Done</strong> (% GR &gt;
+                    95%), tapi tahap lanjutannya ({occ.process}) tidak pernah diinput ke app sehingga tidak terus bertambah
+                    tiap hari.
+                  </>
+                )}
+              </p>
+            );
+          })()}
           {leadTimeDetailQuery.isLoading && <p style={{ color: "var(--text-muted)" }}>Memuat...</p>}
           {!leadTimeDetailQuery.isLoading && (leadTimeDetailQuery.data?.length ?? 0) === 0 && (
             <p style={{ color: "var(--text-muted)" }}>Belum ada tahapan proses yang punya data Start untuk Order ini.</p>

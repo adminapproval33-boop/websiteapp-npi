@@ -5,4 +5,4 @@ ADD COLUMN     "sg" TEXT,
 ADD COLUMN     "viskositas" TEXT;
 
 -- DropTable
-DROP TABLE "qr_code_yamaha";
+DROP TABLE IF EXISTS "qr_code_yamaha";

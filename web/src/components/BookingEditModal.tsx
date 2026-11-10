@@ -6,7 +6,7 @@ import TankSelect from "./TankSelect";
 import { ExcelBlock, ExcelRow, ExcelField } from "./ExcelGrid";
 import { formatInputBy, useEmployeeOptions } from "./EmployeeNameSelect";
 import type { OrderRefData } from "./OrderLookup";
-import { toDateTimeLocalValue } from "../lib/datetime";
+import { toDateTimeLocalValue, formatDateTime } from "../lib/datetime";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import type { ScheduleEvent } from "./WeeklyScheduleCalendar";
@@ -82,6 +82,10 @@ export default function BookingEditModal({
   const [note, setNote] = useState("");
   const [plannedStart, setPlannedStart] = useState("");
   const [error, setError] = useState("");
+  // Peringatan "tanki sudah dibooking Order lain" (2026-11-10, instruksi
+  // eksplisit user) -- sama pola dgn MaterialFlowPanel.tsx, lihat komentar
+  // lengkap di sana.
+  const [conflict, setConflict] = useState<{ order: string; plannedStart: string | null } | null>(null);
 
   // Dependency SENGAJA ikut `existing?.plannedStart` (bukan cuma `existing?.id`
   // -- baris booking yg SAMA, id-nya tidak berubah) supaya popup ini ikut
@@ -111,12 +115,13 @@ export default function BookingEditModal({
       : "-";
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (force?: boolean) => {
       if (existing) {
         return api.put(`/tank-manual-input/booking/${existing.id}`, {
           codeTanki: codeTanki.trim(),
           note: note.trim() || undefined,
           plannedStart: plannedStart || undefined,
+          force: force || undefined,
         });
       }
       return api.post("/tank-manual-input/booking", {
@@ -129,6 +134,7 @@ export default function BookingEditModal({
         orderQty: ref?.orderQty ?? undefined,
         note: note.trim() || undefined,
         plannedStart: plannedStart || undefined,
+        force: force || undefined,
       });
     },
     onSuccess: () => {
@@ -137,16 +143,28 @@ export default function BookingEditModal({
       queryClient.invalidateQueries({ queryKey: ["tank-booking-list", ev.order] });
       onClose();
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Gagal menyimpan booking tanki."),
+    onError: (err) => {
+      // Respons 409 TANK_ALREADY_BOOKED (2026-11-10) -- peringatan, bukan
+      // error fatal, lihat komentar `conflict` di atas & POST /booking di
+      // server utk detail lengkapnya.
+      if (err instanceof ApiError && err.status === 409 && (err.body as { code?: string })?.code === "TANK_ALREADY_BOOKED") {
+        setConflict((err.body as { conflict: { order: string; plannedStart: string | null } }).conflict);
+        setError("");
+        return;
+      }
+      setConflict(null);
+      setError(err instanceof ApiError ? err.message : "Gagal menyimpan booking tanki.");
+    },
   });
 
   function submit() {
     setError("");
+    setConflict(null);
     if (!codeTanki.trim()) {
       setError("Code Tanki wajib diisi.");
       return;
     }
-    saveMutation.mutate();
+    saveMutation.mutate(false);
   }
 
   return createPortal(
@@ -196,7 +214,7 @@ export default function BookingEditModal({
         </ExcelRow>
       </ExcelBlock>
       <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Manual) di Tank Monitoring dengan Order ini, dan gugur
+        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Booking) di Tank Monitoring dengan Order ini, dan gugur
         otomatis begitu Order ini di-input di tahap {label} atau tanki dipakai Order lain. Mengubah Rencana Mulai ikut
         memindahkan kartu ini ke tanggal tersebut di Kalender (sama seperti menarik kartu ke hari lain).
       </p>
@@ -205,6 +223,22 @@ export default function BookingEditModal({
         <p className="error-text" style={{ margin: "8px 0 0" }}>
           {error}
         </p>
+      )}
+      {/* Peringatan tanki sudah dibooking Order lain (2026-11-10) -- lihat
+          komentar `conflict` di atas. */}
+      {conflict && (
+        <div style={{ margin: "8px 0 0", padding: "8px 10px", borderRadius: 6, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem" }}>
+          ⚠ Tanki {codeTanki.trim()} masih dibooking aktif oleh Order {conflict.order}
+          {conflict.plannedStart ? ` (rencana mulai ${formatDateTime(conflict.plannedStart)})` : ""}. Tetap lanjutkan juga?
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => saveMutation.mutate(true)}>
+              Tetap Lanjutkan
+            </button>
+            <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setConflict(null)}>
+              Batal
+            </button>
+          </div>
+        </div>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
         <button type="button" className="btn" disabled={saveMutation.isPending} onClick={submit}>

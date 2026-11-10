@@ -150,6 +150,13 @@ export default function MaterialFlowPanel({
   const [bookingPlannedStart, setBookingPlannedStart] = useState("");
   const [bookingMessage, setBookingMessage] = useState("");
   const [bookingError, setBookingError] = useState("");
+  // Peringatan "tanki sudah dibooking Order lain" (2026-11-10, instruksi
+  // eksplisit user -- root cause laporan nyata "status tanki jumping": tanki
+  // 128/IU1 py 4 booking aktif numpuk dari Order berbeda tanpa peringatan).
+  // Diisi dari respons 409 TANK_ALREADY_BOOKED (lihat bookingMutation.onError
+  // di bawah) -- bukan error fatal, user bisa tetap lanjut lewat tombol
+  // "Tetap Booking" (submitBooking(true), kirim ulang dgn `force: true`).
+  const [bookingConflict, setBookingConflict] = useState<{ order: string; plannedStart: string | null } | null>(null);
   const { data: tankOptions } = useTankOptions();
   const { data: employees } = useEmployeeOptions();
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -244,7 +251,7 @@ export default function MaterialFlowPanel({
   const ref: OrderRefData | null = orderRefQuery.data ?? null;
 
   const bookingMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (force?: boolean) => {
       return api.post("/tank-manual-input/booking", {
         section: bookingStage === "Premix" ? "PREMIX" : "AFTERMIX",
         codeTanki: bookingTank.trim(),
@@ -255,11 +262,13 @@ export default function MaterialFlowPanel({
         orderQty: ref?.orderQty ?? undefined,
         note: bookingRemark.trim() || undefined,
         plannedStart: bookingPlannedStart || undefined,
+        force: force || undefined,
       });
     },
     onSuccess: () => {
       setBookingMessage(`Booking tanki ${bookingTank.trim()} utk Order ${order} (${bookingStage}) tersimpan -- tanki tampil "Terisi" di Tank Monitoring.`);
       setBookingError("");
+      setBookingConflict(null);
       setBookingStage(null);
       setBookingTank("");
       setBookingRemark("");
@@ -267,7 +276,19 @@ export default function MaterialFlowPanel({
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
       queryClient.invalidateQueries({ queryKey: ["tank-booking-list", order] });
     },
-    onError: (err) => setBookingError(err instanceof ApiError ? err.message : "Gagal menyimpan booking tanki."),
+    onError: (err) => {
+      // Respons 409 TANK_ALREADY_BOOKED (lihat komentar `bookingConflict` di
+      // atas) -- beda dari error fatal biasa, tampilkan sbg peringatan dgn
+      // opsi lanjut, bukan cuma pesan merah buntu.
+      if (err instanceof ApiError && err.status === 409 && (err.body as { code?: string; conflict?: { order: string; plannedStart: string | null } })?.code === "TANK_ALREADY_BOOKED") {
+        const conflict = (err.body as { conflict: { order: string; plannedStart: string | null } }).conflict;
+        setBookingConflict(conflict);
+        setBookingError("");
+        return;
+      }
+      setBookingConflict(null);
+      setBookingError(err instanceof ApiError ? err.message : "Gagal menyimpan booking tanki.");
+    },
   });
 
   // Booking yg MASIH AKTIF utk Order ini -- diambil dari Tank Monitoring
@@ -284,9 +305,7 @@ export default function MaterialFlowPanel({
         .then((r) => r.data),
     enabled: !!order,
   });
-  const activeBookings = (tankStatusQuery.data ?? []).filter(
-    (t) => t.occupant?.source === "Manual" && t.occupant.order === order && /^Booking (Premix|Aftermix)\b/.test(t.occupant.remark ?? "")
-  );
+  const activeBookings = (tankStatusQuery.data ?? []).filter((t) => t.occupant?.source === "Booking" && t.occupant.order === order);
   // Detail booking (Rencana Mulai & pemesan) -- dicocokkan ke `activeBookings`
   // lewat Code Tanki (entri TERBARU per tanki, sama aturan "yg terbaru menang"
   // di Tank Monitoring).
@@ -322,11 +341,13 @@ export default function MaterialFlowPanel({
     setBookingRemark("");
     setBookingPlannedStart("");
     setBookingError("");
+    setBookingConflict(null);
   }
 
   function submitBooking() {
     setBookingMessage("");
     setBookingError("");
+    setBookingConflict(null);
     if (!bookingTank.trim()) {
       setBookingError("Code Tanki wajib diisi.");
       return;
@@ -335,7 +356,7 @@ export default function MaterialFlowPanel({
       setBookingError("Code Tanki tidak ada di Master Data Tanki. Pilih dari daftar saran.");
       return;
     }
-    bookingMutation.mutate();
+    bookingMutation.mutate(false);
   }
 
   const statusByName = new Map(stages.map((s) => [s.name, s.done]));
@@ -711,10 +732,43 @@ export default function MaterialFlowPanel({
                         </ExcelRow>
                       </ExcelBlock>
                       <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Manual) di Tank Monitoring dengan Order ini, dan
+                        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Booking) di Tank Monitoring dengan Order ini, dan
                         gugur otomatis begitu Order ini di-input di tahap {bookingStage} atau tanki dipakai Order lain.
                       </p>
                       {bookingError && <p className="error-text" style={{ margin: "8px 0 0" }}>{bookingError}</p>}
+                      {/* Peringatan tanki sudah dibooking Order lain (2026-11-10, instruksi
+                          eksplisit user) -- bukan error fatal, SPV/Leader bisa tetap lanjut
+                          (mis. memang sengaja bergantian), tombol "Tetap Booking" kirim ulang
+                          dgn force:true. Lihat komentar `bookingConflict` di atas. */}
+                      {bookingConflict && (
+                        <div
+                          style={{
+                            margin: "8px 0 0",
+                            padding: "8px 10px",
+                            borderRadius: 6,
+                            background: "#fef3c7",
+                            color: "#92400e",
+                            fontSize: "0.82rem",
+                          }}
+                        >
+                          ⚠ Tanki {bookingTank.trim()} masih dibooking aktif oleh Order {bookingConflict.order}
+                          {bookingConflict.plannedStart ? ` (rencana mulai ${formatDateTime(bookingConflict.plannedStart)})` : ""}. Tetap
+                          lanjutkan booking ini juga?
+                          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                            <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => bookingMutation.mutate(true)}>
+                              Tetap Booking
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-outline"
+                              style={{ padding: "4px 10px" }}
+                              onClick={() => setBookingConflict(null)}
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
                         <button type="button" className="btn" disabled={bookingMutation.isPending} onClick={submitBooking}>
                           {bookingMutation.isPending ? "Menyimpan..." : "Simpan Booking"}

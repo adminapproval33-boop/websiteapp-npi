@@ -1473,8 +1473,14 @@ export interface TankStatusInfo {
      * proses biasa). "Manual" = okupansi ini ditimpa dari tab "Input Manual"
      * (2026-07-31, instruksi eksplisit user) -- kolom "Proses"/
      * "Production Actions" TETAP pakai logika otomatis Order ybs walau
-     * `source`-nya "Manual", cuma kolom baru INI yg beda. */
-    source: "Input Admin" | "Manual";
+     * `source`-nya "Manual"/"Booking", cuma kolom baru INI yg beda. "Booking"
+     * (2026-11-10, instruksi eksplisit user -- laporan "tanki Terisi padahal
+     * tidak ada on process/packing sama sekali") = okupansi ini dari Booking
+     * Tanki (lib/tankBooking.ts), BUKAN Input Manual biasa -- dipisah dari
+     * "Manual" krn beda makna: Booking = baru RENCANA/reservasi, belum tentu
+     * ada aktivitas fisik, sedangkan "Manual" = operator SENGAJA menandai
+     * tanki ini terisi beneran sekarang. */
+    source: "Input Admin" | "Manual" | "Booking";
   } | null;
 }
 
@@ -1530,7 +1536,7 @@ export function parseSapDate(raw: string | null | undefined): Date | null {
 }
 
 async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
-  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, adminQcRowsForTank, checkResults, tankManualInputs, productionOrderManualInputs] = await Promise.all([
+  const [tanks, premixAftermix, milling, colourMatching, packing, approvals, checkResults, adminQcRowsForTank, tankManualInputs, productionOrderManualInputs] = await Promise.all([
     prisma.masterTank.findMany({ orderBy: { code: "asc" } }),
     prisma.premixAftermixLog.findMany({
       select: { order: true, materialNumber: true, batch: true, orderQty: true, remark: true, section: true, codeTanki: true, formReceived: true, start: true, finish: true, timestamp: true },
@@ -1579,12 +1585,6 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
         timestamp: true,
       },
     }),
-    // Admin QC Stage/QC to App/QC Passed TIDAK LAGI di ApprovalSchedule --
-    // lihat komentar sama di /production-orders di atas.
-    prisma.adminQc.findMany({
-      select: { order: true, typeLot: true, qcToApproval: true, qcPassed: true, timestamp: true },
-      orderBy: { timestamp: "desc" },
-    }),
     prisma.checkResult.findMany({
       select: {
         order: true,
@@ -1594,17 +1594,24 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
         remark: true,
         codeTanki: true,
         timestamp: true,
-        // Start/Finish HEADER CheckResult SENGAJA tidak dipakai -- field itu tidak
-        // pernah diisi dari form Input Check Results (Start/Finish di form itu
-        // per Item Check, bukan per header). Proses/Start/Finish QC dihitung dari
-        // Item Check TERWAKIL (qcRepresentativeParam/qcProcessLabel) -- fungsi &
-        // logika yg SAMA PERSIS dgn kolom "Proses" di /production-orders, supaya
-        // format "QC : Item Check : Verdict" konsisten di seluruh dashboard.
-        parameters: {
-          orderBy: { no: "asc" },
-          select: { parameter: true, standard: true, result: true, start: true, finish: true },
-        },
+        // "QC Entry Date" (header Input Check Results) -- Start Proses QC,
+        // SAMA PERSIS sumbernya dgn /production-orders (2026-11-11, instruksi
+        // eksplisit user: laporan nyata Long Time Proses tahap QC beda antara
+        // Production Order Monitoring vs Tank Monitoring, krn di sini
+        // SEBELUMNYA masih pakai format/sumber LAMA pra-2026-07-29/09-28 --
+        // "Start Item Check terwakil" & label "QC : Item Check : Verdict" --
+        // yg sudah digantikan di /production-orders tapi lupa ikut diubah di
+        // sini. JANGAN diubah salah satu tanpa yg lain lagi, lihat komentar
+        // sama di getProductionOrderRows blok checkResults.map).
+        tanggalMasukQc: true,
       },
+    }),
+    // QC Passed (tabel AdminQc terpisah) -- Finish Proses QC, SAMA PERSIS
+    // sumbernya dgn /production-orders (lihat komentar di atas select
+    // checkResult.tanggalMasukQc).
+    prisma.adminQc.findMany({
+      select: { order: true, qcPassed: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
     }),
     prisma.tankManualInput.findMany({ orderBy: { timestamp: "desc" } }),
     // Code Tanki dari tombol "+Input Manual" (Dashboard > Production Order
@@ -1634,6 +1641,12 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     orderQty: string | null;
     remark: string | null;
     timestamp: Date;
+    /** Rencana Mulai -- HANYA diisi utk entri Booking Tanki (lihat
+     * lib/tankBooking.ts), null utk Input Manual biasa (baik dari tab Input
+     * Manual Tank Monitoring maupun "+Input Manual" Production Order
+     * Monitoring, keduanya tidak py konsep ini). Dipakai `pickTankWinner` di
+     * bawah (2026-11-10, instruksi eksplisit user). */
+    plannedStart: Date | null;
   }
 
   // Data "Input Manual" Tank Monitoring DAN Code Tanki dari "+Input Manual"
@@ -1654,6 +1667,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       orderQty: m.orderQty,
       remark: m.remark,
       timestamp: m.timestamp,
+      plannedStart: m.plannedStart,
     })),
     ...productionOrderManualInputs.map((m) => ({
       codeTanki: m.codeTanki as string,
@@ -1664,6 +1678,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       orderQty: m.orderQty,
       remark: null as string | null,
       timestamp: m.timestamp,
+      plannedStart: null as Date | null,
     })),
   ];
   unifiedManualEntries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
@@ -1721,16 +1736,18 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
   // freeing-logic tank (`packingOrders` Set di atas) sudah menjadikan
   // Packing sbg PENANDA "tank dikosongkan lagi", bukan tahap okupansi --
   // memasukkannya jadi touch juga akan kontradiktif dgn logika freeing itu.
-  const latestAdminQcByOrderForTank = new Map<string, (typeof adminQcRowsForTank)[number]>();
-  for (const r of adminQcRowsForTank) {
-    if (!latestAdminQcByOrderForTank.has(r.order)) latestAdminQcByOrderForTank.set(r.order, r);
-  }
   for (const r of approvals) {
     if (!r.codeTanki) continue;
     // Label Proses Approval/Approval - DN murni dari Finish App (SAMA
     // PERSIS dgn /production-orders, lihat finishBasedLabel) -- Start dari
-    // "QC to App" (tabel AdminQc) spy konsisten sama sebelumnya.
-    const adminQc = latestAdminQcByOrderForTank.get(r.order);
+    // "Submit Cust" (ApprovalSchedule.submitToCustomer), SAMA PERSIS dgn
+    // /production-orders (2026-11-11, instruksi eksplisit user -- laporan
+    // nyata: Order 1010156939 py Long Time Proses BEDA ±8 hari antara
+    // Production Order Monitoring vs Tank Monitoring, krn Tank Monitoring
+    // di sini SEBELUMNYA masih pakai sumber LAMA "QC to App"/AdminQc.qcToApproval
+    // -- JANGAN diubah salah satu tanpa yg lain lagi, lihat komentar di
+    // getProductionOrderRows blok approvals.map utk alasan lengkap kenapa
+    // "Submit Cust" dipilih drpd "QC to App").
     touches.push({
       code: r.codeTanki,
       order: r.order,
@@ -1739,14 +1756,22 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       orderQty: r.orderQty,
       remark: r.remark,
       process: finishBasedLabel("Approval", r.finishApp),
-      start: adminQc?.qcToApproval ?? null,
+      start: r.submitToCustomer ?? null,
       finish: r.finishApp,
-      moment: latestMoment(adminQc?.qcToApproval ?? null, r.finishApp, r.timestamp),
+      moment: latestMoment(r.submitToCustomer ?? null, r.finishApp, r.timestamp),
     });
+  }
+  const latestAdminQcByOrderForTank = new Map<string, (typeof adminQcRowsForTank)[number]>();
+  for (const r of adminQcRowsForTank) {
+    if (!latestAdminQcByOrderForTank.has(r.order)) latestAdminQcByOrderForTank.set(r.order, r);
   }
   for (const r of checkResults) {
     if (!r.codeTanki) continue;
-    const rep = qcRepresentativeParam(r.parameters);
+    // Label & Start/Finish Proses QC SAMA PERSIS dgn /production-orders
+    // (2026-11-11, instruksi eksplisit user -- lihat komentar lengkap di
+    // select checkResult.tanggalMasukQc di atas): "QC"/"QC - DN" dari QC
+    // Passed (AdminQc), Start dari "QC Entry Date", Finish dari QC Passed.
+    const adminQc = latestAdminQcByOrderForTank.get(r.order);
     touches.push({
       code: r.codeTanki,
       order: r.order,
@@ -1754,10 +1779,10 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
       batch: r.batch,
       orderQty: r.orderQty,
       remark: r.remark,
-      process: qcProcessLabel(rep),
-      start: rep?.start ?? null,
-      finish: rep?.finish ?? null,
-      moment: rep?.start ?? r.timestamp,
+      process: adminQc?.qcPassed ? "QC - DN" : "QC",
+      start: r.tanggalMasukQc ?? null,
+      finish: adminQc?.qcPassed ?? null,
+      moment: latestMoment(r.tanggalMasukQc ?? null, adminQc?.qcPassed ?? null, r.timestamp),
     });
   }
 
@@ -1786,10 +1811,44 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
     if (colourMatching.some((r) => r.codeTanki === b.codeTanki && r.order !== b.order && r.timestamp.getTime() > t)) return true;
     return false;
   }
-  const latestManualByTank = new Map<string, ManualTankEntry>();
+  const activeManualByTank = new Map<string, ManualTankEntry[]>();
   for (const m of unifiedManualEntries) {
     if (isBookingReleased(m)) continue;
-    if (!latestManualByTank.has(m.codeTanki)) latestManualByTank.set(m.codeTanki, m);
+    const list = activeManualByTank.get(m.codeTanki);
+    if (list) list.push(m);
+    else activeManualByTank.set(m.codeTanki, [m]);
+  }
+  /** Pemenang per tanki kalau >1 entri manual/booking aktif numpuk di tanki
+   * yg sama (2026-11-10, instruksi eksplisit user -- root cause laporan
+   * nyata "status tanki jumping": tanki 128/IU1 py 4 Booking Aftermix aktif
+   * numpuk dari Order berbeda). SEBELUMNYA pemenangnya selalu "yg paling
+   * baru DIBUAT" (unifiedManualEntries sudah terurut desc by timestamp) --
+   * utk Input Manual biasa ini tetap benar (override yg disengaja, terbaru =
+   * paling valid, dipertahankan apa adanya di bawah). TAPI utk Booking
+   * Tanki ini keliru: booking yg paling baru DIBUAT belum tentu yg jadwalnya
+   * paling relevan SEKARANG (mis. booking utk minggu depan dibuat SETELAH
+   * booking utk hari ini -- harusnya booking hari ini yg menang tampil
+   * Terisi, bukan yg minggu depan). Aturan baru: kalau SEMUA entri aktif di
+   * tanki itu Booking (tidak ada Input Manual biasa yg menimpa), pemenangnya
+   * yg Rencana Mulai-nya PALING DEKAT ke sekarang (baik sudah lewat maupun
+   * akan datang) -- booking TANPA Rencana Mulai dianggap tidak py sinyal yg
+   * bisa dipakai, fallback ke "paling baru dibuat" KALAU SEMUA entri sama2
+   * tidak py Rencana Mulai. */
+  function pickTankWinner(entries: ManualTankEntry[]): ManualTankEntry {
+    const realManual = entries.filter((e) => parseBookingSection(e.remark) == null);
+    if (realManual.length > 0) return realManual[0]; // sudah terurut desc timestamp -- "menang mutlak" apa adanya.
+    const withPlannedStart = entries.filter((e) => e.plannedStart != null) as (ManualTankEntry & { plannedStart: Date })[];
+    if (withPlannedStart.length > 0) {
+      const now = Date.now();
+      return withPlannedStart.reduce((best, cur) =>
+        Math.abs(cur.plannedStart.getTime() - now) < Math.abs(best.plannedStart.getTime() - now) ? cur : best
+      );
+    }
+    return entries[0]; // semua booking tanpa Rencana Mulai -- fallback ke paling baru dibuat.
+  }
+  const latestManualByTank = new Map<string, ManualTankEntry>();
+  for (const [code, entries] of activeManualByTank) {
+    latestManualByTank.set(code, pickTankWinner(entries));
   }
 
   /** "Pindah Tanki" (2026-10-24, instruksi eksplisit user -- laporan nyata
@@ -2073,7 +2132,7 @@ async function buildTankStatusMap(): Promise<Map<string, TankStatusInfo>> {
           productionActions: manualProductionActions,
           longTimeProsesSince: manualRange.since,
           longTimeProsesUntil: manualRange.until,
-          source: "Manual",
+          source: parseBookingSection(manual.remark) != null ? "Booking" : "Manual",
         },
       });
       continue;
@@ -2821,7 +2880,7 @@ dashboardRouter.get(
   asyncRoute(async (req, res) => {
     const order = req.params.order.trim();
 
-    const [premixAftermix, milling, colourMatching, packing, checkResult, approval, adminQc] = await Promise.all([
+    const [premixAftermix, milling, colourMatching, packing, checkResult, approval] = await Promise.all([
       prisma.premixAftermixLog.findMany({
         where: { order },
         select: { section: true, start: true, finish: true },
@@ -2835,18 +2894,17 @@ dashboardRouter.get(
         select: { parameters: { select: { start: true, finish: true } } },
         orderBy: { timestamp: "desc" },
       }),
-      // Approval tidak py kolom Start/Finish yg literal -- "Start"-nya QC to
-      // App (sekarang di tabel AdminQc terpisah, lihat query di bawah),
-      // "Finish"-nya Finish App, sesuai permintaan eksplisit user (2026-07-28)
-      // utk merangkum SEMUA tahap termasuk Approval.
+      // Approval tidak py kolom Start/Finish yg literal -- "Start"-nya Submit
+      // Cust, "Finish"-nya Finish App, sesuai permintaan eksplisit user
+      // (2026-07-28) utk merangkum SEMUA tahap termasuk Approval. Start SAMA
+      // PERSIS dgn getProductionOrderRows & buildTankStatusMap (2026-11-11,
+      // instruksi eksplisit user -- laporan nyata popup ini pernah menampilkan
+      // Lead Time Approval beda dari 2 dashboard lain krn masih pakai sumber
+      // LAMA "QC to App"/AdminQc.qcToApproval -- JANGAN diubah salah satu
+      // tanpa yg lain lagi).
       prisma.approvalSchedule.findFirst({
         where: { order },
-        select: { finishApp: true },
-        orderBy: { timestamp: "desc" },
-      }),
-      prisma.adminQc.findFirst({
-        where: { order },
-        select: { qcToApproval: true },
+        select: { submitToCustomer: true, finishApp: true },
         orderBy: { timestamp: "desc" },
       }),
     ]);
@@ -2869,7 +2927,7 @@ dashboardRouter.get(
       buildStage("Aftermix", aftermix?.start ?? null, aftermix?.finish ?? null, now),
       buildStage("Colour Matching", colourMatching?.start ?? null, colourMatching?.finish ?? null, now),
       buildStage("QC", qcStart, qcFinish, now),
-      buildStage("Approval", adminQc?.qcToApproval ?? null, approval?.finishApp ?? null, now),
+      buildStage("Approval", approval?.submitToCustomer ?? null, approval?.finishApp ?? null, now),
       buildStage("Packing", packing?.start ?? null, packing?.finish ?? null, now),
     ].filter((s) => s.start != null);
 

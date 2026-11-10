@@ -85,9 +85,15 @@ export function advancedExportUrl(categories: string[]): string {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Body JSON mentah dari response gagal (2026-11-10, instruksi eksplisit
+   * user) -- dipakai pemanggil yg butuh field TERSTRUKTUR tambahan selain
+   * `message`, mis. `code`/`conflict` di respons 409 "tanki sudah dibooking"
+   * (lihat POST /tank-manual-input/booking) -- drpd regex-parse teks `message`. */
+  body: unknown;
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -105,7 +111,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new ApiError(res.status, data?.message ?? `Permintaan gagal (${res.status}).`);
+    throw new ApiError(res.status, data?.message ?? `Permintaan gagal (${res.status}).`, data);
   }
   return data as T;
 }

@@ -32,8 +32,11 @@ interface TankOccupant {
   /** "Input Admin" = okupansi dihitung otomatis dari histori proses biasa.
    * "Manual" = okupansi ini dari tab "Input Manual" -- `process`/
    * `productionActions` di atas TETAP logika otomatis Order ybs walau
-   * sumbernya manual (2026-07-31, instruksi eksplisit user). */
-  source: "Input Admin" | "Manual";
+   * sumbernya manual (2026-07-31, instruksi eksplisit user). "Booking"
+   * (2026-11-10) = okupansi ini dari Booking Tanki (pop-up Info Proses),
+   * beda dari "Manual" krn baru RENCANA/reservasi, belum tentu ada
+   * aktivitas fisik di tanki ini. */
+  source: "Input Admin" | "Manual" | "Booking";
 }
 
 interface TankRow {
@@ -361,11 +364,12 @@ export default function TankDashboardPage() {
                         borderRadius: 999,
                         fontSize: "0.75rem",
                         fontWeight: 700,
-                        background: r.occupant.source === "Manual" ? "#f3e8ff" : "#dbeafe",
-                        color: r.occupant.source === "Manual" ? "#6b21a8" : "#1e40af",
+                        background: r.occupant.source === "Manual" ? "#f3e8ff" : r.occupant.source === "Booking" ? "#fef3c7" : "#dbeafe",
+                        color: r.occupant.source === "Manual" ? "#6b21a8" : r.occupant.source === "Booking" ? "#92400e" : "#1e40af",
                       }}
+                      title={r.occupant.source === "Booking" ? "Dibooking, belum tentu ada aktivitas proses nyata" : undefined}
                     >
-                      {r.occupant.source}
+                      {r.occupant.source === "Booking" ? "Booking (belum proses)" : r.occupant.source}
                     </span>
                   ) : (
                     "-"

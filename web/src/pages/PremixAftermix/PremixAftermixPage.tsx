@@ -270,6 +270,15 @@ export default function PremixAftermixPage({
   const { pending: pendingTankChange, checkTankChange, confirmProceed: confirmTankChange, cancel: cancelTankChange } = useTankChangeGuard();
   const [search, setSearch] = useState("");
   const [queueSearch, setQueueSearch] = useState("");
+  // Filter Code Tanki di PWO Schedule & Queue, Kalender view (2026-11-10,
+  // instruksi eksplisit user -- supaya SPV/Leader bisa cek "tanki ini sudah
+  // dipakai/dibooking Order apa saja" SEBELUM booking baru, bukan baru
+  // ketahuan setelah bentrok, lihat laporan nyata "tanki 128/IU1 jumping"
+  // krn 4 booking numpuk tanpa ada yg sadar). Dicocokkan ke `tankByOrder` di
+  // bawah (dari daftar booking aktif section ini), BUKAN kolom Code Tanki
+  // Milling (itu sudah bisa difilter lewat tombol "⌕ Filter" bawaan DataTable
+  // di tampilan List, beda tanki/konteks dari booking Aftermix/Premix ini).
+  const [queueTankFilter, setQueueTankFilter] = useState("");
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { widths: colWidths, beginResize, guideX, reset: resetColWidths } = useResizableColWidths(
@@ -348,6 +357,38 @@ export default function PremixAftermixPage({
    * (List tetap tampilkan semua antrian apa adanya, krn dipakai jg utk aksi
    * lain spt "Input Premix"/"Input Aftermix" yg tidak terkait status jadwal). */
   const scheduledOrders = useMemo(() => new Set((pwoScheduleQuery.data ?? []).map((e) => e.order)), [pwoScheduleQuery.data]);
+
+  // Semua booking AKTIF section ini (2026-11-10, instruksi eksplisit user) --
+  // `order` dikosongkan di GET /booking supaya server mengembalikan booking
+  // SEMUA Order (bukan cuma 1), dipakai bangun peta Order -> Code Tanki utk
+  // filter "Code Tanki" di Kalender di bawah. Cuma di-fetch pas Kalender
+  // kebuka (`queueView === "calendar"`) -- List view sudah py filter sendiri
+  // lewat tombol "⌕ Filter" bawaan DataTable di kolom Code Tanki Milling.
+  const bookingListAllQuery = useQuery({
+    queryKey: ["tank-booking-list-all", section],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { order: string; codeTanki: string }[] }>(`/tank-manual-input/booking?section=${section}`)
+        .then((r) => r.data),
+    enabled: !embedded && queueView === "calendar",
+  });
+  const tankByOrder = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const b of bookingListAllQuery.data ?? []) {
+      const set = map.get(b.order) ?? new Set<string>();
+      set.add(b.codeTanki);
+      map.set(b.order, set);
+    }
+    return map;
+  }, [bookingListAllQuery.data]);
+  function matchesQueueTankFilter(order: string): boolean {
+    const needle = queueTankFilter.trim().toLowerCase();
+    if (!needle) return true;
+    const set = tankByOrder.get(order);
+    if (!set) return false;
+    for (const code of set) if (code.toLowerCase().includes(needle)) return true;
+    return false;
+  }
 
   const scheduleMutation = useMutation({
     mutationFn: () => {
@@ -1349,24 +1390,33 @@ export default function PremixAftermixPage({
                   </div>
                 )}
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
-                  📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                  📋 List Antrian ({filteredQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).length})
                 </div>
-                <input
-                  placeholder="Cari nomor Order..."
-                  value={queueSearch}
-                  onChange={(e) => setQueueSearch(e.target.value)}
-                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4, marginBottom: 8 }}
-                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <input
+                    placeholder="Cari nomor Order..."
+                    value={queueSearch}
+                    onChange={(e) => setQueueSearch(e.target.value)}
+                    style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+                  />
+                  <input
+                    placeholder="Filter Code Tanki..."
+                    value={queueTankFilter}
+                    onChange={(e) => setQueueTankFilter(e.target.value)}
+                    title="Filter Order yg sudah dibooking ke Code Tanki tertentu -- cek dulu sebelum booking baru, supaya tidak numpuk di tanki yg sama"
+                    style={{ padding: 8, width: "100%", maxWidth: 220, border: "1px solid var(--border)", borderRadius: 4 }}
+                  />
+                </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
-                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
+                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
                   ))}
-                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order)).length === 0 && (
+                  {filteredQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).length === 0 && (
                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Semua antrian sudah dijadwalkan (atau antrian kosong).</span>
                   )}
                 </div>
                 <WeeklyScheduleCalendar
-                  events={pwoScheduleQuery.data ?? []}
+                  events={(pwoScheduleQuery.data ?? []).filter((e) => matchesQueueTankFilter(e.order))}
                   onDelete={(id) => deleteScheduleMutation.mutate(id)}
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}
@@ -1513,24 +1563,33 @@ export default function PremixAftermixPage({
                   </div>
                 )}
                 <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--navy-dark)", marginBottom: 6 }}>
-                  📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length})
+                  📋 List Antrian ({filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).length})
                 </div>
-                <input
-                  placeholder="Cari nomor Order..."
-                  value={queueSearch}
-                  onChange={(e) => setQueueSearch(e.target.value)}
-                  style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4, marginBottom: 8 }}
-                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <input
+                    placeholder="Cari nomor Order..."
+                    value={queueSearch}
+                    onChange={(e) => setQueueSearch(e.target.value)}
+                    style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+                  />
+                  <input
+                    placeholder="Filter Code Tanki..."
+                    value={queueTankFilter}
+                    onChange={(e) => setQueueTankFilter(e.target.value)}
+                    title="Filter Order yg sudah dibooking ke Code Tanki tertentu -- cek dulu sebelum booking baru, supaya tidak numpuk di tanki yg sama"
+                    style={{ padding: 8, width: "100%", maxWidth: 220, border: "1px solid var(--border)", borderRadius: 4 }}
+                  />
+                </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
-                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).map((r) => (
+                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).map((r) => (
                     <DraggableQueueChip key={r.order} row={r} selected={selectedIds.has(buildQueueDragId(r.order))} onToggleSelect={toggleSelect} />
                   ))}
-                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order)).length === 0 && (
+                  {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).length === 0 && (
                     <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Semua antrian sudah dijadwalkan (atau antrian kosong).</span>
                   )}
                 </div>
                 <WeeklyScheduleCalendar
-                  events={pwoScheduleQuery.data ?? []}
+                  events={(pwoScheduleQuery.data ?? []).filter((e) => matchesQueueTankFilter(e.order))}
                   onDelete={(id) => deleteScheduleMutation.mutate(id)}
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}

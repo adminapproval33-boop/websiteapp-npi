@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
 import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
 import { isValidTankCode } from "../../lib/tankCode";
-import { bookingRemark, parseBookingSection, type BookingSection } from "../../lib/tankBooking";
+import { bookingRemark, parseBookingSection, findActiveBookingConflict, type BookingSection } from "../../lib/tankBooking";
 
 export const tankManualInputRouter = Router();
 tankManualInputRouter.use(requireAuth);
@@ -113,26 +113,37 @@ const bookingSchema = z.object({
   plannedStart: z
     .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
     .transform((v) => (v ? v : null)),
+  // Lewati peringatan "tanki sudah dibooking Order lain" (2026-11-10, lihat
+  // komentar di handler POST /booking di bawah) -- user sudah mengkonfirmasi
+  // tetap lanjut booking walau tanki itu lagi dibooking Order lain.
+  force: z.boolean().optional(),
 });
 
-// Daftar entri booking (bukan Input Manual biasa) utk 1 Order -- dipakai pop-up
-// Info Proses utk nampilin Rencana Mulai & pemesan. `inputBy` = NIK; frontend
-// yg mengubahnya jadi "Nama (NIK)" (formatInputBy), sama pola menu History.
+// Daftar entri booking (bukan Input Manual biasa) -- dipakai pop-up Info
+// Proses utk nampilin Rencana Mulai & pemesan 1 Order (`order` diisi), DAN
+// dipakai filter Code Tanki di PWO Schedule & Queue (2026-11-10, instruksi
+// eksplisit user) utk nampilin SEMUA booking aktif 1 section sekaligus
+// (`order` dikosongkan, `section` diisi) -- supaya SPV/Leader bisa cek
+// "tanki ini sudah dipakai Order apa saja" sebelum booking baru, bukan baru
+// ketahuan setelah bentrok. `inputBy` = NIK; frontend yg mengubahnya jadi
+// "Nama (NIK)" (formatInputBy), sama pola menu History.
 tankManualInputRouter.get(
   "/booking",
   asyncRoute(async (req, res) => {
     const order = String(req.query.order ?? "").trim();
-    if (!order) {
-      res.status(400).json({ success: false, message: "Order wajib diisi." });
-      return;
-    }
+    const sectionParam = req.query.section;
+    const section: BookingSection | undefined =
+      sectionParam === "PREMIX" || sectionParam === "AFTERMIX" ? sectionParam : undefined;
+    const remarkOr = section
+      ? [{ remark: { startsWith: bookingRemark(section) } }]
+      : [{ remark: { startsWith: "Booking Premix" } }, { remark: { startsWith: "Booking Aftermix" } }];
     const rows = await prisma.tankManualInput.findMany({
       where: {
-        order,
-        OR: [{ remark: { startsWith: "Booking Premix" } }, { remark: { startsWith: "Booking Aftermix" } }],
+        ...(order ? { order } : {}),
+        OR: remarkOr,
       },
       orderBy: { timestamp: "desc" },
-      select: { id: true, codeTanki: true, remark: true, plannedStart: true, inputBy: true, timestamp: true },
+      select: { id: true, order: true, codeTanki: true, remark: true, plannedStart: true, inputBy: true, timestamp: true },
     });
     // Nama pemesan: akun aplikasi (User) dulu, lalu Data Karyawan; kalau tidak
     // ketemu di keduanya, frontend tampilkan NIK apa adanya.
@@ -158,11 +169,32 @@ tankManualInputRouter.post(
       res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
       return;
     }
-    const { section, note, ...rest } = parsed.data;
+    const { section, note, force, ...rest } = parsed.data;
     if (!(await isValidTankCode(rest.codeTanki))) {
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
+
+    // Peringatan "tanki sudah dibooking Order lain" (2026-11-10, instruksi
+    // eksplisit user -- root cause laporan nyata "status tanki jumping":
+    // tanki 128/IU1 py 4 booking aktif numpuk dari Order berbeda tanpa
+    // peringatan apapun). TIDAK mutlak menolak (booking ganda kadang memang
+    // disengaja, mis. jadwal gantian hari berbeda) -- frontend menampilkan
+    // konfirmasi, lalu submit ulang dgn `force: true` kalau user tetap mau
+    // lanjut (pola sama dgn force-login sesi ganda).
+    if (!force) {
+      const conflict = await findActiveBookingConflict(rest.codeTanki, rest.order);
+      if (conflict) {
+        res.status(409).json({
+          success: false,
+          code: "TANK_ALREADY_BOOKED",
+          message: `Tanki ${rest.codeTanki} masih dibooking aktif oleh Order ${conflict.order}. Lanjutkan booking ini juga?`,
+          conflict: { order: conflict.order, plannedStart: conflict.plannedStart, timestamp: conflict.timestamp },
+        });
+        return;
+      }
+    }
+
     const created = await prisma.tankManualInput.create({
       data: { ...rest, remark: bookingRemark(section, note), inputBy: req.auth!.nik },
     });
@@ -236,6 +268,9 @@ const editBookingSchema = z.object({
     .union([z.literal(""), z.null(), z.undefined(), z.coerce.date()])
     .transform((v) => (v ? v : null))
     .optional(),
+  // Sama pola spt `bookingSchema` POST (2026-11-10) -- lewati peringatan
+  // "tanki sudah dibooking Order lain" kalau user sudah konfirmasi lanjut.
+  force: z.boolean().optional(),
 });
 
 /** Edit booking tanki YANG SUDAH ADA, dipicu double-click kartu Kalender PWO
@@ -270,6 +305,25 @@ tankManualInputRouter.put(
       res.status(400).json({ success: false, message: "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar." });
       return;
     }
+
+    // Peringatan "tanki sudah dibooking Order lain" (2026-11-10) -- cuma
+    // relevan kalau codeTanki BENERAN berubah (pindah tanki), bukan sekadar
+    // edit Catatan/Rencana Mulai di tanki yg sama. `excludeOrder` = Order
+    // booking INI SENDIRI, supaya tidak salah menganggap booking ini
+    // sendiri sbg "konflik". Lihat komentar lengkap di POST /booking di atas.
+    if (!parsed.data.force && parsed.data.codeTanki !== existing.codeTanki) {
+      const conflict = await findActiveBookingConflict(parsed.data.codeTanki, existing.order);
+      if (conflict) {
+        res.status(409).json({
+          success: false,
+          code: "TANK_ALREADY_BOOKED",
+          message: `Tanki ${parsed.data.codeTanki} masih dibooking aktif oleh Order ${conflict.order}. Lanjutkan juga?`,
+          conflict: { order: conflict.order, plannedStart: conflict.plannedStart, timestamp: conflict.timestamp },
+        });
+        return;
+      }
+    }
+
     const updated = await prisma.tankManualInput.update({
       where: { id: req.params.id },
       data: {

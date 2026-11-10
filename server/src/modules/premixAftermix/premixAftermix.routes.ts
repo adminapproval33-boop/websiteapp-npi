@@ -687,15 +687,49 @@ const scheduleSchema = z.object({
   scheduledDate: z.coerce.date(),
 });
 
+/** Order yg SUDAH py input proses ASLI (bukan cuma Booking/jadwal) di
+ * `section` ybs -- dedupe ke baris PALING BARU per Order lalu cek Start-nya
+ * (SAMA PERSIS definisi `startedAftermixOrderSet` di /aftermix-pwo-queue &
+ * syarat #3 /premix-pwo-queue di atas, JANGAN diubah salah satu tanpa yg
+ * lain), dicek TANPA peduli Code Tanki-nya sama atau beda dgn yg
+ * direncanakan di Booking (2026-11-10, instruksi eksplisit user -- laporan
+ * nyata: Order direncanakan di Tanki 01, ternyata running di Tanki 02,
+ * kartu Kalender-nya tetap "nyangkut" selamanya krn sebelumnya tidak ada
+ * yg mengecek status proses asli Order-nya sama sekali, cuma soal sudah
+ * dibooking/dijadwalkan atau belum). Dipakai `GET /pwo-schedule` (sembunyikan
+ * kartu yg Order-nya sudah diproses) & `cleanupCompletedSchedules` (hapus
+ * permanen baris PwoSchedule yg sudah tidak relevan lagi). */
+async function getOrdersWithRealInput(section: "PREMIX" | "AFTERMIX", orders: string[]): Promise<Set<string>> {
+  if (orders.length === 0) return new Set();
+  const logs = await prisma.premixAftermixLog.findMany({
+    where: { section, order: { in: orders } },
+    orderBy: { timestamp: "desc" },
+    select: { order: true, start: true },
+  });
+  const latestStartedByOrder = new Map<string, boolean>();
+  for (const r of logs) {
+    if (!latestStartedByOrder.has(r.order)) latestStartedByOrder.set(r.order, r.start != null);
+  }
+  return new Set(Array.from(latestStartedByOrder.entries()).filter(([, started]) => started).map(([order]) => order));
+}
+
 premixAftermixRouter.get(
   "/pwo-schedule",
   asyncRoute(async (req: AuthedRequest, res) => {
     const section = req.query.section === "AFTERMIX" ? "AFTERMIX" : "PREMIX";
     if (!checkSectionMenuView(req, res, section)) return;
-    const rows = await prisma.pwoSchedule.findMany({
+    const allRows = await prisma.pwoSchedule.findMany({
       where: { section },
       orderBy: [{ scheduledDate: "asc" }, { sequence: "asc" }],
     });
+
+    // Sembunyikan kartu Order yg SUDAH diproses beneran (real input, Code
+    // Tanki apapun) -- lihat komentar `getOrdersWithRealInput` di atas.
+    // Live/langsung (dihitung tiap request, BUKAN nunggu job berkala) --
+    // begitu Start tersimpan, kartu langsung hilang dari Kalender saat itu
+    // juga, tidak perlu refresh berkali-kali atau nunggu beberapa menit.
+    const startedOrders = await getOrdersWithRealInput(section, Array.from(new Set(allRows.map((r) => r.order))));
+    const rows = allRows.filter((r) => !startedOrders.has(r.order));
 
     // "Today-ATP" (2026-08-05, instruksi eksplisit user) -- live lookup ke
     // Master Data Referensi Order/PO (SAP-COOISPI), BUKAN disimpan di
@@ -731,6 +765,31 @@ premixAftermixRouter.get(
     });
   })
 );
+
+/** Hapus permanen baris PwoSchedule yg Order-nya SUDAH diproses beneran
+ * (2026-11-10, instruksi eksplisit user) -- housekeeping, SAMA pola dgn
+ * `cleanupReleasedBookings` di lib/tankBooking.ts: `GET /pwo-schedule` di
+ * atas SUDAH menyembunyikannya scr live/langsung (tidak perlu nunggu ini),
+ * fungsi INI cuma membersihkan baris fisiknya dari database supaya tidak
+ * numpuk selamanya. Dipanggil berkala oleh bookingCleanupScheduler.ts. */
+export async function cleanupCompletedSchedules(): Promise<number> {
+  const allRows = await prisma.pwoSchedule.findMany({ select: { id: true, order: true, section: true } });
+  if (allRows.length === 0) return 0;
+  const bySection = new Map<"PREMIX" | "AFTERMIX", typeof allRows>();
+  for (const r of allRows) {
+    const list = bySection.get(r.section);
+    if (list) list.push(r);
+    else bySection.set(r.section, [r]);
+  }
+  const toDelete: string[] = [];
+  for (const [section, rows] of bySection) {
+    const started = await getOrdersWithRealInput(section, Array.from(new Set(rows.map((r) => r.order))));
+    for (const r of rows) if (started.has(r.order)) toDelete.push(r.id);
+  }
+  if (toDelete.length === 0) return 0;
+  await prisma.pwoSchedule.deleteMany({ where: { id: { in: toDelete } } });
+  return toDelete.length;
+}
 
 /// Drag Order dari strip Queue -> hari di Kalender (baru ATAU pindah hari,
 /// 2026-08-05) -- upsert by order+section (jadwal ulang Order yg sama

@@ -3374,6 +3374,165 @@ dashboardRouter.get(
   })
 );
 
+interface RftTrendBucket {
+  bucketKey: string;
+  bucketStart: Date;
+  total: number;
+  direct: number;
+  notDirect: number;
+}
+
+interface RftSection {
+  total: number;
+  direct: number;
+  notDirect: number;
+  buckets: RftTrendBucket[];
+}
+
+function buildRftBuckets(items: { date: Date; direct: boolean }[], granularity: TrendGranularity): RftSection {
+  const buckets = new Map<string, RftTrendBucket>();
+  let total = 0;
+  let direct = 0;
+  for (const it of items) {
+    const key = trendBucketKey(it.date, granularity);
+    let b = buckets.get(key);
+    if (!b) {
+      b = { bucketKey: key, bucketStart: wibDayStartInstant(key)!, total: 0, direct: 0, notDirect: 0 };
+      buckets.set(key, b);
+    }
+    b.total += 1;
+    total += 1;
+    if (it.direct) {
+      b.direct += 1;
+      direct += 1;
+    } else {
+      b.notDirect += 1;
+    }
+  }
+  return {
+    total,
+    direct,
+    notDirect: total - direct,
+    buckets: Array.from(buckets.values()).sort((a, b) => a.bucketKey.localeCompare(b.bucketKey)),
+  };
+}
+
+/**
+ * Tab "RFT Quality Check" & "RFT Approval" di Dashboard Produktivitas
+ * (2026-11-11, instruksi eksplisit user). Definisi yg DISETUJUI user:
+ *
+ * - RFT QC: Order "OK (QC Passed)" -- baris AdminQc TERBARU per Order py
+ *   `qcPassed` terisi, SAMA PERSIS definisi /quality-check-review & ok-trend
+ *   di atas -- dianggap "Direct Passed" kalau TIDAK ADA SATU PUN parameter di
+ *   SELURUH histori Check Results Order itu yg verdict-nya NG (evaluateSpec
+ *   dgn nama Item Check ikut dikirim, supaya aturan HARDNESS kena) -- SAMA
+ *   PERSIS `ngOrderSet` di QualityCheckReviewPage.tsx (kartu "Direct Passed"/
+ *   "Not Direct Passed" Dashboard Quality), supaya 2 dashboard tidak pernah
+ *   beda angka. Bucket by tanggal `qcPassed`.
+ * - RFT Approval: Order "Oke Approval" -- baris ApprovalSchedule TERBARU per
+ *   Order py `finishApp` terisi -- dianggap lolos sekali jadi kalau TIDAK
+ *   PERNAH ditandai Improve: flag `needsImprove` false DAN Remark-nya tidak
+ *   mengandung baris "Trial N (NG)" (jejak permanen tombol Improve, lihat
+ *   ApprovalPage.tsx `appendRemarkLine` -- flag-nya sendiri dimatikan lagi
+ *   begitu selesai Improve, jadi Remark yg jadi bukti riwayatnya). Bucket by
+ *   tanggal `finishApp`.
+ *
+ * Rentang tanggal & granularitas SAMA dgn /produktivitas-trend
+ * (resolveProduktivitasRange).
+ */
+async function buildRftData(range: { gte?: Date; lte?: Date }, granularity: TrendGranularity): Promise<{ qc: RftSection; approval: RftSection }> {
+  const inRange = (d: Date) => !(range.gte && d < range.gte) && !(range.lte && d > range.lte);
+
+  const [adminQcRows, approvalRows] = await Promise.all([
+    prisma.adminQc.findMany({
+      select: { order: true, qcPassed: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
+    }),
+    prisma.approvalSchedule.findMany({
+      select: { order: true, finishApp: true, needsImprove: true, remark: true, timestamp: true },
+      orderBy: { timestamp: "desc" },
+    }),
+  ]);
+
+  // ---- QC ----
+  const latestAdminQcByOrder = new Map<string, (typeof adminQcRows)[number]>();
+  for (const r of adminQcRows) {
+    if (!latestAdminQcByOrder.has(r.order)) latestAdminQcByOrder.set(r.order, r);
+  }
+  const okOrdersRaw = Array.from(latestAdminQcByOrder.values()).filter(
+    (r): r is typeof r & { qcPassed: Date } => r.qcPassed != null && inRange(r.qcPassed)
+  );
+
+  // ---- Approval (kandidat) ----
+  const latestApprovalByOrder = new Map<string, (typeof approvalRows)[number]>();
+  for (const r of approvalRows) {
+    if (!latestApprovalByOrder.has(r.order)) latestApprovalByOrder.set(r.order, r);
+  }
+  const okeOrdersRaw = Array.from(latestApprovalByOrder.values()).filter(
+    (r): r is typeof r & { finishApp: Date } => r.finishApp != null && inRange(r.finishApp)
+  );
+
+  // Order Teco (%GR "9999%" di Master Data Cooispi = ditutup teknis/dibatalkan
+  // di SAP) DIKELUARKAN dari kedua hitungan -- SAMA PERSIS /quality-check-review
+  // (2026-10-12, instruksi eksplisit user: Teco tidak ditampilkan di dashboard
+  // Quality) -- kalau tidak, kartu RFT QC di sini bisa beda 1-2 Order dari
+  // kartu RFT Dashboard Quality (ketahuan saat verifikasi 2026-11-11: 352 vs 351).
+  const candidateOrders = Array.from(new Set([...okOrdersRaw.map((o) => o.order), ...okeOrdersRaw.map((o) => o.order)]));
+  const masterRows = candidateOrders.length
+    ? await prisma.masterOrder.findMany({ where: { order: { in: candidateOrders } }, select: { order: true, pctGR: true } })
+    : [];
+  const tecoOrders = new Set(
+    masterRows.filter((m) => {
+      const v = parsePctGR(m.pctGR);
+      return v !== null && v >= 9999;
+    }).map((m) => m.order)
+  );
+  const okOrders = okOrdersRaw.filter((o) => !tecoOrders.has(o.order));
+  const okeOrders = okeOrdersRaw.filter((o) => !tecoOrders.has(o.order));
+  const okOrderNumbers = okOrders.map((o) => o.order);
+  const checkRows = okOrderNumbers.length
+    ? await prisma.checkResult.findMany({
+        where: { order: { in: okOrderNumbers } },
+        select: { order: true, parameters: { select: { parameter: true, standard: true, result: true } } },
+      })
+    : [];
+  const ngOrderSet = new Set<string>();
+  for (const cr of checkRows) {
+    for (const p of cr.parameters) {
+      if (evaluateSpec(p.standard, p.result, p.parameter) === "fail") {
+        ngOrderSet.add(cr.order);
+        break;
+      }
+    }
+  }
+  const qc = buildRftBuckets(
+    okOrders.map((o) => ({ date: o.qcPassed, direct: !ngOrderSet.has(o.order) })),
+    granularity
+  );
+
+  // ---- Approval ----
+  const IMPROVE_TRAIL = /trial\s*\d+\s*\(\s*ng\s*\)/i;
+  const approval = buildRftBuckets(
+    okeOrders.map((o) => ({ date: o.finishApp, direct: !o.needsImprove && !IMPROVE_TRAIL.test(o.remark ?? "") })),
+    granularity
+  );
+
+  return { qc, approval };
+}
+
+dashboardRouter.get(
+  "/produktivitas-rft",
+  asyncRoute(async (req, res) => {
+    const { period, from, to, finishRange } = resolveProduktivitasRange(req);
+    const rawGranularity = String(req.query.granularity ?? "day");
+    const granularity: TrendGranularity = (["day", "week", "month"] as const).includes(rawGranularity as TrendGranularity)
+      ? (rawGranularity as TrendGranularity)
+      : "day";
+    const data = await buildRftData(finishRange, granularity);
+    res.json({ success: true, data: { period, from, to, granularity, ...data } });
+  })
+);
+
 // ---------------------------------------------------------------------------
 // Dashboard > Colour Matching: 2 tab (2026-09-11, instruksi eksplisit user) --
 // "Dashboard Colour Matching" = agregasi per-member (Total Output/Jumlah

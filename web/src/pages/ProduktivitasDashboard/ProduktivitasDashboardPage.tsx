@@ -191,7 +191,124 @@ function OccupancyBar({ percent }: { percent: number }) {
  * Monitoring (GET /dashboard/produktivitas gabungkan keduanya jadi 1
  * response supaya konsisten).
  */
-type DashboardTab = "ringkasan" | "tren";
+/** Tab "RFT Quality Check" & "RFT Approval" (2026-11-11, instruksi eksplisit
+ * user) -- 2 panel tambahan di halaman yg sama, ikut filter Harian/Mingguan/
+ * Bulanan + Dari/Sampai Tanggal yg sudah ada. Definisi (disetujui user):
+ * RFT QC = Order OK (QC Passed) yg SEMUA histori Check Results-nya Pass sejak
+ * awal (SAMA PERSIS "Direct Passed" di Dashboard Quality, lihat
+ * /dashboard/produktivitas-rft di backend -- 1 sumber kebenaran); RFT
+ * Approval = Order Oke Approval (Finish App terisi) yg TIDAK PERNAH ditandai
+ * Improve ("Trial N (NG)" di Remark / flag needsImprove). */
+type DashboardTab = "ringkasan" | "tren" | "rftQc" | "rftApproval";
+
+interface RftBucket {
+  bucketKey: string;
+  total: number;
+  direct: number;
+  notDirect: number;
+}
+
+interface RftSection {
+  total: number;
+  direct: number;
+  notDirect: number;
+  buckets: RftBucket[];
+}
+
+interface RftData {
+  granularity: Granularity;
+  qc: RftSection;
+  approval: RftSection;
+}
+
+const RFT_SERIES_QC: TrendSeries[] = [
+  { key: "direct", label: "Direct Passed", color: "#1baf7a" },
+  { key: "notDirect", label: "Not Direct Passed", color: "#eb6834" },
+];
+const RFT_SERIES_APPROVAL: TrendSeries[] = [
+  { key: "direct", label: "Oke Approval tanpa Improve", color: "#1baf7a" },
+  { key: "notDirect", label: "Pernah Improve", color: "#eb6834" },
+];
+const RFT_RATE_SERIES: TrendSeries[] = [{ key: "rate", label: "RFT Rate (%)", color: "#2a78d6" }];
+
+/** Satu panel RFT (dipakai 2x: QC & Approval) -- kartu KPI + 2 grafik tren
+ * (jumlah Order RFT vs tidak, dan RFT Rate %) per bucket periode. */
+function RftPanel({
+  title,
+  description,
+  section,
+  series,
+  granularity,
+  showTable,
+  dayScope,
+}: {
+  title: string;
+  description: string;
+  section: RftSection | undefined;
+  series: TrendSeries[];
+  granularity: Granularity;
+  showTable: boolean;
+  dayScope: "workdays" | "all";
+}) {
+  const buckets = useMemo(() => {
+    const raw = section?.buckets ?? [];
+    return granularity === "day" && dayScope === "workdays" ? raw.filter((b) => !isWeekendKey(b.bucketKey)) : raw;
+  }, [section, granularity, dayScope]);
+  const countPoints: TrendChartPoint[] = useMemo(
+    () =>
+      buckets.map((b) => ({
+        bucketKey: b.bucketKey,
+        label: formatBucketLabel(b.bucketKey, granularity),
+        values: { direct: b.direct, notDirect: b.notDirect },
+      })),
+    [buckets, granularity]
+  );
+  const ratePoints: TrendChartPoint[] = useMemo(
+    () =>
+      buckets.map((b) => ({
+        bucketKey: b.bucketKey,
+        label: formatBucketLabel(b.bucketKey, granularity),
+        values: { rate: b.total > 0 ? Math.round((b.direct / b.total) * 1000) / 10 : 0 },
+      })),
+    [buckets, granularity]
+  );
+  const total = section?.total ?? 0;
+  const direct = section?.direct ?? 0;
+  const notDirect = section?.notDirect ?? 0;
+  const rate = total > 0 ? Math.round((direct / total) * 1000) / 10 : 0;
+  const perLabel = GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase();
+
+  return (
+    <>
+      <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.78rem" }}>{description}</p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+        <KpiCard label="Total Selesai" value={total} color="var(--navy-light)" />
+        <KpiCard label={series[0].label} value={direct} color={series[0].color} />
+        <KpiCard label={series[1].label} value={notDirect} color={series[1].color} />
+        <KpiCard label="RFT Rate" value={`${rate.toFixed(1)}%`} color="#9b59b6" />
+      </div>
+      <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} -- Jumlah Order per {perLabel}</div>
+        <TrendLineChart points={countPoints} series={series} yAxisLabel="Jumlah Order" granularity={granularity} showTable={showTable} />
+      </div>
+      <div className="panel" style={{ padding: 16, marginBottom: 8 }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} -- RFT Rate per {perLabel}</div>
+        <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+          RFT Rate = {series[0].label} / Total Selesai x 100%. Garis putus-putus = rata-rata pada rentang ini.
+        </p>
+        <TrendLineChart
+          points={ratePoints}
+          series={RFT_RATE_SERIES}
+          yAxisLabel="%"
+          valueFormatter={(n) => `${n.toLocaleString("id-ID")}%`}
+          granularity={granularity}
+          showAverage
+          showTable={showTable}
+        />
+      </div>
+    </>
+  );
+}
 
 export default function ProduktivitasDashboardPage() {
   // Tab terpisah utk grafik tren (2026-08-21, instruksi eksplisit user) --
@@ -281,6 +398,19 @@ export default function ProduktivitasDashboardPage() {
       params.set("granularity", granularity);
       return api.get<{ success: boolean; data: TrendData }>(`/dashboard/produktivitas-trend?${params.toString()}`).then((r) => r.data);
     },
+  });
+
+  // RFT QC & Approval (2026-11-11, instruksi eksplisit user) -- 1 request
+  // utk kedua tab (sumber data beda tapi parameter rentang/granularitas
+  // sama), cuma di-fetch pas salah satu tab RFT dibuka.
+  const rftQuery = useQuery({
+    queryKey: ["dashboard-produktivitas-rft", period, customFrom, customTo, granularity],
+    queryFn: () => {
+      const params = buildRangeParams();
+      params.set("granularity", granularity);
+      return api.get<{ success: boolean; data: RftData }>(`/dashboard/produktivitas-rft?${params.toString()}`).then((r) => r.data);
+    },
+    enabled: dashboardTab === "rftQc" || dashboardTab === "rftApproval",
   });
 
   // "Hari Kerja Saja" cuma bisa diterapkan per-bucket kalau granularitasnya
@@ -381,6 +511,16 @@ export default function ProduktivitasDashboardPage() {
           <button type="button" className={`btn ${dashboardTab === "tren" ? "" : "btn-outline"}`} onClick={() => setDashboardTab("tren")}>
             Tren Produktivitas
           </button>
+          <button type="button" className={`btn ${dashboardTab === "rftQc" ? "" : "btn-outline"}`} onClick={() => setDashboardTab("rftQc")}>
+            RFT Quality Check
+          </button>
+          <button
+            type="button"
+            className={`btn ${dashboardTab === "rftApproval" ? "" : "btn-outline"}`}
+            onClick={() => setDashboardTab("rftApproval")}
+          >
+            RFT Approval
+          </button>
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
@@ -410,7 +550,7 @@ export default function ProduktivitasDashboardPage() {
               )}
             </div>
           )}
-          {dashboardTab === "tren" && (
+          {dashboardTab !== "ringkasan" && (
             <div style={{ position: "relative" }}>
               <button
                 type="button"
@@ -437,7 +577,7 @@ export default function ProduktivitasDashboardPage() {
               )}
             </div>
           )}
-          {dashboardTab === "tren" && (
+          {dashboardTab !== "ringkasan" && (
             <button type="button" className="btn btn-outline" onClick={() => setShowTrendTable((s) => !s)}>
               {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
             </button>
@@ -669,6 +809,38 @@ export default function ProduktivitasDashboardPage() {
           />
         </div>
         </>
+        )}
+
+        {dashboardTab === "rftQc" && (
+          <RftPanel
+            title="RFT Quality Check"
+            description={
+              "Order OK (QC Passed) yang SEMUA hasil Check Results-nya Pass sejak percobaan pertama = Direct Passed; " +
+              "pernah ada hasil Fail di percobaan sebelumnya = Not Direct Passed. Definisi & angkanya sama persis dengan " +
+              "kartu RFT di Dashboard Quality. Dikelompokkan per tanggal QC Passed."
+            }
+            section={rftQuery.data?.qc}
+            series={RFT_SERIES_QC}
+            granularity={granularity}
+            showTable={showTrendTable}
+            dayScope={effectiveDayScope}
+          />
+        )}
+
+        {dashboardTab === "rftApproval" && (
+          <RftPanel
+            title="RFT Approval"
+            description={
+              "Order Oke Approval (Finish App terisi) yang TIDAK PERNAH ditandai Improve selama proses Approval = " +
+              "lolos sekali jadi; yang pernah ditandai Improve (\"Trial N (NG)\" di Remark) = Pernah Improve. " +
+              "Dikelompokkan per tanggal Finish App."
+            }
+            section={rftQuery.data?.approval}
+            series={RFT_SERIES_APPROVAL}
+            granularity={granularity}
+            showTable={showTrendTable}
+            dayScope={effectiveDayScope}
+          />
         )}
 
         {detailBucket && (

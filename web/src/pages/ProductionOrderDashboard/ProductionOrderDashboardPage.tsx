@@ -54,6 +54,10 @@ interface ProductionOrderRow {
    * eksplisit user (2026-07-28): kolom "Proses" cuma boleh diisi
    * Premix/Milling/Aftermix/Colour Matching/QC/Approval. */
   productionActions: string | null;
+  /** Tanggal mulai tahap PALING AWAL yg pernah disentuh Order ini (2026-11-11,
+   * instruksi eksplisit user) -- dasar filter rentang tanggal "Dari"/"Sampai"
+   * di bawah. Null = Order belum pernah disentuh tahap manapun. */
+  earliestTouch: string | null;
 }
 
 interface QcParamDetail {
@@ -362,6 +366,16 @@ function MillingDetailTable({ detail }: { detail: MillingDetail }) {
 
 export default function ProductionOrderDashboardPage() {
   const [search, setSearch] = useState("");
+  // Filter rentang tanggal "Dari"/"Sampai" (2026-11-11, instruksi eksplisit
+  // user: "supaya saat nanti datanya sudah banyak, user bisa memfilter data
+  // dari tanggal berapa yang mau dilihat sampai tanggal berapa") --
+  // berdasarkan tanggal mulai tahap PALING AWAL yg disentuh Order (field
+  // `earliestTouch`, SAMA sumbernya dgn backend `earliestTouchByOrder`),
+  // BUKAN kolom "Start" yg ada di tabel (itu tahap TERAKHIR, berubah2 seiring
+  // Order maju tahap). Dikirim ke backend (bukan filter client-side) supaya
+  // tetap ringan begitu datanya sudah banyak, sama pola dgn `search`.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   // Dropdown tombol "PWO Schedule & Queue" (2026-11-03, instruksi eksplisit
   // user) -- SENGAJA dropdown, bukan 1 klik buka 2 tab sekaligus: browser
   // (Firefox, kadang Chrome tergantung setting) membatasi window.open() JS
@@ -433,10 +447,12 @@ export default function ProductionOrderDashboardPage() {
   const queryClient = useQueryClient();
 
   const rowsQuery = useQuery({
-    queryKey: ["dashboard-production-orders", search],
+    queryKey: ["dashboard-production-orders", search, dateFrom, dateTo],
     queryFn: () =>
       api
-        .get<{ success: boolean; data: ProductionOrderRow[] }>(`/dashboard/production-orders?search=${encodeURIComponent(search)}`)
+        .get<{ success: boolean; data: ProductionOrderRow[] }>(
+          `/dashboard/production-orders?search=${encodeURIComponent(search)}&dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`
+        )
         .then((r) => r.data),
   });
 
@@ -500,12 +516,45 @@ export default function ProductionOrderDashboardPage() {
           riwayat Material Number ini (dari Order lain) tapi belum diinput utk Order ini. Arahkan kursor ke label
           utk lihat nama lengkapnya.
         </p>
-        <input
-          placeholder="Cari nomor Order..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ marginBottom: 12, padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
-        />
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
+          <input
+            placeholder="Cari nomor Order..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
+          />
+          {/* Filter rentang tanggal (2026-11-11, instruksi eksplisit user) --
+              berdasarkan tanggal mulai tahap PALING AWAL yg disentuh Order
+              (`earliestTouch`), lihat komentar lengkap di state `dateFrom`
+              di atas. */}
+          <div className="field" style={{ gap: 4 }}>
+            <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Dari Tanggal</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: 7 }} />
+          </div>
+          <div className="field" style={{ gap: 4 }}>
+            <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Sampai Tanggal</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: 7 }} />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+            >
+              ✕ Reset Tanggal
+            </button>
+          )}
+        </div>
+        {(dateFrom || dateTo) && (
+          <p style={{ marginTop: -6, marginBottom: 12, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            Filter berdasarkan tanggal mulai tahap <strong>paling awal</strong> yang disentuh tiap Order (bukan kolom
+            "Start" di tabel, yang menunjukkan tahap paling terakhir). Order yang belum pernah disentuh tahap apa
+            pun (masih di antrian) tidak ikut tampil selama filter ini aktif.
+          </p>
+        )}
         <DataTable
           rowKey={(r: ProductionOrderRow) => `${r.order}-${r.process}-${r.start}`}
           exportFileName="dashboard-production-orders"
@@ -660,6 +709,16 @@ export default function ProductionOrderDashboardPage() {
               label: "Production Actions",
               render: (r) => (r.productionActions ? <ProcessBadge process={r.productionActions} /> : "-"),
               csvValue: (r) => r.productionActions ?? "-",
+            },
+            {
+              key: "earliestTouch",
+              label: "Mulai Tahap Pertama",
+              render: (r) => (
+                <span title="Tanggal mulai tahap PALING AWAL yang disentuh Order ini -- dasar filter rentang tanggal Dari/Sampai di atas (beda dari kolom Start, yang tahap paling TERAKHIR)">
+                  {r.earliestTouch ? formatDateTime(r.earliestTouch) : "-"}
+                </span>
+              ),
+              csvValue: (r) => toExcelDateTimeString(r.earliestTouch),
             },
             {
               key: "start",

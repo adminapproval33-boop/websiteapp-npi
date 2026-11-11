@@ -56,6 +56,16 @@ export interface ProductionOrderRow {
    * yg berarti, bukan 0. Null = hitung seperti biasa sampai sekarang (kasus
    * normal, Order masih proses beneran). */
   longTimeProsesUntil: Date | null;
+  /** Tanggal mulai tahap PALING AWAL yg pernah disentuh utk Order ini, lintas
+   * SEMUA tahap (Premix/Milling/Aftermix/Colour Matching/QC/Approval/Packing)
+   * -- SAMA PERSIS `earliestTouchByOrder` yg sudah dipakai `longTimeProsesSince`
+   * di atas (khusus Order Teco), TAPI field INI terisi utk SEMUA Order (bukan
+   * cuma Teco), null kalau Order belum pernah disentuh tahap manapun (masih
+   * di antrian "QU - ..."). Dipakai filter rentang tanggal di frontend
+   * (2026-11-11, instruksi eksplisit user: "tanggal mulai tahap paling awal
+   * yang disentuh" -- supaya daftar Order bisa disaring per periode begitu
+   * datanya sudah banyak). */
+  earliestTouch: Date | null;
   stages: { name: string; done: boolean }[];
   progressPercent: number;
   /** Label Proses Packing utk Order ini, TERPISAH dari kolom "Proses" --
@@ -469,7 +479,7 @@ function approvalStatusLabel(r: ApprovalStatusFields): string {
  * agregasi Stage/Lead Time Proses di bawah. `search` default "" = seluruh
  * Order (dipakai scheduler); route sendiri tetap meneruskan
  * `req.query.search` spt semula. */
-export async function getProductionOrderRows(search = ""): Promise<ProductionOrderRow[]> {
+export async function getProductionOrderRows(search = "", dateFrom?: Date, dateTo?: Date): Promise<ProductionOrderRow[]> {
 
     // Query TIDAK difilter `search` di sini lagi -- histori LINTAS ORDER (utk
     // Set per Material Number di bawah) harus tetap lengkap walau user lagi
@@ -1049,6 +1059,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       | "longTimeProsesSince"
       | "longTimeProsesUntil"
       | "tankType"
+      | "earliestTouch"
     >[] = [
       ...premixAftermix.map((r) => ({
         order: r.order,
@@ -1324,7 +1335,25 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
     // Order yg DITAMPILKAN saja -- data lintas Order lainnya (Set per Material
     // Number di atas) tetap dihitung dari histori LENGKAP tanpa filter ini.
     const searchLower = search.toLowerCase();
-    const filteredDeduped = search ? deduped.filter((r) => r.order.toLowerCase().includes(searchLower)) : deduped;
+    const searchFiltered = search ? deduped.filter((r) => r.order.toLowerCase().includes(searchLower)) : deduped;
+    // Filter rentang tanggal (2026-11-11, instruksi eksplisit user: "supaya
+    // saat nanti datanya sudah banyak, user bisa memfilter data dari tanggal
+    // berapa sampai tanggal berapa") -- berdasarkan `earliestTouchByOrder`
+    // (tanggal mulai tahap PALING AWAL yg pernah disentuh Order ini, SAMA
+    // field yg diexpose ke frontend sbg `earliestTouch`). Order yg BELUM
+    // PERNAH disentuh tahap manapun (masih di antrian "QU - ...", tidak py
+    // earliestTouch) ikut DIKELUARKAN begitu filter ini aktif -- tidak py
+    // tanggal utk dicocokkan ke rentang yg diminta.
+    const filteredDeduped =
+      dateFrom || dateTo
+        ? searchFiltered.filter((r) => {
+            const touch = earliestTouchByOrder.get(r.order);
+            if (!touch) return false;
+            if (dateFrom && touch.getTime() < dateFrom.getTime()) return false;
+            if (dateTo && touch.getTime() > dateTo.getTime()) return false;
+            return true;
+          })
+        : searchFiltered;
     // %GR "9999%" di Master Data Cooispi = kode sentinel SAP (order status
     // TECO -- Technically Complete -- BUKAN persentase asli) buat Order yg
     // administrasinya ditutup tanpa pernah benar2 diproduksi. Aturan
@@ -1353,13 +1382,20 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
       const master = masterByOrder.get(r.order);
       const stages = computeStages(r.order, master?.materialNumber ?? null);
       const progressPercent = stages.length === 0 ? 0 : Math.round((stages.filter((s) => s.done).length / stages.length) * 100);
-      // Begitu Order ybs SUDAH py baris nyata di History Packing, kolom Start
-      // Proses/Finish Proses/Remark ambil dari SANA (bukan lagi dari
-      // Premix/Milling/Aftermix/Colour Matching/Approval spt biasanya) --
+      // Begitu Order ybs SUDAH py baris nyata di History Packing, kolom
+      // Proses/Start Proses/Finish Proses/Remark ambil dari SANA (bukan lagi
+      // dari Premix/Milling/Aftermix/Colour Matching/Approval spt biasanya) --
       // sesuai instruksi eksplisit user (2026-07-29). Kalau Order cuma
       // "QU - Packing" (baru di antrian, belum py baris PackingLog beneran)
       // TIDAK ada override -- History Packing-nya sendiri memang belum ada
-      // apa-apa, jadi 3 kolom itu tetap ikut logika lama.
+      // apa-apa, jadi 4 kolom itu tetap ikut logika lama. Kolom "Proses"
+      // SEBELUMNYA (2026-11-11, instruksi eksplisit user) TIDAK ikut
+      // override ini -- cuma Start/Finish/Remark yg diganti ke data Packing,
+      // "Proses" tetap nampilkan label tahap SEBELUM Packing (mis. "Approval")
+      // -- 1 baris jadi campur 2 sumber beda (Proses dari 1 tahap, Remark dari
+      // tahap lain) walau TIDAK PERNAH ketahuan di praktik (tanki/Order ini
+      // nyaris selalu sudah lepas dari Tank Monitoring duluan sebelum Packing
+      // sempat diisi Remark). Sekarang disamakan: "Proses" ikut override jg.
       const packingRow = latestPackingRow.get(r.order);
       const codeTanki = manualTankOverrideByOrder.get(r.order) ?? (packingRow ? packingRow.codeTanki : r.codeTanki) ?? fallbackTankFor(r.order);
       // Prioritas: %GR=9999% (sentinel TECO, Order ini SUDAH pernah lolos
@@ -1379,6 +1415,7 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         batch: master?.batch ?? null,
         pctGR: master?.pctGR ?? null,
         orderType: master?.orderType ?? null,
+        process: packingRow ? (packingRow.finish ? "Packing - DN" : "Packing") : r.process,
         start: packingRow ? packingRow.start : r.start,
         finish: packingRow ? packingRow.finish : r.finish,
         remark: packingRow ? packingRow.remark : r.remark,
@@ -1402,17 +1439,36 @@ export async function getProductionOrderRows(search = ""): Promise<ProductionOrd
         longTimeProsesSince: productionActions === "Teco" ? earliestTouchByOrder.get(r.order) ?? null : null,
         longTimeProsesUntil:
           productionActions === "Teco" ? r.timestamp : productionActions === "Done" ? parseSapDate(master?.actEndDate) : null,
+        earliestTouch: earliestTouchByOrder.get(r.order) ?? null,
       };
     });
 
     return result;
 }
 
+/** `dateFrom`/`dateTo` (2026-11-11, instruksi eksplisit user) -- string
+ * tanggal "YYYY-MM-DD" dari input date HTML biasa, di-parse apa adanya (jam
+ * lokal server, SAMA pola dgn tanggal lain di app ini yg dikunci Asia/Jakarta
+ * -- lihat timezone.ts) tanpa perlu konversi timezone eksplisit di sini.
+ * `dateTo` digeser ke akhir hari (23:59:59.999) supaya Order yg disentuh
+ * KAPAN SAJA di tanggal itu ikut ketangkep, bukan cuma pas tengah malam. */
+function parseDateQueryParam(raw: unknown, endOfDay = false): Date | undefined {
+  const str = String(raw ?? "").trim();
+  if (!str) return undefined;
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) return undefined;
+  if (endOfDay) d.setHours(23, 59, 59, 999);
+  else d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 dashboardRouter.get(
   "/production-orders",
   asyncRoute(async (req, res) => {
     const search = String(req.query.search ?? "").trim();
-    const result = await getProductionOrderRows(search);
+    const dateFrom = parseDateQueryParam(req.query.dateFrom);
+    const dateTo = parseDateQueryParam(req.query.dateTo, true);
+    const result = await getProductionOrderRows(search, dateFrom, dateTo);
     res.json({ success: true, data: result });
   })
 );

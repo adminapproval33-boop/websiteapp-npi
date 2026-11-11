@@ -917,7 +917,7 @@ export default function MasterDataPage() {
         <>
           <ImportCard
             title="Master Part Yamaha"
-            description='File wajib punya kolom header "CODE SAP" (boleh juga Material Number -- dicocokkan ke Material Number di Referensi Order/PO), "Item No." (boleh "Item No"), dan "Item Name". Dipakai menu "QR Code Yamaha" untuk mencari nomor part versi Yamaha dari Material Number Order.'
+            description='File wajib punya kolom Material Number -- nama header-nya cukup MENGANDUNG "CODE SAP" atau "Material Number" (contoh: "CODE SAP", "Material Number (Code SAP)"), dicocokkan ke Material Number di Referensi Order/PO. Kolom "Item No." dan "Item Name" opsional. Dipakai menu Label Entry FG untuk mencari Item No. Yamaha & membuat QR Code Yamaha dari Material Number Order.'
             onImport={(file, mode) => importPartYamaha.mutate({ file, mode })}
             isPending={importPartYamaha.isPending}
             result={partYamahaResult}

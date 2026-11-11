@@ -42,6 +42,25 @@ function findColumn(headers: string[], ...candidates: string[]): number {
   return -1;
 }
 
+/** Versi LONGGAR findColumn -- cocok juga kalau nama header cuma MENGANDUNG
+ * kandidatnya (mis. "Material Number (Code SAP)" tetap kena utk "code sap"),
+ * exact match tetap diprioritaskan. SENGAJA fungsi terpisah, BUKAN mengubah
+ * findColumn global: import lain (Material Flow, Cooispi) punya kandidat
+ * pendek spt "material" yg akan salah nyangkut ke "material code" kalau
+ * substring-match dipakai di sana. Dipakai import Master Part Yamaha
+ * (2026-11-11, laporan user: file "Kode Material Yamaha.xlsx" ditolak padahal
+ * isinya benar, cuma headernya ditulis "Material Number (Code SAP)"). */
+function findColumnLoose(headers: string[], ...candidates: string[]): number {
+  const exact = findColumn(headers, ...candidates);
+  if (exact !== -1) return exact;
+  for (const candidate of candidates) {
+    const needle = candidate.toLowerCase();
+    const idx = headers.findIndex((h) => h.includes(needle));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const result: T[][] = [];
   for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
@@ -628,16 +647,27 @@ masterDataRouter.post(
     // yg beneran dgn cek baris mana yg punya kolom "code sap" dulu, supaya
     // tidak mengandalkan posisi baris tetap (lebih tahan banting kalau format
     // file export-nya sedikit beda).
+    // Pencocokan header LONGGAR (findColumnLoose) -- header yg cuma MENGANDUNG
+    // "code sap"/"material number"/"item no"/"item name" tetap diterima, mis.
+    // "Material Number (Code SAP)" (2026-11-11, laporan user: file ditolak
+    // padahal isinya benar).
+    const resolveCols = (hdrs: string[]) => ({
+      materialNumber: findColumnLoose(hdrs, "code sap", "material number"),
+      itemNo: findColumnLoose(hdrs, "item no.", "item no"),
+      itemName: findColumnLoose(hdrs, "item name"),
+    });
     let headerRowIdx = 0;
-    let headers = rows[0].map(normalizeHeader);
-    let col = { materialNumber: findColumn(headers, "code sap", "material number"), itemNo: findColumn(headers, "item no.", "item no"), itemName: findColumn(headers, "item name") };
+    let col = resolveCols(rows[0].map(normalizeHeader));
     if (col.materialNumber === -1 && rows.length > 1) {
       headerRowIdx = 1;
-      headers = rows[1].map(normalizeHeader);
-      col = { materialNumber: findColumn(headers, "code sap", "material number"), itemNo: findColumn(headers, "item no.", "item no"), itemName: findColumn(headers, "item name") };
+      col = resolveCols(rows[1].map(normalizeHeader));
     }
     if (col.materialNumber === -1) {
-      res.status(400).json({ success: false, message: 'File wajib punya kolom header "CODE SAP" (boleh juga "Item No." dan "Item Name").' });
+      res.status(400).json({
+        success: false,
+        message:
+          'Kolom Material Number tidak ditemukan di baris header. Pastikan ada kolom yang namanya mengandung "CODE SAP" atau "Material Number" (contoh: "CODE SAP", "Material Number (Code SAP)"). Kolom "Item No." dan "Item Name" opsional.',
+      });
       return;
     }
 

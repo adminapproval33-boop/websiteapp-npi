@@ -4,6 +4,7 @@ import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
 import TrendLineChart, { TrendChartPoint, TrendSeries } from "./TrendLineChart";
+import TrendBarChart from "./TrendBarChart";
 
 type Period = "today" | "week" | "month" | "all" | "custom";
 
@@ -231,82 +232,234 @@ const RFT_SERIES_APPROVAL: TrendSeries[] = [
 ];
 const RFT_RATE_SERIES: TrendSeries[] = [{ key: "rate", label: "RFT Rate (%)", color: "#2a78d6" }];
 
-/** Satu panel RFT (dipakai 2x: QC & Approval) -- kartu KPI + 2 grafik tren
- * (jumlah Order RFT vs tidak, dan RFT Rate %) per bucket periode. */
+/** Satu panel RFT (dipakai 2x: QC & Approval) -- kartu KPI (total 1 tahun) +
+ * 2 diagram batang per BULAN utk 1 tahun yg dipilih, FORMAT SAMA PERSIS dgn
+ * "Laporan Dashboard Approval" yg dikirim tiap pagi (approvalReportSlide.ts,
+ * 2026-11-12 instruksi eksplisit user): batang berdampingan per bulan mulai
+ * dari bulan pertama yg py data s.d. Desember, ditambah 1 kolom "Ytd.YY"
+ * (total setahun) di paling kanan, angka nilai di atas tiap batang. BUKAN
+ * ikut filter Harian/Mingguan/Bulanan + Dari/Sampai Tanggal halaman ini. */
 function RftPanel({
   title,
   description,
   section,
   series,
-  granularity,
+  year,
   showTable,
-  dayScope,
+  variant,
 }: {
   title: string;
   description: string;
   section: RftSection | undefined;
   series: TrendSeries[];
-  granularity: Granularity;
+  year: number;
   showTable: boolean;
-  dayScope: "workdays" | "all";
+  /** Menentukan isi popup "!" cara menghitung (QC vs Approval). */
+  variant: "qc" | "approval";
 }) {
-  const buckets = useMemo(() => {
-    const raw = section?.buckets ?? [];
-    return granularity === "day" && dayScope === "workdays" ? raw.filter((b) => !isWeekendKey(b.bucketKey)) : raw;
-  }, [section, granularity, dayScope]);
-  const countPoints: TrendChartPoint[] = useMemo(
-    () =>
-      buckets.map((b) => ({
-        bucketKey: b.bucketKey,
-        label: formatBucketLabel(b.bucketKey, granularity),
-        values: { direct: b.direct, notDirect: b.notDirect },
-      })),
-    [buckets, granularity]
-  );
-  const ratePoints: TrendChartPoint[] = useMemo(
-    () =>
-      buckets.map((b) => ({
-        bucketKey: b.bucketKey,
-        label: formatBucketLabel(b.bucketKey, granularity),
-        values: { rate: b.total > 0 ? Math.round((b.direct / b.total) * 1000) / 10 : 0 },
-      })),
-    [buckets, granularity]
-  );
-  const total = section?.total ?? 0;
-  const direct = section?.direct ?? 0;
-  const notDirect = section?.notDirect ?? 0;
+  const ytdLabel = `Ytd.${String(year).slice(-2)}`;
+  // Popup "!" cara menghitung (2026-11-12, instruksi eksplisit user) -- 1 per
+  // grafik, isinya beda utk grafik Jumlah Order vs RFT Rate.
+  const [infoOpen, setInfoOpen] = useState<"count" | "rate" | null>(null);
+  const { countPoints, ratePoints, total, direct, notDirect } = useMemo(() => {
+    const byMonth = new Map<number, RftBucket>();
+    for (const b of section?.buckets ?? []) byMonth.set(Number(b.bucketKey.slice(5, 7)) - 1, b);
+    // Mulai dari bulan PERTAMA yg py data (sama spt laporan: tidak menampilkan
+    // deretan bulan kosong di awal tahun), kalau kosong semua tampilkan Des saja.
+    let firstIdx = 11;
+    for (const idx of byMonth.keys()) if (idx < firstIdx) firstIdx = idx;
+    const monthIdx: number[] = [];
+    for (let i = firstIdx; i <= 11; i++) monthIdx.push(i);
+    let t = 0;
+    let d = 0;
+    const countPoints: TrendChartPoint[] = monthIdx.map((i) => {
+      const b = byMonth.get(i);
+      t += b?.total ?? 0;
+      d += b?.direct ?? 0;
+      return { bucketKey: `${year}-${String(i + 1).padStart(2, "0")}`, label: MONTHS_ID[i], values: { direct: b?.direct ?? 0, notDirect: b?.notDirect ?? 0 } };
+    });
+    countPoints.push({ bucketKey: `${year}-ytd`, label: ytdLabel, values: { direct: d, notDirect: t - d } });
+    const ratePoints: TrendChartPoint[] = countPoints.map((p) => {
+      const tot = p.values.direct + p.values.notDirect;
+      return { bucketKey: p.bucketKey, label: p.label, values: { rate: tot > 0 ? Math.round((p.values.direct / tot) * 1000) / 10 : 0 } };
+    });
+    return { countPoints, ratePoints, total: t, direct: d, notDirect: t - d };
+  }, [section, year, ytdLabel]);
   const rate = total > 0 ? Math.round((direct / total) * 1000) / 10 : 0;
-  const perLabel = GRANULARITY_OPTIONS.find((o) => o.value === granularity)?.label.toLowerCase();
 
   return (
     <>
       <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.78rem" }}>{description}</p>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
-        <KpiCard label="Total Selesai" value={total} color="var(--navy-light)" />
+        <KpiCard label={`Total Selesai (${ytdLabel})`} value={total} color="var(--navy-light)" />
         <KpiCard label={series[0].label} value={direct} color={series[0].color} />
         <KpiCard label={series[1].label} value={notDirect} color={series[1].color} />
         <KpiCard label="RFT Rate" value={`${rate.toFixed(1)}%`} color="#9b59b6" />
       </div>
       <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} -- Jumlah Order per {perLabel}</div>
-        <TrendLineChart points={countPoints} series={series} yAxisLabel="Jumlah Order" granularity={granularity} showTable={showTable} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 4 }}>
+          <span>{title} -- Jumlah Order per Bulan {year}</span>
+          <RftInfoButton onClick={() => setInfoOpen("count")} />
+        </div>
+        <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
+          Batang berdampingan per bulan; kolom {ytdLabel} = total sepanjang tahun (year-to-date). Format sama dengan
+          Laporan Dashboard Approval harian.
+        </p>
+        <TrendBarChart points={countPoints} series={series} yAxisLabel="Jumlah Order" showTable={showTable} />
       </div>
       <div className="panel" style={{ padding: 16, marginBottom: 8 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{title} -- RFT Rate per {perLabel}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 4 }}>
+          <span>{title} -- RFT Rate per Bulan {year}</span>
+          <RftInfoButton onClick={() => setInfoOpen("rate")} />
+        </div>
         <p style={{ marginTop: 0, marginBottom: 12, color: "var(--text-muted)", fontSize: "0.75rem" }}>
-          RFT Rate = {series[0].label} / Total Selesai x 100%. Garis putus-putus = rata-rata pada rentang ini.
+          RFT Rate = {series[0].label} / Total Selesai x 100%, per bulan; kolom {ytdLabel} = rate sepanjang tahun.
         </p>
-        <TrendLineChart
+        <TrendBarChart
           points={ratePoints}
           series={RFT_RATE_SERIES}
           yAxisLabel="%"
           valueFormatter={(n) => `${n.toLocaleString("id-ID")}%`}
-          granularity={granularity}
-          showAverage
           showTable={showTable}
+          yMax={100}
         />
       </div>
+
+      {infoOpen && (
+        <Modal
+          title={`Cara menghitung: ${title} -- ${infoOpen === "count" ? "Jumlah Order" : "RFT Rate"} per Bulan ${year}`}
+          onClose={() => setInfoOpen(null)}
+          width={640}
+        >
+          <RftHowTo variant={variant} kind={infoOpen} series={series} ytdLabel={ytdLabel} />
+        </Modal>
+      )}
     </>
+  );
+}
+
+function RftInfoButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Lihat cara menghitung angka di grafik ini"
+      aria-label="Cara menghitung"
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: 999,
+        border: "1.5px solid var(--navy)",
+        background: "#fff",
+        color: "var(--navy)",
+        fontWeight: 800,
+        fontSize: "0.78rem",
+        lineHeight: 1,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+      }}
+    >
+      !
+    </button>
+  );
+}
+
+/** Isi popup "!" -- penjelasan langkah demi langkah angka di grafik RFT
+ * (2026-11-12, instruksi eksplisit user). Harus selalu SEJALAN dgn logika
+ * nyata di backend `buildRftData` (dashboard.routes.ts) -- kalau rumusnya
+ * diubah di sana, teks ini ikut diperbarui. */
+function RftHowTo({ variant, kind, series, ytdLabel }: { variant: "qc" | "approval"; kind: "count" | "rate"; series: TrendSeries[]; ytdLabel: string }) {
+  const ok = series[0].label;
+  const notOk = series[1].label;
+  const li: React.CSSProperties = { marginBottom: 8, lineHeight: 1.5 };
+  const code: React.CSSProperties = { fontFamily: "ui-monospace, Consolas, monospace", background: "#f1f5f9", padding: "2px 6px", borderRadius: 4, fontSize: "0.82rem" };
+  return (
+    <div style={{ fontSize: "0.88rem", color: "var(--text-main)" }}>
+      <ol style={{ paddingLeft: 22, margin: 0, listStyle: "decimal outside" }}>
+        <li style={li}>
+          <strong>Order mana yang dihitung ("Total Selesai")</strong>
+          <br />
+          {variant === "qc" ? (
+            <>
+              Hanya Order yang sudah <strong>OK (QC Passed)</strong>: diambil baris <em>Input Admin QC terbaru</em> per Order, dan
+              kolom <strong>QC Passed</strong>-nya harus terisi. Order yang masih On Check / Improve / Assorted (NG) / Approval
+              tidak ikut dihitung.
+            </>
+          ) : (
+            <>
+              Hanya Order yang sudah <strong>Oke Approval</strong>: diambil baris <em>Approval (Lot History) terbaru</em> per Order,
+              dan kolom <strong>Finish App</strong>-nya harus terisi. Order yang masih Prepare / Wait Approval / Approval tidak ikut
+              dihitung.
+            </>
+          )}{" "}
+          Order <strong>Teco</strong> (%GR = 9999% di Master Data Cooispi) selalu dikeluarkan.
+        </li>
+        <li style={li}>
+          <strong>Menentukan "{ok}" vs "{notOk}"</strong>
+          <br />
+          {variant === "qc" ? (
+            <>
+              Sistem membuka <strong>seluruh riwayat Input Check Results</strong> Order itu (semua percobaan sejak awal, bukan hanya
+              input terakhir) dan memeriksa tiap Item Check terhadap Spec-nya (rentang, &le;/&ge;, toleransi &plusmn;, aturan
+              HARDNESS, dll). Kalau <strong>tidak ada satu pun</strong> yang pernah NG &rarr; <strong>{ok}</strong>. Kalau
+              <strong> ada minimal satu</strong> yang pernah NG di percobaan mana pun &rarr; <strong>{notOk}</strong>, walaupun
+              akhirnya Order itu OK. Definisi ini sama persis dengan kartu RFT di Dashboard Quality.
+            </>
+          ) : (
+            <>
+              Order dianggap <strong>{ok}</strong> kalau selama proses Approval <strong>tidak pernah</strong> ditandai Improve:
+              flag Improve tidak aktif <em>dan</em> di Remark-nya tidak ada jejak <span style={code}>Trial N (NG)</span> (jejak
+              ini ditulis otomatis setiap tombol Improve dinyalakan). Kalau pernah &rarr; <strong>{notOk}</strong>, walaupun
+              akhirnya Oke Approval.
+            </>
+          )}
+        </li>
+        <li style={li}>
+          <strong>Dikelompokkan per bulan</strong>
+          <br />
+          Setiap Order masuk ke bulan tanggal{" "}
+          {variant === "qc" ? <strong>QC Passed</strong> : <strong>Finish App</strong>}-nya (bukan tanggal Order dibuat / tanggal
+          input lainnya). Grafik dimulai dari bulan pertama yang punya data sampai Desember.
+        </li>
+        {kind === "count" ? (
+          <li style={li}>
+            <strong>Angka di atas batang</strong>
+            <br />
+            Batang hijau = jumlah Order <strong>{ok}</strong> bulan itu; batang oranye = jumlah Order <strong>{notOk}</strong> bulan
+            itu. Jumlah keduanya = Total Selesai bulan itu.
+          </li>
+        ) : (
+          <li style={li}>
+            <strong>Rumus RFT Rate per bulan</strong>
+            <br />
+            <span style={code}>
+              RFT Rate = {ok} bulan itu &divide; Total Selesai bulan itu &times; 100%
+            </span>
+            <br />
+            Contoh: 18 {ok} dari 20 Total Selesai &rarr; 18 &divide; 20 &times; 100% = <strong>90,0%</strong>.
+          </li>
+        )}
+        <li style={li}>
+          <strong>Kolom "{ytdLabel}" (year-to-date)</strong>
+          <br />
+          {kind === "count" ? (
+            <>Penjumlahan seluruh bulan dalam tahun ini: &Sigma; {ok} dan &Sigma; {notOk} Jan&ndash;Des.</>
+          ) : (
+            <>
+              <strong>Bukan</strong> rata-rata dari persentase bulanan, tetapi dihitung ulang dari total setahun:{" "}
+              <span style={code}>
+                &Sigma; {ok} Jan&ndash;Des &divide; &Sigma; Total Selesai Jan&ndash;Des &times; 100%
+              </span>
+              . Bulan dengan Order lebih banyak otomatis berbobot lebih besar &mdash; angka ini sama dengan kartu KPI "RFT Rate"
+              di atas.
+            </>
+          )}
+        </li>
+      </ol>
+    </div>
   );
 }
 
@@ -325,6 +478,13 @@ export default function ProduktivitasDashboardPage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const usingCustomRange = Boolean(customFrom || customTo);
+  // Tahun utk tab RFT (2026-11-12, instruksi eksplisit user: tampilan per
+  // bulan 1 tahun penuh spt Laporan Dashboard Approval harian) -- pilihan
+  // tahun berjalan s.d. 2 tahun ke belakang, sama pola pemilih tahun grafik
+  // "RFT Rate per Bulan (Tahunan)" di Dashboard Quality.
+  const [rftYear, setRftYear] = useState(() => new Date().getFullYear());
+  const rftYearOptions = [0, 1, 2].map((d) => new Date().getFullYear() - d);
+  const isRftTab = dashboardTab === "rftQc" || dashboardTab === "rftApproval";
   const [granularity, setGranularity] = useState<Granularity>("day");
   // Cakupan hari utk grafik tren (2026-08-21, instruksi eksplisit user: Sabtu/
   // Minggu produksinya tidak efektif, jangan ikut menarik rata-rata ke bawah,
@@ -403,14 +563,15 @@ export default function ProduktivitasDashboardPage() {
   // RFT QC & Approval (2026-11-11, instruksi eksplisit user) -- 1 request
   // utk kedua tab (sumber data beda tapi parameter rentang/granularitas
   // sama), cuma di-fetch pas salah satu tab RFT dibuka.
+  // SELALU 1 tahun penuh (Jan-Des `rftYear`) per bulan -- TIDAK ikut
+  // period/customFrom/customTo/granularity halaman (lihat komentar RftPanel).
   const rftQuery = useQuery({
-    queryKey: ["dashboard-produktivitas-rft", period, customFrom, customTo, granularity],
-    queryFn: () => {
-      const params = buildRangeParams();
-      params.set("granularity", granularity);
-      return api.get<{ success: boolean; data: RftData }>(`/dashboard/produktivitas-rft?${params.toString()}`).then((r) => r.data);
-    },
-    enabled: dashboardTab === "rftQc" || dashboardTab === "rftApproval",
+    queryKey: ["dashboard-produktivitas-rft", rftYear],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: RftData }>(`/dashboard/produktivitas-rft?from=${rftYear}-01-01&to=${rftYear}-12-31&granularity=month`)
+        .then((r) => r.data),
+    enabled: isRftTab,
   });
 
   // "Hari Kerja Saja" cuma bisa diterapkan per-bucket kalau granularitasnya
@@ -550,7 +711,7 @@ export default function ProduktivitasDashboardPage() {
               )}
             </div>
           )}
-          {dashboardTab !== "ringkasan" && (
+          {dashboardTab === "tren" && (
             <div style={{ position: "relative" }}>
               <button
                 type="button"
@@ -582,38 +743,56 @@ export default function ProduktivitasDashboardPage() {
               {showTrendTable ? "Lihat sbg Grafik" : "Lihat sbg Tabel"}
             </button>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
-            {GRANULARITY_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`btn ${granularity === opt.value ? "" : "btn-outline"}`}
-                onClick={() => setGranularity(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div className="field" style={{ maxWidth: 180 }}>
-            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-          </div>
-          <div className="field" style={{ maxWidth: 180 }}>
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-          </div>
-          {usingCustomRange && (
-            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
-          )}
-          {usingCustomRange && (
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => {
-                setCustomFrom("");
-                setCustomTo("");
-              }}
-            >
-              Reset Tanggal
-            </button>
+          {/* Tab RFT: pemilih TAHUN saja (grafik selalu per bulan Jan-Des tahun
+              itu, spt Laporan Dashboard Approval) -- filter granularitas &
+              rentang tanggal halaman ini tidak berlaku di sana. */}
+          {isRftTab ? (
+            <div className="field" style={{ gap: 4 }}>
+              <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Tahun</label>
+              <select value={rftYear} onChange={(e) => setRftYear(Number(e.target.value))} style={{ width: 110 }}>
+                {rftYearOptions.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 8 }}>
+                {GRANULARITY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`btn ${granularity === opt.value ? "" : "btn-outline"}`}
+                    onClick={() => setGranularity(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="field" style={{ maxWidth: 180 }}>
+                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+              </div>
+              <div className="field" style={{ maxWidth: 180 }}>
+                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+              </div>
+              {usingCustomRange && (
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Rentang tanggal aktif.</span>
+              )}
+              {usingCustomRange && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setCustomFrom("");
+                    setCustomTo("");
+                  }}
+                >
+                  Reset Tanggal
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -821,9 +1000,9 @@ export default function ProduktivitasDashboardPage() {
             }
             section={rftQuery.data?.qc}
             series={RFT_SERIES_QC}
-            granularity={granularity}
+            year={rftYear}
             showTable={showTrendTable}
-            dayScope={effectiveDayScope}
+            variant="qc"
           />
         )}
 
@@ -837,9 +1016,9 @@ export default function ProduktivitasDashboardPage() {
             }
             section={rftQuery.data?.approval}
             series={RFT_SERIES_APPROVAL}
-            granularity={granularity}
+            year={rftYear}
             showTable={showTrendTable}
-            dayScope={effectiveDayScope}
+            variant="approval"
           />
         )}
 

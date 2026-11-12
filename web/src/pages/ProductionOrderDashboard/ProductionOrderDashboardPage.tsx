@@ -622,10 +622,28 @@ export default function ProductionOrderDashboardPage() {
             { key: "orderQty", label: "Qty/Liter", render: (r) => r.orderQty },
             { key: "codeTanki", label: "Code Tanki", render: (r) => r.codeTanki ?? "-" },
             { key: "tankType", label: "Tank Type", render: (r) => r.tankType ?? "-" },
-            { key: "pctGR", label: "% GR", render: (r) => r.pctGR ?? "-" },
+            {
+              key: "pctGR",
+              label: "% GR",
+              render: (r) => r.pctGR ?? "-",
+              // Filter operator matematika (2026-11-12, instruksi eksplisit
+              // user: ketik "<25" atau "<25%" utk menampilkan semua Order
+              // %GR-nya di bawah 25%) -- tidak perlu csvValue angka khusus,
+              // "75%"/"-" (string render di atas) sudah cukup dipahami
+              // mathColumnFilter (strip karakter non-angka, "-" dicegat
+              // eksplisit jadi "tidak cocok").
+              filterNumeric: true,
+            },
             {
               key: "progressBar",
               label: "Proses Bar",
+              // Filter operator matematika (2026-11-12) -- `csvValue` di bawah
+              // SENGAJA tetap format "75% (Premix, Milling)" (lebih informatif
+              // utk Export CSV), BUKAN angka polos -- aman krn nama tahap
+              // (Premix/Milling/dst) tidak pernah mengandung digit, jadi
+              // mathColumnFilter yg strip semua karakter non-angka tetap dapat
+              // angka %-nya dgn benar.
+              filterNumeric: true,
               // +30px drpd lebar asli (260) supaya tombol muat di sisi kiri
               // TANPA bikin bar progress-nya sendiri kepotong/ke-hidden oleh
               // batas lebar kolom (ProgressBarCell py minWidth 260 sendiri).
@@ -680,6 +698,10 @@ export default function ProductionOrderDashboardPage() {
             {
               key: "process",
               label: "Proses",
+              // Filter dropdown (2026-11-12, instruksi eksplisit user) --
+              // daftar opsinya otomatis dari label "Proses" yg benar2 lagi
+              // tampil di tabel, bukan diketik bebas.
+              filterOptions: "auto",
               render: (r) => {
                 if (MILLING_STAGE_LABELS.has(r.process)) {
                   return (
@@ -707,6 +729,9 @@ export default function ProductionOrderDashboardPage() {
             {
               key: "productionActions",
               label: "Production Actions",
+              // Filter dropdown (2026-11-12, instruksi eksplisit user) --
+              // sama pola dgn "Proses" di atas.
+              filterOptions: "auto",
               render: (r) => (r.productionActions ? <ProcessBadge process={r.productionActions} /> : "-"),
               csvValue: (r) => r.productionActions ?? "-",
             },

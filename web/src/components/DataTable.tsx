@@ -23,6 +23,34 @@ export interface DataTableColumn<T> {
   csvValue?: (row: T) => string | number | null | undefined;
   /** Lebar awal kolom (px). Bisa diubah bebas oleh user lewat drag di header (tersimpan per tabel). */
   defaultWidth?: number;
+  /** Filter kolom ini jadi dropdown (pilih dari daftar), BUKAN kotak teks
+   * bebas (2026-11-12, instruksi eksplisit user: Production Order Monitoring
+   * kolom "Proses"/"Production Actions"). `"auto"` = daftar opsinya dihitung
+   * sendiri dari nilai UNIK yg benar2 muncul di `rows` saat ini (pakai
+   * `csvValue` kalau ada, sama logika dgn accessor filter/sort biasa) --
+   * otomatis ikut berubah kalau label baru muncul di kode, tidak perlu
+   * di-hardcode & dirawat manual di sini. Cocok "exact match" (pilih salah
+   * satu opsi), bukan substring spt filter teks bawaan. */
+  filterOptions?: "auto";
+  /** Filter kolom ini pakai operator pembanding (2026-11-12, instruksi
+   * eksplisit user: kolom "% GR"/"Proses Bar" -- user ketik "<25" atau
+   * "<25%" utk menampilkan semua baris di bawah 25%). Query diawali
+   * `<`/`<=`/`>`/`>=`/`=` (opsional "%" di akhir, diabaikan) dibandingkan scr
+   * numerik ke `csvValue` kolom ini; tanpa operator/tidak numerik, jatuh
+   * balik ke perilaku filter biasa (match persis/substring). HANYA berguna
+   * kalau `csvValue` mengembalikan number (lihat `smartColumnFilter`). */
+  filterNumeric?: boolean;
+}
+
+/** Nilai mentah 1 sel kolom, dari `csvValue` kalau ada (prioritas, SAMA pola
+ * dgn accessor filter/sort & CSV export) -- fallback ke hasil `render()`
+ * KALAU berupa string/number polos. Dipakai bareng oleh accessor TanStack,
+ * autofit lebar kolom, DAN opsi dropdown "auto" -- 1 implementasi, bukan
+ * 3 salinan yg bisa diam2 beda perilaku. */
+function getRawCellValue<T>(column: DataTableColumn<T>, row: T): string | number {
+  if (column.csvValue) return column.csvValue(row) ?? "";
+  const rendered = column.render(row);
+  return typeof rendered === "string" || typeof rendered === "number" ? rendered : "";
 }
 
 interface Persisted {
@@ -69,6 +97,55 @@ const smartColumnFilter: FilterFn<any> = (row, columnId, filterValue) => {
   return String(raw ?? "")
     .toLowerCase()
     .includes(query.toLowerCase());
+};
+
+/** Filter dropdown (2026-11-12) -- "equals" PERSIS (user memilih 1 opsi dari
+ * daftar, bukan mengetik bebas), tidak relevan dibanding `smartColumnFilter`
+ * yg substring/exact-angka. Query kosong ("Semua") = tampilkan semua. */
+const selectColumnFilter: FilterFn<any> = (row, columnId, filterValue) => {
+  const query = String(filterValue ?? "");
+  if (!query) return true;
+  return String(row.getValue(columnId) ?? "") === query;
+};
+
+/** Operator pembanding di AWAL query: `<`, `<=`, `>`, `>=`, `=`, lalu angka
+ * (boleh desimal/negatif/koma), lalu "%" opsional di akhir (diabaikan --
+ * kolom %, mis. "% GR", nilainya sudah murni angka 0-100 di `csvValue`,
+ * simbol "%" cuma kemudahan ketik user spy tidak perlu mikir "pakai % atau
+ * tidak"). */
+const NUMERIC_FILTER_RE = /^(<=|>=|<|>|=)?\s*(-?\d+(?:[.,]\d+)?)\s*%?$/;
+
+/** Filter operator matematika (2026-11-12, instruksi eksplisit user: kolom
+ * "% GR"/"Proses Bar" Production Order Monitoring -- ketik "<25" atau "<25%"
+ * utk menampilkan SEMUA baris di bawah 25%). Query yg TIDAK diawali operator
+ * (atau bukan angka sama sekali) jatuh balik ke `smartColumnFilter` biasa --
+ * kolom ini tetap bisa dipakai spt filter angka exact-match normal kalau
+ * user cuma ketik "25" tanpa operator. */
+const mathColumnFilter: FilterFn<any> = (row, columnId, filterValue, addMeta) => {
+  const query = String(filterValue ?? "").trim();
+  if (!query) return true;
+  const m = query.match(NUMERIC_FILTER_RE);
+  if (!m) return smartColumnFilter(row, columnId, filterValue, addMeta);
+  const operator = m[1] ?? "=";
+  const target = Number(m[2].replace(",", "."));
+  const raw = row.getValue(columnId);
+  // Baris tanpa nilai (mis. kolom "% GR" isinya "-", bukan angka beneran)
+  // HARUS dianggap "tidak cocok", BUKAN 0 -- `Number("")` di JS = 0, jadi
+  // string kosong/hasil strip-nya kosong harus dicegat eksplisit dulu,
+  // sebelum sempat ke-anggap "0% beneran" & salah lolos filter "<25".
+  let value: number;
+  if (typeof raw === "number") {
+    value = raw;
+  } else {
+    const stripped = String(raw ?? "").replace(",", ".").replace(/[^0-9.-]/g, "");
+    value = stripped === "" || stripped === "-" ? NaN : Number(stripped);
+  }
+  if (Number.isNaN(value)) return false;
+  if (operator === "<") return value < target;
+  if (operator === "<=") return value <= target;
+  if (operator === ">") return value > target;
+  if (operator === ">=") return value >= target;
+  return value === target;
 };
 
 /**
@@ -159,12 +236,9 @@ export default function DataTable<T>({
         // (kasus paling umum) -- kolom yg render-nya JSX kompleks (badge,
         // tombol Aksi) sudah SELALU py `csvValue` eksplisit di semua
         // pemanggil, jadi tidak kena cabang fallback ini.
-        accessorFn: (row: T) => {
-          if (c.csvValue) return c.csvValue(row) ?? "";
-          const rendered = c.render(row);
-          return typeof rendered === "string" || typeof rendered === "number" ? rendered : "";
-        },
+        accessorFn: (row: T) => getRawCellValue(c, row),
         cell: (info) => c.render(info.row.original),
+        filterFn: c.filterOptions ? selectColumnFilter : c.filterNumeric ? mathColumnFilter : smartColumnFilter,
         size: c.defaultWidth ?? 170,
         minSize: 60,
         maxSize: 640,
@@ -245,14 +319,8 @@ export default function DataTable<T>({
     let maxWidth = ctx.measureText(original.label).width;
     const sample = rows.length > AUTOFIT_SAMPLE_LIMIT ? rows.slice(0, AUTOFIT_SAMPLE_LIMIT) : rows;
     for (const row of sample) {
-      let value: unknown;
-      if (original.csvValue) {
-        value = original.csvValue(row);
-      } else {
-        const rendered = original.render(row);
-        value = typeof rendered === "string" || typeof rendered === "number" ? rendered : "";
-      }
-      if (value == null || value === "") continue;
+      const value = getRawCellValue(original, row);
+      if (value === "") continue;
       const w = ctx.measureText(String(value)).width;
       if (w > maxWidth) maxWidth = w;
     }
@@ -277,6 +345,29 @@ export default function DataTable<T>({
     });
     setDraggedCol(null);
   }
+
+  // Opsi dropdown "auto" (2026-11-12) -- nilai UNIK yg benar2 muncul di
+  // `rows` SAAT INI per kolom yg minta `filterOptions: "auto"`, diurutkan
+  // alfabet. Dihitung dari SEMUA baris (bukan disample spt autofit lebar
+  // kolom) -- cuma dedupe lewat Set, murah drpd ngukur teks lewat Canvas, dan
+  // daftar opsi harus lengkap (bukan "biasanya cukup") spy user tidak
+  // kehilangan nilai yg jarang muncul. Cuma dihitung kalau showFilters aktif
+  // (baris filter kebuka) -- percuma kalau filter tidak lagi dipakai.
+  const autoFilterOptions = useMemo(() => {
+    if (!showFilters) return {} as Record<string, string[]>;
+    const result: Record<string, string[]> = {};
+    for (const c of columns) {
+      if (c.filterOptions !== "auto") continue;
+      const set = new Set<string>();
+      for (const row of rows) {
+        const v = getRawCellValue(c, row);
+        if (v !== "") set.add(String(v));
+      }
+      result[c.key] = Array.from(set).sort((a, b) => a.localeCompare(b, "id"));
+    }
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns, rows, showFilters]);
 
   const csvColumns: CsvColumn<T>[] = table.getVisibleLeafColumns().map((col) => {
     const original = columns.find((c) => c.key === col.id)!;
@@ -407,15 +498,38 @@ export default function DataTable<T>({
                       {{ asc: "▲", desc: "▼" }[header.column.getIsSorted() as string] ?? ""}
                     </span>
                   </div>
-                  {showFilters && (
-                    <input
-                      value={(header.column.getFilterValue() as string) ?? ""}
-                      onChange={(e) => header.column.setFilterValue(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      placeholder="Filter..."
-                      style={{ width: "100%", marginTop: 4, fontSize: "0.75rem", padding: "2px 4px" }}
-                    />
-                  )}
+                  {showFilters &&
+                    (() => {
+                      const original = columns.find((c) => c.key === header.column.id);
+                      if (original?.filterOptions === "auto") {
+                        const options = autoFilterOptions[header.column.id] ?? [];
+                        return (
+                          <select
+                            value={(header.column.getFilterValue() as string) ?? ""}
+                            onChange={(e) => header.column.setFilterValue(e.target.value || undefined)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: "100%", marginTop: 4, fontSize: "0.75rem", padding: "2px 2px" }}
+                          >
+                            <option value="">Semua</option>
+                            {options.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      }
+                      return (
+                        <input
+                          value={(header.column.getFilterValue() as string) ?? ""}
+                          onChange={(e) => header.column.setFilterValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder={original?.filterNumeric ? "mis. <25 atau >=50" : "Filter..."}
+                          title={original?.filterNumeric ? 'Boleh pakai operator: <25, <=25, >25, >=25, =25 (boleh diakhiri "%")' : undefined}
+                          style={{ width: "100%", marginTop: 4, fontSize: "0.75rem", padding: "2px 4px" }}
+                        />
+                      );
+                    })()}
                   <div
                     onMouseDown={header.getResizeHandler()}
                     onTouchStart={header.getResizeHandler()}

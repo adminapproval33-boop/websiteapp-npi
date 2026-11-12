@@ -29,9 +29,16 @@ export interface DataTableColumn<T> {
    * sendiri dari nilai UNIK yg benar2 muncul di `rows` saat ini (pakai
    * `csvValue` kalau ada, sama logika dgn accessor filter/sort biasa) --
    * otomatis ikut berubah kalau label baru muncul di kode, tidak perlu
-   * di-hardcode & dirawat manual di sini. Cocok "exact match" (pilih salah
-   * satu opsi), bukan substring spt filter teks bawaan. */
-  filterOptions?: "auto";
+   * di-hardcode & dirawat manual di sini, diurutkan alfabet. Cocok "exact
+   * match" (pilih salah satu opsi), bukan substring spt filter teks bawaan.
+   * Array string (2026-11-12, instruksi eksplisit user: kolom "Proses"
+   * diurutkan berdasarkan tahapan proses pertama->terakhir, bukan alfabet) =
+   * SAMA spt "auto" (opsi tetap dihitung otomatis dari nilai yg benar2
+   * muncul), TAPI diurutkan menurut posisi nilai itu di array ini (bukan
+   * alfabet) -- nilai yg muncul di data tapi TIDAK ada di array ini (label
+   * baru yg belum diantisipasi) tetap muncul, diselipkan di akhir urut
+   * alfabet, supaya tidak pernah hilang/ke-skip walau lupa diupdate. */
+  filterOptions?: "auto" | string[];
   /** Filter kolom ini pakai operator pembanding (2026-11-12, instruksi
    * eksplisit user: kolom "% GR"/"Proses Bar" -- user ketik "<25" atau
    * "<25%" utk menampilkan semua baris di bawah 25%). Query diawali
@@ -357,13 +364,27 @@ export default function DataTable<T>({
     if (!showFilters) return {} as Record<string, string[]>;
     const result: Record<string, string[]> = {};
     for (const c of columns) {
-      if (c.filterOptions !== "auto") continue;
+      if (!c.filterOptions) continue;
       const set = new Set<string>();
       for (const row of rows) {
         const v = getRawCellValue(c, row);
         if (v !== "") set.add(String(v));
       }
-      result[c.key] = Array.from(set).sort((a, b) => a.localeCompare(b, "id"));
+      const values = Array.from(set);
+      if (Array.isArray(c.filterOptions)) {
+        const priority = c.filterOptions;
+        values.sort((a, b) => {
+          const ia = priority.indexOf(a);
+          const ib = priority.indexOf(b);
+          if (ia === -1 && ib === -1) return a.localeCompare(b, "id");
+          if (ia === -1) return 1;
+          if (ib === -1) return -1;
+          return ia - ib;
+        });
+      } else {
+        values.sort((a, b) => a.localeCompare(b, "id"));
+      }
+      result[c.key] = values;
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -501,7 +522,7 @@ export default function DataTable<T>({
                   {showFilters &&
                     (() => {
                       const original = columns.find((c) => c.key === header.column.id);
-                      if (original?.filterOptions === "auto") {
+                      if (original?.filterOptions) {
                         const options = autoFilterOptions[header.column.id] ?? [];
                         return (
                           <select

@@ -17,6 +17,7 @@ import MaterialFlowPanel from "./MaterialFlowPanel";
 import OrderLookup from "../../components/OrderLookup";
 import ManualInputModal from "./ManualInputModal";
 import PindahTankiModal from "../../components/PindahTankiModal";
+import { PROCESS_FILTER_ORDER } from "../../components/ProcessBadge";
 
 interface ProductionOrderRow {
   order: string;
@@ -700,8 +701,10 @@ export default function ProductionOrderDashboardPage() {
               label: "Proses",
               // Filter dropdown (2026-11-12, instruksi eksplisit user) --
               // daftar opsinya otomatis dari label "Proses" yg benar2 lagi
-              // tampil di tabel, bukan diketik bebas.
-              filterOptions: "auto",
+              // tampil di tabel, bukan diketik bebas, DIURUTKAN berdasarkan
+              // tahap proses pertama->terakhir (PROCESS_FILTER_ORDER), bukan
+              // alfabet.
+              filterOptions: PROCESS_FILTER_ORDER,
               render: (r) => {
                 if (MILLING_STAGE_LABELS.has(r.process)) {
                   return (

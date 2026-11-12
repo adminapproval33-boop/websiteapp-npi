@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
-import ProcessBadge from "../../components/ProcessBadge";
+import ProcessBadge, { PROCESS_FILTER_ORDER } from "../../components/ProcessBadge";
 import { formatDateDDMMYYYY, formatDateTime, formatDuration } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
 import MaintenanceQuickModal from "../Maintenance/MaintenanceQuickModal";
@@ -382,16 +382,32 @@ export default function TankDashboardPage() {
               { key: "batch", label: "Batch", render: (r) => r.occupant?.batch || "-" },
               { key: "orderType", label: "Order Type", render: (r) => r.occupant?.orderType || "-" },
               { key: "orderQty", label: "Qty/Liter", render: (r) => r.occupant?.orderQty || "-" },
-              { key: "pctGR", label: "% GR", render: (r) => r.occupant?.pctGR || "-" },
+              {
+                key: "pctGR",
+                label: "% GR",
+                render: (r) => r.occupant?.pctGR || "-",
+                // Filter operator matematika (2026-11-12, disamakan dgn
+                // Production Order Monitoring, instruksi eksplisit user) --
+                // ketik "<25" atau "<25%" utk menampilkan semua Order
+                // %GR-nya di bawah 25%.
+                filterNumeric: true,
+              },
               {
                 key: "process",
                 label: "Proses",
+                // Filter dropdown, diurutkan berdasarkan tahap proses
+                // pertama->terakhir (2026-11-12, disamakan dgn Production
+                // Order Monitoring, instruksi eksplisit user).
+                filterOptions: PROCESS_FILTER_ORDER,
                 render: (r) => (r.occupant ? <ProcessBadge process={r.occupant.process} onClick={() => setQcDetailOrder(r.occupant!.order)} /> : "-"),
                 csvValue: (r) => r.occupant?.process ?? "-",
               },
               {
                 key: "productionActions",
                 label: "Production Actions",
+                // Filter dropdown (2026-11-12, disamakan dgn Production Order
+                // Monitoring, instruksi eksplisit user).
+                filterOptions: "auto",
                 render: (r) => (r.occupant?.productionActions ? <ProcessBadge process={r.occupant.productionActions} /> : "-"),
                 csvValue: (r) => r.occupant?.productionActions ?? "-",
               },

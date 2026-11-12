@@ -28,6 +28,50 @@ const APPROVAL_STAGE_LABELS = new Set(["QU - Approval", "Approval", "Approval - 
 /** Label Proses formatnya bervariasi (mis. "QC : Visco : Pass", "Milling
  * (Couple)") -- dicocokkan ke salah satu warna di STAGE_COLORS lewat
  * prefix/substring, bukan exact match. */
+/** Urutan dropdown filter kolom "Proses" (2026-11-12, instruksi eksplisit
+ * user: "urutkan berdasarkan proses pertama sampai yang terakhir", lalu
+ * diminta disamakan juga ke Dashboard Tank Monitoring) -- ditaruh di sini
+ * (bukan di 1 halaman) krn dipakai BARENG oleh Production Order Monitoring
+ * & Tank Monitoring, sama alasannya dgn STAGE_COLORS di atas. "-" (belum
+ * tersentuh sama sekali) dulu, lalu tiap tahap kerja urut Bongkaran ->
+ * Premix -> Milling -> Aftermix -> Colour Matching -> QC -> Approval ->
+ * Packing (sama urutan dipakai endpoint "/production-orders/:order/remarks"
+ * di backend), dgn sub-state tiap tahap Queue -> In Progress -> Done.
+ * Bongkaran ditaruh paling awal krn secara fisik terjadi SEBELUM Premix
+ * (bongkar bahan baku), walau tidak ikut STAGE_SEQUENCE/Proses Bar. Nilai
+ * yg kebetulan muncul tapi tidak ada di daftar ini (label baru yg belum
+ * diantisipasi) otomatis diselipkan di akhir, lihat `DataTable`'s
+ * `filterOptions` array handling -- jadi daftar ini TIDAK perlu 100%
+ * lengkap, cuma menentukan urutannya. */
+export const PROCESS_FILTER_ORDER = [
+  "-",
+  "Bongkaran",
+  "QU - Bongkaran",
+  "Produksi - PQE",
+  "QU - Premix",
+  "Premix",
+  "Premix - DN",
+  "QU - Milling",
+  "Milling",
+  "Milling - DN",
+  "QU - Aftermix",
+  "Aftermix",
+  "Aftermix - DN",
+  "QU - Colour Matching",
+  "Colour Matching",
+  "Colour Matching - DN",
+  "QU - QC",
+  "QC",
+  "QC - DN",
+  "QU - Approval",
+  "Wait Approval",
+  "Approval",
+  "Approval - DN",
+  "QU - Packing",
+  "Packing",
+  "Packing - DN",
+];
+
 export function getProcessColor(process: string): { bg: string; fg: string } {
   if (APPROVAL_STAGE_LABELS.has(process)) return STAGE_COLORS.Approval;
   if (process.startsWith("QC")) return STAGE_COLORS.QC;

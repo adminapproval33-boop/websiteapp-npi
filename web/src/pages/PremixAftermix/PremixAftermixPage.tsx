@@ -435,34 +435,46 @@ export default function PremixAftermixPage({
     materialDescription: "",
     batch: "",
     scheduledDate: todayDateValue(),
-    // Code Tanki OPSIONAL (2026-11-03, instruksi eksplisit user: dropdown
-    // langsung di popup ini, biar nge-link ke Tank Monitoring sekalian) --
-    // kosong = cuma bikin jadwal Kalender spt sebelumnya (tanpa booking tanki).
+    // SEMUA field termasuk Code Tanki WAJIB diisi (2026-11-16, instruksi
+    // eksplisit user: tolak Save + tampilkan warning kalau ada yg kosong --
+    // revisi dari versi awal 2026-11-03 yg Code Tanki-nya opsional).
     codeTanki: "",
   });
   const [manualScheduleError, setManualScheduleError] = useState("");
+
+  /** Validasi semua field WAJIB diisi sblm Save (2026-11-16, instruksi
+   * eksplisit user) -- dicek saat klik tombol, BUKAN cuma disable tombolnya
+   * diam2, supaya user benar2 lihat pesan kenapa ditolak. */
+  function validateManualSchedule(): string | null {
+    const f = manualScheduleForm;
+    if (!f.order.trim()) return "Order wajib diisi.";
+    if (!f.materialNumber.trim()) return "Material Number wajib diisi.";
+    if (!f.batch.trim()) return "Batch wajib diisi.";
+    if (!f.materialDescription.trim()) return "Material Description wajib diisi.";
+    if (!f.scheduledDate) return "Tanggal wajib diisi.";
+    if (!f.codeTanki.trim()) return "Code Tanki wajib diisi.";
+    if (!isKnownTankCode(tanks, f.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
+    return null;
+  }
+
   const manualScheduleMutation = useMutation({
     mutationFn: () => {
-      const payload = {
+      // Code Tanki sekarang WAJIB (lihat validateManualSchedule di atas), jadi
+      // SELALU lewat POST /booking (yg otomatis bikin jadwal Kalender-nya jg
+      // lewat syncPwoScheduleFromPlannedStart, lihat komentar di
+      // tankManualInput.routes.ts) -- 1 Order langsung kelihatan di KEDUA menu
+      // (Kalender & Tank Monitoring) sekali submit. Jalur "jadwal polos tanpa
+      // booking" (POST /pwo-schedule) sudah tidak lagi bisa dicapai dari form
+      // ini (2026-11-16, instruksi eksplisit user).
+      return api.post("/tank-manual-input/booking", {
+        section,
         order: manualScheduleForm.order.trim(),
         materialNumber: manualScheduleForm.materialNumber.trim(),
         materialDescription: manualScheduleForm.materialDescription.trim(),
         batch: manualScheduleForm.batch.trim(),
-      };
-      // Code Tanki diisi -> sekalian booking tanki (POST /booking SUDAH
-      // otomatis bikin jadwal Kalender-nya jg lewat syncPwoScheduleFromPlannedStart,
-      // lihat komentar di tankManualInput.routes.ts) -- 1 Order langsung
-      // kelihatan di KEDUA menu (Kalender & Tank Monitoring) sekali submit.
-      // Kosong -> tetap jadwal polos spt sebelumnya (POST /pwo-schedule).
-      if (manualScheduleForm.codeTanki.trim()) {
-        return api.post("/tank-manual-input/booking", {
-          section,
-          codeTanki: manualScheduleForm.codeTanki.trim(),
-          ...payload,
-          plannedStart: manualScheduleForm.scheduledDate,
-        });
-      }
-      return api.post("/premix-aftermix/pwo-schedule", { section, ...payload, scheduledDate: manualScheduleForm.scheduledDate });
+        codeTanki: manualScheduleForm.codeTanki.trim(),
+        plannedStart: manualScheduleForm.scheduledDate,
+      });
     },
     onSuccess: () => {
       setManualScheduleError("");
@@ -480,6 +492,16 @@ export default function PremixAftermixPage({
     },
     onError: (err) => setManualScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal manual."),
   });
+
+  function handleManualScheduleSave() {
+    const err = validateManualSchedule();
+    if (err) {
+      setManualScheduleError(err);
+      return;
+    }
+    setManualScheduleError("");
+    manualScheduleMutation.mutate();
+  }
 
   const deleteScheduleMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/premix-aftermix/pwo-schedule/${id}`),
@@ -1715,9 +1737,8 @@ export default function PremixAftermixPage({
           <p style={{ marginTop: 0, marginBottom: 12, fontSize: "0.78rem", color: "var(--text-muted)" }}>
             Khusus Order yang sudah diputuskan MRP hari ini tapi belum kedapatan di Master Data COOISPI (sync cuma
             2x/hari) -- isi manual di sini supaya tetap bisa langsung dijadwalkan ke Kalender. Begitu COOISPI sync
-            berikutnya jalan, Today-ATP Order ini otomatis ikut muncul tanpa langkah tambahan. Isi Code Tanki kalau
-            Order ini sekalian mau dibooking tankinya -- langsung kelihatan di Tank Monitoring juga, kosongkan kalau
-            belum mau booking tanki.
+            berikutnya jalan, Today-ATP Order ini otomatis ikut muncul tanpa langkah tambahan. Semua kolom di bawah
+            wajib diisi, termasuk Code Tanki -- sekalian booking tankinya, langsung kelihatan di Tank Monitoring juga.
           </p>
           <div className="field-grid">
             <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -1760,8 +1781,8 @@ export default function PremixAftermixPage({
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <TankSelect
                 id="manual-schedule-tank"
-                label="Code Tanki (opsional -- isi utk sekalian booking)"
-                required={false}
+                label="Code Tanki"
+                required
                 value={manualScheduleForm.codeTanki}
                 onChange={(v) => setManualScheduleForm((f) => ({ ...f, codeTanki: v }))}
               />
@@ -1772,19 +1793,10 @@ export default function PremixAftermixPage({
             className="btn"
             type="button"
             style={{ marginTop: 12 }}
-            disabled={
-              !manualScheduleForm.order.trim() ||
-              !manualScheduleForm.scheduledDate ||
-              !isKnownTankCode(tanks, manualScheduleForm.codeTanki) ||
-              manualScheduleMutation.isPending
-            }
-            onClick={() => manualScheduleMutation.mutate()}
+            disabled={manualScheduleMutation.isPending}
+            onClick={handleManualScheduleSave}
           >
-            {manualScheduleMutation.isPending
-              ? "Menyimpan..."
-              : manualScheduleForm.codeTanki.trim()
-                ? "Simpan Jadwal + Booking Tanki"
-                : "Simpan Jadwal"}
+            {manualScheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal + Booking Tanki"}
           </button>
         </Modal>
       )}

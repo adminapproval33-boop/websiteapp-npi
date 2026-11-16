@@ -22,6 +22,19 @@ export const MENU_KEYS = [
   "productionLabel",
   "productionLabelFg",
   "purchaseRequisition",
+  "kepalaWarna",
+  /// 4 tombol toolbar Production Order Monitoring (2026-11-16, instruksi
+  /// eksplisit user) -- "Booking & Schedule Tanki" & "newPoProduk" murni
+  /// navigasi/buka popup (Save-nya sendiri sudah digerbangi menu tujuan
+  /// masing2, mis. premix/aftermix), jadi di sini levelnya cuma
+  /// menentukan tombolnya TAMPIL atau TIDAK (Hide), View & Input
+  /// berperilaku sama. "pindahTanki" & "inputManualPo" py Save sendiri
+  /// (POST /dashboard/pindah-tanki & productionOrderManualInputRouter),
+  /// jadi View di situ beneran membedakan "bisa lihat" vs "bisa Save".
+  "pindahTanki",
+  "bookingScheduleTanki",
+  "inputManualPo",
+  "newPoProduk",
 ] as const;
 
 export type MenuKey = (typeof MENU_KEYS)[number];
@@ -41,6 +54,11 @@ export const MENU_LABELS: Record<MenuKey, string> = {
   productionLabel: "Label Entry SFG",
   productionLabelFg: "Label Entry FG",
   purchaseRequisition: "Purchase Requisition",
+  kepalaWarna: "Stok Kepala Warna",
+  pindahTanki: "Pindah Tanki (Production Order)",
+  bookingScheduleTanki: "Booking & Schedule Tanki (Production Order)",
+  inputManualPo: "+Input Manual (Production Order)",
+  newPoProduk: "+New PO Produk (Production Order)",
 };
 
 export function isMenuKey(v: unknown): v is MenuKey {

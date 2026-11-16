@@ -18,6 +18,13 @@ export const MENU_KEYS = [
   "productionLabel",
   "productionLabelFg",
   "purchaseRequisition",
+  "kepalaWarna",
+  /// 4 tombol toolbar Production Order Monitoring (2026-11-16, instruksi
+  /// eksplisit user) -- lihat komentar lengkap di server/src/lib/menuAccess.ts.
+  "pindahTanki",
+  "bookingScheduleTanki",
+  "inputManualPo",
+  "newPoProduk",
 ] as const;
 
 export type MenuKey = (typeof MENU_KEYS)[number];
@@ -37,6 +44,11 @@ export const MENU_LABELS: Record<MenuKey, string> = {
   productionLabel: "Label Entry SFG",
   productionLabelFg: "Label Entry FG",
   purchaseRequisition: "Purchase Requisition",
+  kepalaWarna: "Stok Kepala Warna",
+  pindahTanki: "Pindah Tanki (Production Order)",
+  bookingScheduleTanki: "Booking & Schedule Tanki (Production Order)",
+  inputManualPo: "+Input Manual (Production Order)",
+  newPoProduk: "+New PO Produk (Production Order)",
 };
 
 /** Path menu (lihat layout/menu.tsx) -> MenuKey -- dipakai utk sembunyikan
@@ -58,6 +70,7 @@ export const MENU_KEY_BY_PATH: Record<string, MenuKey> = {
   "/pr/entry": "purchaseRequisition",
   "/pr/history": "purchaseRequisition",
   "/pr/monitoring": "purchaseRequisition",
+  "/warehouse/kepala-warna": "kepalaWarna",
 };
 
 export type MenuLevel = "VIEW" | "INPUT" | "HIDE";

@@ -26,6 +26,7 @@ import ProductionLabelEntryFgPage from "../pages/ProductionLabel/ProductionLabel
 import MaintenanceHubPage from "../pages/Maintenance/MaintenanceHubPage";
 import BackupManagementPage from "../pages/Backup/BackupManagementPage";
 import SmtpSettingsPage from "../pages/Smtp/SmtpSettingsPage";
+import KepalaWarnaPage from "../pages/KepalaWarna/KepalaWarnaPage";
 
 export interface MenuLeaf {
   type: "leaf";
@@ -85,6 +86,7 @@ export const menuTree: MenuNode[] = [
     leaf("Label Entry FG", "/production-label/entry-fg", <ProductionLabelEntryFgPage />),
   ]),
   leaf("Maintenance", "/maintenance/form", <MaintenanceHubPage />),
+  leaf("Stok Kepala Warna", "/warehouse/kepala-warna", <KepalaWarnaPage />),
   group("Purchase Requisition", [
     leaf("PR Entry", "/pr/entry", undefined, OUT_OF_SCOPE),
     leaf("PR History", "/pr/history", undefined, OUT_OF_SCOPE),

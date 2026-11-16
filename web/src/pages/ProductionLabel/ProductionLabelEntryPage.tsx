@@ -5,7 +5,7 @@ import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
 import BarcodeSvg from "../../components/BarcodeSvg";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
-import { formatDateDDMMYYYY, toDateTimeLocalValue, validateNotFutureDate } from "../../lib/datetime";
+import { formatDateDDMMYYYY, parseDDMMYYYYToInputDate, toDateTimeLocalValue, validateNotFutureDate } from "../../lib/datetime";
 import LabelHistoryPage from "./LabelHistoryPage";
 import "../../styles/printLabel.css";
 
@@ -145,18 +145,6 @@ interface ProductionLabelHistoryRow {
   /// Cuma ada di ProductionLabelFg (kolom baru KHUSUS FG, field QR Code Yamaha) -- undefined saat apiBase SFG, aman krn dibaca via `?? "" `.
   viskositas?: string | null;
   sg?: string | null;
-}
-
-/** Lot No disimpan di DB sbg string "dd-mm-yyyy" (lihat `formatDateDDMMYYYY`
- * saat Save), tapi input Lot No di form ini `<input type="date">` yg butuh
- * format "yyyy-mm-dd" -- kebalikan dari `formatDateDDMMYYYY`, khusus dipakai
- * utk autofill dari History (tidak ada arah ini di lib/datetime.ts krn cuma
- * dipakai di sini). */
-function parseDDMMYYYYToInputDate(value: string | null | undefined): string {
-  const match = (value ?? "").trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (!match) return "";
-  const [, dd, mm, yyyy] = match;
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 /** Label Entry SFG (menu, 2026-08-20 -- sebelumnya "Production Label Entry")

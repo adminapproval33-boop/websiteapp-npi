@@ -95,6 +95,19 @@ export function formatDateDDMMYYYY(value: string | Date | null | undefined): str
   return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 
+/** Kebalikan dari `formatDateDDMMYYYY` -- "dd-mm-yyyy" (format tersimpan di
+ * DB, mis. `ProductionLabel.lotNo`) -> "yyyy-mm-dd" (format yg dipahami
+ * <input type="date">). Dipindah dari ProductionLabelEntryPage.tsx
+ * (2026-11-13, instruksi eksplisit user: kolom "Lot" Stok Kepala Warna jadi
+ * date picker, disambungkan ke Label Entry) supaya 1 implementasi dipakai
+ * bareng, bukan disalin ulang. */
+export function parseDDMMYYYYToInputDate(value: string | null | undefined): string {
+  const match = (value ?? "").trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) return "";
+  const [, dd, mm, yyyy] = match;
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 /**
  * Format tanggal "mentah" (YYYY-MM-DD HH:mm:ss) KHUSUS untuk export CSV --
  * bukan `formatDateTime` yang sudah diformat jadi teks lokal ("17 Jul 2026,

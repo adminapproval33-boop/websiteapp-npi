@@ -127,6 +127,13 @@ model MasterOrder {
   updatedAt               DateTime @updatedAt
 
   @@index([materialNumber])
+  /// 2026-11-13, dipakai modul Stok Kepala Warna (kepalaWarna.routes.ts) utk
+  /// lookup Batch -> Order/Material Number/Material Description -- REUSE
+  /// tabel ini (sudah disync lewat Master Data > Referensi Order/PO, SUMBER
+  /// SAMA persis dgn file COOISPI yg dulu ditempel manual via macro VBA
+  /// `UPDMSTRNEW`), BUKAN tabel master baru -- menghindari duplikasi data
+  /// yg sama & sync terpisah.
+  @@index([batch])
   @@map("master_orders")
 }
 
@@ -1192,4 +1199,61 @@ model SmtpSetting {
   updatedByNik String?
 
   @@map("smtp_settings")
+}
+
+/// Master slot rak gudang Kepala Warna (pasta warna/tinting), mis.
+/// "RAK.IU1.A.1" (2026-11-13, instruksi eksplisit user: adopsi logika macro
+/// VBA workbook "DATA KEPALA WARNA RAK 123.xlsm" ke web). Beda dari sheet
+/// Excel "ZONA" asalnya (nilai kosong/terisi diketik manual, kapasitas per
+/// zona statis) -- di sini `occupied`/`currentBatch` di-set OTOMATIS oleh
+/// KwTransaction (Masuk -> terisi, Keluar -> kosong lagi), dan kapasitas per
+/// zona dihitung live dari COUNT slot per `zonaGroup`, bukan kolom tersendiri
+/// yg bisa basi. Asumsi 1 slot cuma utk 1 Batch pada satu waktu (dikonfirmasi
+/// user).
+model KwRackSlot {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  /// Turunan dari `code` tanpa nomor slot, mis. "RAK.IU1.A." dari
+  /// "RAK.IU1.A.1" -- dipakai grouping kapasitas per baris rak.
+  zonaGroup    String
+  occupied     Boolean  @default(false)
+  currentBatch String?
+  updatedAt    DateTime @updatedAt
+
+  @@index([zonaGroup])
+  @@map("kw_rack_slots")
+}
+
+/// Histori transaksi Masuk & Keluar rak Kepala Warna, gabung 1 tabel
+/// (gantikan sheet Excel "HIST IN OUT ZONA KEPALA WARNA" -- di Excel baris
+/// terbaru di-insert ke row paling atas via macro, di sini cukup
+/// `ORDER BY timestamp DESC` biasa). `type` membedakan IN/OUT: field "KHUSUS
+/// OUT" (`noPoProses`/`matCodeProses`/`itemProses`) null kalau `type="IN"`.
+/// `qty` SATU angka total (instruksi eksplisit user 2026-11-13: tidak perlu
+/// dipecah per baris spt "Total Qty Out = SUM(C18:L29)" di Excel). Field
+/// "Selisih Timbangan" Excel SENGAJA tidak diikutkan (instruksi eksplisit
+/// user: dihapus, rumusnya di Excel toh selalu 0).
+model KwTransaction {
+  id                  Int       @id @default(autoincrement())
+  type                String    // "IN" | "OUT"
+  rackCode            String
+  batch               String
+  materialNumber      String?
+  materialDescription String?
+  noPo                String?
+  lot                 String?
+  exp                 DateTime?
+  qty                 String?
+  /// KHUSUS type="OUT" -- tujuan pemakaian (lookup Mat Code/Item Proses dari
+  /// KwMaster by No PO Proses).
+  noPoProses          String?
+  matCodeProses       String?
+  itemProses          String?
+  ket                 String?
+  inputBy             String
+  timestamp           DateTime  @default(now())
+
+  @@index([batch])
+  @@index([rackCode])
+  @@map("kw_transactions")
 }

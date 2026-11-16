@@ -11,6 +11,7 @@ import { premixAftermixRouter } from "./modules/premixAftermix/premixAftermix.ro
 import { millingRouter } from "./modules/milling/milling.routes";
 import { colourMatchingRouter } from "./modules/colourMatching/colourMatching.routes";
 import { bongkaranRouter } from "./modules/bongkaran/bongkaran.routes";
+import { kepalaWarnaRouter } from "./modules/kepalaWarna/kepalaWarna.routes";
 import { packingRouter } from "./modules/packing/packing.routes";
 import { productSpecRouter } from "./modules/productSpec/productSpec.routes";
 import { checkResultsRouter } from "./modules/checkResults/checkResults.routes";
@@ -53,6 +54,7 @@ export function createApp() {
   app.use("/api/milling", millingRouter);
   app.use("/api/colour-matching", colourMatchingRouter);
   app.use("/api/bongkaran", bongkaranRouter);
+  app.use("/api/kepala-warna", kepalaWarnaRouter);
   app.use("/api/packing", packingRouter);
   app.use("/api/product-specs", productSpecRouter);
   app.use("/api/check-results", checkResultsRouter);

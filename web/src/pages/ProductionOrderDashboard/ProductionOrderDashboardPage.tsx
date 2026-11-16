@@ -18,6 +18,8 @@ import OrderLookup from "../../components/OrderLookup";
 import ManualInputModal from "./ManualInputModal";
 import PindahTankiModal from "../../components/PindahTankiModal";
 import { PROCESS_FILTER_ORDER } from "../../components/ProcessBadge";
+import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 
 interface ProductionOrderRow {
   order: string;
@@ -366,6 +368,18 @@ function MillingDetailTable({ detail }: { detail: MillingDetail }) {
 }
 
 export default function ProductionOrderDashboardPage() {
+  // Akses per-tombol (2026-11-16, instruksi eksplisit user) -- "Hide" =
+  // tombol tidak dirender sama sekali. "pindahTanki"/"inputManualPo" py Save
+  // sendiri yg jg digerbangi server (requireMenuInput) kalau levelnya "View"
+  // -- tombolnya tetap dirender (biar bisa dilihat) tapi Save-nya ditolak
+  // server. "bookingScheduleTanki"/"newPoProduk" murni navigasi/buka popup
+  // tanpa Save sendiri, jadi View & Input tampil sama (cuma Hide yg beda).
+  const { user } = useAuth();
+  const pindahTankiLevel = getMenuLevel(user, "pindahTanki");
+  const bookingScheduleTankiLevel = getMenuLevel(user, "bookingScheduleTanki");
+  const inputManualPoLevel = getMenuLevel(user, "inputManualPo");
+  const newPoProdukLevel = getMenuLevel(user, "newPoProduk");
+
   const [search, setSearch] = useState("");
   // Filter rentang tanggal "Dari"/"Sampai" (2026-11-11, instruksi eksplisit
   // user: "supaya saat nanti datanya sudah banyak, user bisa memfilter data
@@ -524,30 +538,6 @@ export default function ProductionOrderDashboardPage() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
           />
-          {/* Filter rentang tanggal (2026-11-11, instruksi eksplisit user) --
-              berdasarkan tanggal mulai tahap PALING AWAL yg disentuh Order
-              (`earliestTouch`), lihat komentar lengkap di state `dateFrom`
-              di atas. */}
-          <div className="field" style={{ gap: 4 }}>
-            <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Dari Tanggal</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: 7 }} />
-          </div>
-          <div className="field" style={{ gap: 4 }}>
-            <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Sampai Tanggal</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: 7 }} />
-          </div>
-          {(dateFrom || dateTo) && (
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => {
-                setDateFrom("");
-                setDateTo("");
-              }}
-            >
-              ✕ Reset Tanggal
-            </button>
-          )}
         </div>
         {(dateFrom || dateTo) && (
           <p style={{ marginTop: -6, marginBottom: 12, fontSize: "0.78rem", color: "var(--text-muted)" }}>
@@ -561,56 +551,94 @@ export default function ProductionOrderDashboardPage() {
           exportFileName="dashboard-production-orders"
           storageKey="dashboard-production-orders"
           freezeFirstColumn
+          toolbarExtraLeft={
+            <>
+              {/* Filter rentang tanggal (2026-11-11, instruksi eksplisit user) --
+                  berdasarkan tanggal mulai tahap PALING AWAL yg disentuh Order
+                  (`earliestTouch`), lihat komentar lengkap di state `dateFrom`
+                  di atas. Disejajarkan dgn toolbar "☰ Kolom/🔍 Filter/dst"
+                  (2026-11-16, instruksi eksplisit user), bukan baris sendiri
+                  di atas tabel spt sebelumnya. */}
+              <div className="field" style={{ gap: 4 }}>
+                <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Dari Tanggal</label>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: 7 }} />
+              </div>
+              <div className="field" style={{ gap: 4 }}>
+                <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)" }}>Sampai Tanggal</label>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: 7 }} />
+              </div>
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
+                >
+                  ✕ Reset Tanggal
+                </button>
+              )}
+            </>
+          }
           toolbarExtra={
             <>
-              <button type="button" className="btn btn-outline" onClick={() => setPindahTankiOpen(true)}>
-                🔄 Pindah Tanki
-              </button>
-              <div style={{ position: "relative" }}>
-                <button type="button" className="btn btn-topbar-blue" onClick={() => setShowPwoQueueMenu((s) => !s)}>
-                  📅 PWO Schedule &amp; Queue ▾
+              {pindahTankiLevel !== "HIDE" && (
+                <button type="button" className="btn btn-outline" onClick={() => setPindahTankiOpen(true)}>
+                  🔄 Pindah Tanki
                 </button>
-                {showPwoQueueMenu && (
-                  <div
-                    className="panel"
-                    style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 160, padding: 6 }}
-                  >
-                    <a
-                      href="/planning/premix?tab=queue"
-                      target="_blank"
-                      rel="noopener"
-                      className="btn btn-outline"
-                      style={{ display: "block", textAlign: "left", marginBottom: 6 }}
-                      onClick={() => setShowPwoQueueMenu(false)}
+              )}
+              {bookingScheduleTankiLevel !== "HIDE" && (
+                <div style={{ position: "relative" }}>
+                  <button type="button" className="btn btn-topbar-blue" onClick={() => setShowPwoQueueMenu((s) => !s)}>
+                    📅 Booking &amp; Schedule Tanki ▾
+                  </button>
+                  {showPwoQueueMenu && (
+                    <div
+                      className="panel"
+                      style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 20, minWidth: 160, padding: 6 }}
                     >
-                      Premix
-                    </a>
-                    <a
-                      href="/planning/aftermix?tab=queue"
-                      target="_blank"
-                      rel="noopener"
-                      className="btn btn-outline"
-                      style={{ display: "block", textAlign: "left" }}
-                      onClick={() => setShowPwoQueueMenu(false)}
-                    >
-                      Aftermix
-                    </a>
-                  </div>
-                )}
-              </div>
-              <button type="button" className="btn" onClick={() => setManualInputOpen(true)}>
-                📝 +Input Manual
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setNewOrderValue("");
-                  setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
-                }}
-              >
-                🆕 +New PO Produk
-              </button>
+                      <a
+                        href="/planning/premix?tab=queue"
+                        target="_blank"
+                        rel="noopener"
+                        className="btn btn-outline"
+                        style={{ display: "block", textAlign: "left", marginBottom: 6 }}
+                        onClick={() => setShowPwoQueueMenu(false)}
+                      >
+                        Premix
+                      </a>
+                      <a
+                        href="/planning/aftermix?tab=queue"
+                        target="_blank"
+                        rel="noopener"
+                        className="btn btn-outline"
+                        style={{ display: "block", textAlign: "left" }}
+                        onClick={() => setShowPwoQueueMenu(false)}
+                      >
+                        Aftermix
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+              {inputManualPoLevel !== "HIDE" && (
+                <button type="button" className="btn" onClick={() => setManualInputOpen(true)}>
+                  📝 +Input Manual
+                </button>
+              )}
+              {newPoProdukLevel !== "HIDE" && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    setNewOrderValue("");
+                    setInfoTarget({ order: "", materialNumber: null, stages: [], orderType: null, viaSearch: true });
+                  }}
+                >
+                  🆕 +New PO Produk
+                </button>
+              )}
             </>
           }
           rows={rowsQuery.data ?? []}

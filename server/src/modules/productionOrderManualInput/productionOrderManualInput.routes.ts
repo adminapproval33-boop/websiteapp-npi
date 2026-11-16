@@ -3,13 +3,14 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { sanitizeNik, sanitizeMembers } from "../../lib/employeeNik";
 import { isValidTankCode } from "../../lib/tankCode";
 import { notFutureDate } from "../../lib/dateValidation";
 
 export const productionOrderManualInputRouter = Router();
 productionOrderManualInputRouter.use(requireAuth);
+productionOrderManualInputRouter.use(requireMenuView("inputManualPo"));
 
 const saveSchema = z.object({
   order: z.string().trim().min(1, "Order wajib diisi."),
@@ -45,6 +46,7 @@ productionOrderManualInputRouter.get(
 productionOrderManualInputRouter.post(
   "/",
   requireWrite,
+  requireMenuInput("inputManualPo"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -76,6 +78,7 @@ productionOrderManualInputRouter.post(
 productionOrderManualInputRouter.put(
   "/:id",
   requireWrite,
+  requireMenuInput("inputManualPo"),
   asyncRoute(async (req, res) => {
     const parsed = saveSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -104,6 +107,7 @@ productionOrderManualInputRouter.put(
 productionOrderManualInputRouter.delete(
   "/:id",
   requireWrite,
+  requireMenuInput("inputManualPo"),
   asyncRoute(async (req, res) => {
     const existing = await prisma.productionOrderManualInput.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new HttpError(404, "Data tidak ditemukan.");

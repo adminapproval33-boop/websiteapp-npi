@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { evaluateSpec } from "../../lib/specEval";
 import { parseQtyNumber } from "../../lib/qty";
 import { parseBookingSection } from "../../lib/tankBooking";
@@ -3822,6 +3822,7 @@ async function resolveCurrentCodeTanki(order: string): Promise<string | null> {
  * TETAP 200 (bukan 400 spt POST /pindah-tanki) krn ini cuma preview/baca. */
 dashboardRouter.get(
   "/pindah-tanki/current-tank",
+  requireMenuView("pindahTanki"),
   asyncRoute(async (req, res) => {
     const order = String(req.query.order ?? "").trim();
     if (!order) {
@@ -3958,6 +3959,7 @@ async function mutatePindahTankiHistoryLine(
  * Diurutkan tanggal terbaru dulu. */
 dashboardRouter.get(
   "/pindah-tanki/history",
+  requireMenuView("pindahTanki"),
   asyncRoute(async (_req, res) => {
     const [paRows, cmRows, crRows, apRows, pkRows, millingRows] = await Promise.all([
       prisma.premixAftermixLog.findMany({ where: { remark: { contains: "[Pindah Tanki]" } }, select: { id: true, order: true, remark: true } }),
@@ -4043,6 +4045,7 @@ const historyDeleteSchema = z.object({
 dashboardRouter.delete(
   "/pindah-tanki/history",
   requireWrite,
+  requireMenuInput("pindahTanki"),
   asyncRoute(async (req, res) => {
     const parsed = historyDeleteSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -4081,6 +4084,7 @@ dashboardRouter.delete(
 dashboardRouter.post(
   "/pindah-tanki",
   requireWrite,
+  requireMenuInput("pindahTanki"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = pindahTankiSchema.safeParse(req.body);
     if (!parsed.success) {

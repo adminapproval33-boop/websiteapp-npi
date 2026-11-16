@@ -6,7 +6,7 @@ import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/Ta
 import IuPlantSelect from "../../components/IuPlantSelect";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
-import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
+import { ExcelBlock, ExcelRow, ExcelField, ExcelSubHeader } from "../../components/ExcelGrid";
 import { formatInputBy, useEmployeeOptions } from "../../components/EmployeeNameSelect";
 import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { evaluateSpec, SPEC_VERDICT_COLOR, SPEC_VERDICT_LABEL } from "../../lib/specEval";
@@ -166,11 +166,20 @@ const HEADER_COL_DEFAULT_WIDTHS: Record<string, number> = {
   lotPassed: 170,
   qcToApproval: 170,
   qcPassed: 170,
+  // 4 field Check Results yg sekarang ikut jadi baris sendiri di tabel
+  // header ini (2026-11-16, instruksi eksplisit user: samakan formatnya dgn
+  // tabel "Portal Quality Control » Input Admin QC" -- sebelumnya blok flex
+  // terpisah di luar ExcelBlock).
+  tanggalMasukQc: 180,
+  flc: 120,
+  custSegmen: 160,
+  customer: 180,
 };
 
 const HEADER_COL_ROWS: string[][] = [
   ["order", "materialNumber", "materialDescription", "batch", "orderQty", "plant"],
   ["iuPlant", "codeTanki", "typeLot", "lotPassed", "qcToApproval", "qcPassed"],
+  ["tanggalMasukQc", "flc", "custSegmen", "customer"],
 ];
 
 const SPEC_TABLE_DEFAULT_WIDTHS: Record<string, number> = {
@@ -790,7 +799,51 @@ export default function AdminQcPage({
                   <input type="datetime-local" value={toDateTimeLocalValue(form.qcPassed)} onChange={(e) => setForm({ ...form, qcPassed: e.target.value })} required={qcPassedRequired} />
                 </ExcelField>
               </ExcelRow>
+              {/* Field Check Results yg sekarang BISA diedit dari Admin QC
+                  jg (2026-11-16, instruksi eksplisit user, revisi dari
+                  read-only, lalu disamakan formatnya dgn tabel di atas) --
+                  perubahan di sini disinkronkan balik ke Check Results &
+                  History-nya saat Save (lihat saveMutation, PUT
+                  /check-results/:checkId/admin-qc-fields). Urutan SENGAJA
+                  QC Entry Date, FLC, Cust Segmen, Customer (instruksi
+                  eksplisit user). Baris ini cuma muncul kalau Order ybs
+                  terhubung ke Check Results (checkInfo terisi). */}
+              {checkInfo && (
+                <>
+                  <ExcelSubHeader label="Dari Input Check Results" color="qc" />
+                  <ExcelRow>
+                  <ExcelField label="QC Entry Date *" widthPx={headerColWidths.tanggalMasukQc} onResizeStart={beginHeaderResize("tanggalMasukQc")} {...gridNav("tanggalMasukQc")}>
+                    <input
+                      type="datetime-local"
+                      value={form.tanggalMasukQc}
+                      onChange={(e) => setForm({ ...form, tanggalMasukQc: e.target.value })}
+                      required
+                    />
+                  </ExcelField>
+                  <ExcelField label="FLC" widthPx={headerColWidths.flc} onResizeStart={beginHeaderResize("flc")} {...gridNav("flc")}>
+                    <select value={form.flc} onChange={(e) => setForm({ ...form, flc: e.target.value })}>
+                      <option value="Reguler">Reguler</option>
+                      <option value="FLC 1">FLC 1</option>
+                      <option value="FLC 2">FLC 2</option>
+                      <option value="FLC 3">FLC 3</option>
+                    </select>
+                  </ExcelField>
+                  <ExcelField label="Cust Segmen" widthPx={headerColWidths.custSegmen} onResizeStart={beginHeaderResize("custSegmen")} {...gridNav("custSegmen")}>
+                    <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
+                  </ExcelField>
+                  <ExcelField label="Customer" widthPx={headerColWidths.customer} onResizeStart={beginHeaderResize("customer")} {...gridNav("customer")}>
+                    <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
+                  </ExcelField>
+                  </ExcelRow>
+                </>
+              )}
             </ExcelBlock>
+            {checkInfo && (
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 4 }}>
+                Baris "QC Entry Date / FLC / Cust Segmen / Customer" di atas berasal dari <strong>Input Check Results</strong> --
+                bisa diubah di sini, perubahannya otomatis ikut tersimpan ke Input Check Results &amp; History-nya juga.
+              </p>
+            )}
 
             <h3 className="pp-section-title" style={{ marginTop: 18 }}>
               Spec Parameters
@@ -810,49 +863,6 @@ export default function AdminQcPage({
                 {checkPassthrough.checkId ? `Terhubung ke Check Results ${checkPassthrough.checkId}` : "Spec Parameters dari Product Spek"} (
                 {params.length} item check).
               </p>
-            )}
-            {checkInfo && (
-              <>
-                {/* Field Check Results yg sekarang BISA diedit dari Admin QC
-                    jg (2026-11-16, instruksi eksplisit user, revisi dari
-                    read-only) -- perubahan di sini disinkronkan balik ke
-                    Check Results & History-nya saat Save (lihat saveMutation,
-                    PUT /check-results/:checkId/admin-qc-fields). Urutan
-                    SENGAJA QC Entry Date, FLC, Cust Segmen, Customer (instruksi
-                    eksplisit user). */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
-                  <div className="field" style={{ flex: "1 1 180px" }}>
-                    <label title="Ikut tersinkron ke Input Check Results saat Save">QC Entry Date *</label>
-                    <input
-                      type="datetime-local"
-                      value={form.tanggalMasukQc}
-                      onChange={(e) => setForm({ ...form, tanggalMasukQc: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="field" style={{ flex: "1 1 140px" }}>
-                    <label title="Ikut tersinkron ke Input Check Results saat Save">FLC</label>
-                    <select value={form.flc} onChange={(e) => setForm({ ...form, flc: e.target.value })}>
-                      <option value="Reguler">Reguler</option>
-                      <option value="FLC 1">FLC 1</option>
-                      <option value="FLC 2">FLC 2</option>
-                      <option value="FLC 3">FLC 3</option>
-                    </select>
-                  </div>
-                  <div className="field" style={{ flex: "1 1 180px" }}>
-                    <label title="Ikut tersinkron ke Input Check Results saat Save">Cust Segmen</label>
-                    <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
-                  </div>
-                  <div className="field" style={{ flex: "1 1 180px" }}>
-                    <label title="Ikut tersinkron ke Input Check Results saat Save">Customer</label>
-                    <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
-                  </div>
-                </div>
-                <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: -4 }}>
-                  4 field di atas berasal dari <strong>Input Check Results</strong> -- bisa diubah di sini, perubahannya
-                  otomatis ikut tersimpan ke Input Check Results &amp; History-nya juga.
-                </p>
-              </>
             )}
             <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
               Tabel di bawah ini hanya tampilan (view-only) -- untuk mengisi/mengubah Result, Start, Finish, atau PIC,

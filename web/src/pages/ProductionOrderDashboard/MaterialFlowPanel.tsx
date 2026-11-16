@@ -32,6 +32,7 @@ const BOOKING_COL_ROWS: string[][] = [
 ];
 import { api, ApiError } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
+import { getMenuLevel } from "../../lib/menuAccess";
 import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
 import PindahTankiModal from "../../components/PindahTankiModal";
 import type { OrderRefData } from "../../components/OrderLookup";
@@ -128,6 +129,13 @@ export default function MaterialFlowPanel({
    * -- backend sinkron, lihat requireWrite di masterdata.routes.ts PUT
    * /material-flow/:materialNumber). */
   const canEdit = user?.access === "FULL_ACCESS" || user?.access === "INPUT";
+  // Akses booking tanki (2026-11-16, instruksi eksplisit user) -- SATU key
+  // "bookingScheduleTanki" ini jadi satu-satunya saklar booking, lepas dari
+  // menu/tombol mana yg dipakai (lihat komentar lengkap di
+  // tankManualInput.routes.ts). Hide -> tombol Booking/Batalkan disembunyikan
+  // total; View -> tombolnya tetap kelihatan (spy bisa lihat status booking
+  // aktif) tapi disabled, tidak bisa Save/Batalkan.
+  const bookingAccessLevel = getMenuLevel(user, "bookingScheduleTanki");
   const isRfOrder = orderType === "RF01" || orderType === "RF02";
   const [checked, setChecked] = useState<Record<FlowField, boolean> | null>(null);
   const [message, setMessage] = useState("");
@@ -345,6 +353,10 @@ export default function MaterialFlowPanel({
   }
 
   function submitBooking() {
+    // Jaga-jaga (2026-11-16, instruksi eksplisit user) -- tombol "Booking"
+    // yg membuka modal ini sendiri sudah disabled utk View-only, ini cuma
+    // defense-in-depth.
+    if (bookingAccessLevel === "VIEW" || bookingAccessLevel === "HIDE") return;
     setBookingMessage("");
     setBookingError("");
     setBookingConflict(null);
@@ -461,13 +473,19 @@ export default function MaterialFlowPanel({
                 Buka Input ➜
               </button>
             )}
-            {order && canEdit && (s.name === "Premix" || s.name === "Aftermix") && (
+            {order && canEdit && bookingAccessLevel !== "HIDE" && (s.name === "Premix" || s.name === "Aftermix") && (
               <button
                 type="button"
                 className="btn"
                 style={{ padding: "3px 10px", fontSize: "0.78rem" }}
-                disabled={!isRequired}
-                title={isRequired ? `Booking tanki utk ${s.name}` : `Material ini tidak memakai proses ${s.name}.`}
+                disabled={!isRequired || bookingAccessLevel === "VIEW"}
+                title={
+                  bookingAccessLevel === "VIEW"
+                    ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa booking."
+                    : isRequired
+                      ? `Booking tanki utk ${s.name}`
+                      : `Material ini tidak memakai proses ${s.name}.`
+                }
                 onClick={() => {
                   setBookingStage(s.name as "Premix" | "Aftermix");
                   setBookingMessage("");
@@ -647,12 +665,13 @@ export default function MaterialFlowPanel({
                       {detail?.plannedStart ? ` — Rencana mulai ${formatDateTime(detail.plannedStart)}` : ""}
                       {detail ? ` — oleh ${detail.inputByName ? `${detail.inputByName} (${detail.inputBy})` : detail.inputBy}` : ""}
                     </span>
-                    {canEdit && (
+                    {canEdit && bookingAccessLevel !== "HIDE" && (
                       <button
                         type="button"
                         className="btn btn-outline"
                         style={{ padding: "2px 10px", fontSize: "0.75rem" }}
-                        disabled={cancelBookingMutation.isPending}
+                        disabled={cancelBookingMutation.isPending || bookingAccessLevel === "VIEW"}
+                        title={bookingAccessLevel === "VIEW" ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa membatalkan." : undefined}
                         onClick={() => cancelBookingMutation.mutate(b.code)}
                       >
                         Batalkan

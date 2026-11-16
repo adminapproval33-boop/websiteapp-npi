@@ -24,13 +24,21 @@ export const MENU_KEYS = [
   "purchaseRequisition",
   "kepalaWarna",
   /// 4 tombol toolbar Production Order Monitoring (2026-11-16, instruksi
-  /// eksplisit user) -- "Booking & Schedule Tanki" & "newPoProduk" murni
-  /// navigasi/buka popup (Save-nya sendiri sudah digerbangi menu tujuan
-  /// masing2, mis. premix/aftermix), jadi di sini levelnya cuma
-  /// menentukan tombolnya TAMPIL atau TIDAK (Hide), View & Input
-  /// berperilaku sama. "pindahTanki" & "inputManualPo" py Save sendiri
-  /// (POST /dashboard/pindah-tanki & productionOrderManualInputRouter),
-  /// jadi View di situ beneran membedakan "bisa lihat" vs "bisa Save".
+  /// eksplisit user) -- "newPoProduk" murni navigasi/buka popup, jadi di
+  /// situ levelnya cuma menentukan tombolnya TAMPIL atau TIDAK (Hide),
+  /// View & Input berperilaku sama. "pindahTanki" & "inputManualPo" py
+  /// Save sendiri (POST /dashboard/pindah-tanki &
+  /// productionOrderManualInputRouter), jadi View di situ beneran
+  /// membedakan "bisa lihat" vs "bisa Save".
+  /// "bookingScheduleTanki" DIREVISI sesi ini (2026-11-16, instruksi
+  /// eksplisit user): key ini SEKARANG jadi satu-satunya gate utk SEMUA
+  /// jalan booking tanki (Info Proses "Booking" di MaterialFlowPanel.tsx,
+  /// klik kartu Kalender -> BookingEditModal, & "+Input Manual Schedule"
+  /// di PremixAftermixPage.tsx) -- bukan cuma navigasi lagi. View beneran
+  /// membedakan "bisa lihat jadwal/booking" vs "bisa booking/edit/batal",
+  /// krn ke-4 endpoint /tank-manual-input/booking* di server digerbangi
+  /// requireMenuView/requireMenuInput("bookingScheduleTanki") langsung,
+  /// terlepas dari menu mana (premix/aftermix/dashboard) yg mengaksesnya.
   "pindahTanki",
   "bookingScheduleTanki",
   "inputManualPo",

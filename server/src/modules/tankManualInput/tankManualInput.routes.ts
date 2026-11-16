@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { asyncRoute, HttpError } from "../../middleware/errorHandler";
-import { requireAuth, requireWrite, requireFullAccess, AuthedRequest } from "../../middleware/auth";
+import { requireAuth, requireWrite, requireFullAccess, requireMenuView, requireMenuInput, AuthedRequest } from "../../middleware/auth";
 import { isValidTankCode } from "../../lib/tankCode";
 import { bookingRemark, parseBookingSection, findActiveBookingConflict, type BookingSection } from "../../lib/tankBooking";
 
@@ -127,8 +127,19 @@ const bookingSchema = z.object({
 // "tanki ini sudah dipakai Order apa saja" sebelum booking baru, bukan baru
 // ketahuan setelah bentrok. `inputBy` = NIK; frontend yg mengubahnya jadi
 // "Nama (NIK)" (formatInputBy), sama pola menu History.
+//
+// SEMUA 4 endpoint /booking* di bawah (GET di sini, POST /booking, POST
+// /booking/cancel, PUT /booking/:id) digerbangi menu key BARU
+// "bookingScheduleTanki" (2026-11-16, instruksi eksplisit user: 1 key ini
+// jadi SATU-SATUNYA saklar booking tanki, lepas dari menu/tombol mana yg
+// dipakai user utk sampai ke situ -- Info Proses "Booking", kartu Kalender
+// PWO Schedule & Queue, maupun "+Input Manual Schedule"). SEBELUM INI tidak
+// ada menu key sama sekali di sini, cuma `requireWrite` (level akses GLOBAL,
+// bukan per-menu) -- siapa saja yg bukan akses View bisa booking, tidak
+// peduli Premix/Aftermix-nya sendiri levelnya apa.
 tankManualInputRouter.get(
   "/booking",
+  requireMenuView("bookingScheduleTanki"),
   asyncRoute(async (req, res) => {
     const order = String(req.query.order ?? "").trim();
     const sectionParam = req.query.section;
@@ -163,6 +174,7 @@ tankManualInputRouter.get(
 tankManualInputRouter.post(
   "/booking",
   requireWrite,
+  requireMenuInput("bookingScheduleTanki"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = bookingSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -231,6 +243,7 @@ const cancelBookingSchema = z.object({
 tankManualInputRouter.post(
   "/booking/cancel",
   requireWrite,
+  requireMenuInput("bookingScheduleTanki"),
   asyncRoute(async (req, res) => {
     const parsed = cancelBookingSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -291,6 +304,7 @@ const editBookingSchema = z.object({
 tankManualInputRouter.put(
   "/booking/:id",
   requireWrite,
+  requireMenuInput("bookingScheduleTanki"),
   asyncRoute(async (req: AuthedRequest, res) => {
     const parsed = editBookingSchema.safeParse(req.body);
     if (!parsed.success) {

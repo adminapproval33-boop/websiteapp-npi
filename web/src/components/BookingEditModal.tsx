@@ -46,10 +46,16 @@ export default function BookingEditModal({
   ev,
   section,
   onClose,
+  readOnly,
 }: {
   ev: ScheduleEvent;
   section: "PREMIX" | "AFTERMIX";
   onClose: () => void;
+  /** Akses View-only utk menu "Booking & Schedule Tanki" (2026-11-16, instruksi
+   * eksplisit user: menu ini jadi SATU-SATUNYA gate semua cara booking tanki) --
+   * popup tetap bisa dibuka utk dilihat, tapi semua kolom & tombol Simpan
+   * dinonaktifkan. */
+  readOnly?: boolean;
 }) {
   const label = section === "PREMIX" ? "Premix" : "Aftermix";
   const prefix = `Booking ${label}`;
@@ -158,6 +164,7 @@ export default function BookingEditModal({
   });
 
   function submit() {
+    if (readOnly) return;
     setError("");
     setConflict(null);
     if (!codeTanki.trim()) {
@@ -194,13 +201,14 @@ export default function BookingEditModal({
         </ExcelRow>
         <ExcelRow>
           <ExcelField label="Code Tanki *">
-            <TankSelect bare id="pwo-booking-tank" value={codeTanki} onChange={setCodeTanki} />
+            <TankSelect bare id="pwo-booking-tank" value={codeTanki} onChange={setCodeTanki} disabled={readOnly} />
           </ExcelField>
           <ExcelField label="Rencana Mulai">
             <input
               type="datetime-local"
               value={plannedStart}
               onChange={(e) => setPlannedStart(e.target.value)}
+              disabled={readOnly}
             />
           </ExcelField>
           <ExcelField label="Booked By">
@@ -209,10 +217,15 @@ export default function BookingEditModal({
         </ExcelRow>
         <ExcelRow>
           <ExcelField label="Catatan">
-            <input value={note} onChange={(e) => setNote(e.target.value)} />
+            <input value={note} onChange={(e) => setNote(e.target.value)} disabled={readOnly} />
           </ExcelField>
         </ExcelRow>
       </ExcelBlock>
+      {readOnly && (
+        <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "#92400e" }}>
+          ⚠ Akses View-only utk menu "Booking & Schedule Tanki" -- hanya bisa melihat, tidak bisa menyimpan.
+        </p>
+      )}
       <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
         * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Booking) di Tank Monitoring dengan Order ini, dan gugur
         otomatis begitu Order ini di-input di tahap {label} atau tanki dipakai Order lain. Mengubah Rencana Mulai ikut
@@ -231,7 +244,7 @@ export default function BookingEditModal({
           ⚠ Tanki {codeTanki.trim()} masih dibooking aktif oleh Order {conflict.order}
           {conflict.plannedStart ? ` (rencana mulai ${formatDateTime(conflict.plannedStart)})` : ""}. Tetap lanjutkan juga?
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => saveMutation.mutate(true)}>
+            <button type="button" className="btn" style={{ padding: "4px 10px" }} disabled={readOnly} onClick={() => saveMutation.mutate(true)}>
               Tetap Lanjutkan
             </button>
             <button type="button" className="btn btn-outline" style={{ padding: "4px 10px" }} onClick={() => setConflict(null)}>
@@ -241,7 +254,13 @@ export default function BookingEditModal({
         </div>
       )}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-        <button type="button" className="btn" disabled={saveMutation.isPending} onClick={submit}>
+        <button
+          type="button"
+          className="btn"
+          disabled={readOnly || saveMutation.isPending}
+          title={readOnly ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa menyimpan." : undefined}
+          onClick={submit}
+        >
           {saveMutation.isPending ? "Menyimpan..." : existing ? "Simpan Perubahan" : "Simpan Booking"}
         </button>
       </div>

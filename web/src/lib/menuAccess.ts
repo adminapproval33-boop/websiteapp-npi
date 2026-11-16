@@ -20,7 +20,10 @@ export const MENU_KEYS = [
   "purchaseRequisition",
   "kepalaWarna",
   /// 4 tombol toolbar Production Order Monitoring (2026-11-16, instruksi
-  /// eksplisit user) -- lihat komentar lengkap di server/src/lib/menuAccess.ts.
+  /// eksplisit user) -- "bookingScheduleTanki" DIREVISI sesi ini jadi
+  /// satu-satunya gate utk SEMUA jalan booking tanki (Info Proses, klik
+  /// kartu Kalender, "+Input Manual Schedule"). Lihat komentar lengkap di
+  /// server/src/lib/menuAccess.ts.
   "pindahTanki",
   "bookingScheduleTanki",
   "inputManualPo",

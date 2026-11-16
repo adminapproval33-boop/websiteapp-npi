@@ -246,6 +246,13 @@ export default function PremixAftermixPage({
 }) {
   const { user } = useAuth();
   const isViewOnly = getMenuLevel(user, section === "PREMIX" ? "premix" : "aftermix") === "VIEW";
+  // Akses booking tanki (2026-11-16, instruksi eksplisit user) -- SATU key
+  // "bookingScheduleTanki" ini menggerbangi SEMUA jalan booking di halaman
+  // ini: klik kartu Kalender (BookingEditModal) & "+Input Manual Schedule"
+  // (SEKARANG selalu booking jg, Code Tanki wajib). Lihat komentar lengkap
+  // di tankManualInput.routes.ts & MaterialFlowPanel.tsx (Info Proses
+  // "Booking", gerbang yg sama).
+  const bookingAccessLevel = getMenuLevel(user, "bookingScheduleTanki");
   const { data: employees } = useEmployeeOptions();
   const { data: spvSuggestions } = useNameSuggestions("premixAftermix", "spv", section);
   const { data: leaderSuggestions } = useNameSuggestions("premixAftermix", "leader", section);
@@ -342,6 +349,12 @@ export default function PremixAftermixPage({
   /** Kartu Kalender yg di-double-click -> buka popup Booking Tanki (2026-10-20,
    * instruksi eksplisit user). */
   const [bookingEv, setBookingEv] = useState<ScheduleEvent | null>(null);
+  // Klik kartu Kalender tidak boleh membuka BookingEditModal sama sekali
+  // kalau akses Hide utk "bookingScheduleTanki" (konsisten dgn pola Hide =
+  // sembunyikan fitur sepenuhnya); kalau View, modal tetap terbuka tapi
+  // read-only (lihat prop `readOnly` di pemanggilan BookingEditModal di
+  // bawah).
+  const handleOpenBooking = bookingAccessLevel === "HIDE" ? () => {} : setBookingEv;
 
   const pwoScheduleQuery = useQuery({
     queryKey: ["pwo-schedule", section],
@@ -494,6 +507,10 @@ export default function PremixAftermixPage({
   });
 
   function handleManualScheduleSave() {
+    // Defense-in-depth (2026-11-16) -- tombol pemicunya sudah disembunyikan/
+    // dinonaktifkan sesuai bookingAccessLevel, ini cuma jaga-jaga kalau
+    // terpanggil lewat jalan lain.
+    if (bookingAccessLevel === "HIDE" || bookingAccessLevel === "VIEW") return;
     const err = validateManualSchedule();
     if (err) {
       setManualScheduleError(err);
@@ -1376,9 +1393,17 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
-              <button type="button" className="btn" onClick={() => setManualScheduleOpen(true)}>
-                📝 +Input Manual Schedule
-              </button>
+              {bookingAccessLevel !== "HIDE" && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={bookingAccessLevel === "VIEW"}
+                  title={bookingAccessLevel === "VIEW" ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa booking." : undefined}
+                  onClick={() => setManualScheduleOpen(true)}
+                >
+                  📝 +Input Manual Schedule
+                </button>
+              )}
             </div>
           </div>
           <div className="panel-body">
@@ -1443,7 +1468,7 @@ export default function PremixAftermixPage({
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
-                  onOpenBooking={setBookingEv}
+                  onOpenBooking={handleOpenBooking}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1557,9 +1582,17 @@ export default function PremixAftermixPage({
               <button type="button" className={`btn ${queueView === "calendar" ? "" : "btn-outline"}`} onClick={() => setQueueView("calendar")}>
                 📅 Kalender
               </button>
-              <button type="button" className="btn" onClick={() => setManualScheduleOpen(true)}>
-                📝 +Input Manual Schedule
-              </button>
+              {bookingAccessLevel !== "HIDE" && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={bookingAccessLevel === "VIEW"}
+                  title={bookingAccessLevel === "VIEW" ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa booking." : undefined}
+                  onClick={() => setManualScheduleOpen(true)}
+                >
+                  📝 +Input Manual Schedule
+                </button>
+              )}
             </div>
           </div>
           <div className="panel-body">
@@ -1616,7 +1649,7 @@ export default function PremixAftermixPage({
                   onReorderDay={handleReorderDay}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
-                  onOpenBooking={setBookingEv}
+                  onOpenBooking={handleOpenBooking}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1810,7 +1843,14 @@ export default function PremixAftermixPage({
         />
       )}
 
-      {bookingEv && <BookingEditModal ev={bookingEv} section={section} onClose={() => setBookingEv(null)} />}
+      {bookingEv && (
+        <BookingEditModal
+          ev={bookingEv}
+          section={section}
+          onClose={() => setBookingEv(null)}
+          readOnly={bookingAccessLevel === "VIEW"}
+        />
+      )}
     </div>
   );
 }

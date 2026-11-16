@@ -29,6 +29,7 @@ export default function TankSelect({
   required = true,
   bare = false,
   label = "Code Tanki",
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -37,6 +38,7 @@ export default function TankSelect({
   /** Jika true, render input polos saja (tanpa wrapper .field + label) supaya bisa dibungkus komponen layout lain, mis. ExcelField. */
   bare?: boolean;
   label?: string;
+  disabled?: boolean;
 }) {
   const { data: tanks } = useTankOptions();
   const listId = `${id}-tank-options`;
@@ -50,6 +52,7 @@ export default function TankSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        disabled={disabled}
         style={isInvalid ? { width: "100%", borderColor: "var(--danger)", background: "#fef2f2" } : { width: "100%" }}
         title={isInvalid ? "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran." : undefined}
       />

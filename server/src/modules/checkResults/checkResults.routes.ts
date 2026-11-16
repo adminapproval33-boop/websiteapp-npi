@@ -361,6 +361,41 @@ checkResultsRouter.put(
   })
 );
 
+const adminQcFieldsSchema = z.object({
+  customer: z.string().optional(),
+  custSegmen: z.string().optional(),
+  flc: z.string().optional(),
+  tanggalMasukQc: notFutureDate(requiredDate, "QC Entry Date"),
+});
+
+/// Sinkron Customer/Cust Segmen/FLC/QC Entry Date dari Admin QC balik ke
+/// Check Results (2026-11-16, instruksi eksplisit user: 4 field ini sekarang
+/// BISA diedit lewat Input Admin QC juga, dan perubahannya harus otomatis
+/// kelihatan di Input Check Results & History-nya). Endpoint SEMPIT khusus 4
+/// field ini -- SAMA alasannya dgn /appearance-notes di atas (PUT /:checkId
+/// biasa butuh payload lengkap termasuk `parameters`, AdminQcPage.tsx tidak
+/// punya field CheckResult lain spt lotCoa/dst di state-nya). `requireWrite`
+/// polos (bukan requireMenuInput("checkResults")) -- SAMA alasan jg dgn
+/// /appearance-notes, ini aksi dari menu Admin QC. BEDA dari
+/// /appearance-notes yg APPEND, di sini langsung OVERWRITE (field diskrit,
+/// bukan catatan yg terakumulasi).
+checkResultsRouter.put(
+  "/:checkId/admin-qc-fields",
+  requireWrite,
+  asyncRoute(async (req, res) => {
+    const checkId = req.params.checkId;
+    const existing = await prisma.checkResult.findUnique({ where: { checkId } });
+    if (!existing) throw new HttpError(404, "Check Results tidak ditemukan.");
+    const parsed = adminQcFieldsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, message: parsed.error.errors[0]?.message ?? "Data tidak valid." });
+      return;
+    }
+    const updated = await prisma.checkResult.update({ where: { checkId }, data: parsed.data });
+    res.json({ success: true, message: "Customer/Cust Segmen/FLC/QC Entry Date berhasil disinkronkan.", data: updated });
+  })
+);
+
 checkResultsRouter.delete(
   "/:checkId",
   requireMenuInput("checkResults"),

@@ -67,6 +67,16 @@ interface CheckRow {
   batch: string | null;
   customer: string | null;
   custSegmen: string | null;
+  /// "Reguler" atau "FLC 1"/"FLC 2"/"FLC 3" -- lihat komentar `flc` di
+  /// server/prisma/schema.prisma (CheckResult). Belum pernah ditampilkan di
+  /// Admin QC sama sekali (2026-11-16, instruksi eksplisit user: data yg
+  /// sudah terinput di Input Check Results tapi belum ada kolomnya di sini,
+  /// masukkan dalam bentuk autofill read-only -- lihat `checkInfo` di bawah).
+  flc: string | null;
+  /// "QC Entry Date" -- tanggal+jam sampel FISIK masuk ke QC (2026-11-16,
+  /// instruksi eksplisit user, sama pola dgn Customer/Cust Segmen/FLC di
+  /// atas). Beda dari `timestamp` (kapan BARIS ini disimpan ke sistem).
+  tanggalMasukQc: string | null;
   orderQty: string | null;
   plant: string | null;
   iuPlant: string | null;
@@ -130,6 +140,17 @@ const emptyForm = {
   qcToApproval: "",
   qcPassed: "",
   remark: "",
+  // 4 field Check Results yg sekarang BISA diedit dari sini juga (2026-11-16,
+  // instruksi eksplisit user) -- lihat komentar `checkInfo` utk baseline
+  // diff-nya. BUKAN kolom di tabel AdminQc (schema.prisma tidak diubah),
+  // cuma "numpang" di form state ini supaya gampang diedit di JSX yg sama --
+  // saveMutation TIDAK mengirim 4 field ini ke POST/PUT /admin-qc (endpoint
+  // itu strip key asing), melainkan ke PUT /check-results/:checkId/
+  // admin-qc-fields kalau ada yg berubah dari `checkInfo`.
+  customer: "",
+  custSegmen: "",
+  flc: "",
+  tanggalMasukQc: "",
 };
 
 const HEADER_COL_DEFAULT_WIDTHS: Record<string, number> = {
@@ -210,6 +231,13 @@ export default function AdminQcPage({
   const isAssortedNg = form.typeLot === "Assorted (NG)";
   const [params, setParams] = useState<ParamRow[]>([]);
   const [checkPassthrough, setCheckPassthrough] = useState<CheckPassthrough>(emptyCheckPassthrough);
+  /** Field Check Results yg belum py kolomnya sendiri di Admin QC (Customer/
+   * Cust Segmen/FLC/Lot COA) -- 2026-11-16, instruksi eksplisit user: data
+   * yg sudah terinput di Input Check Results, tampilkan di sini sbg autofill
+   * READ-ONLY (BUKAN kolom baru di tabel AdminQc, murni referensi live dari
+   * Check Results, sama prinsipnya dgn Spec Parameters di bawah -- null
+   * kalau Order ini belum terhubung ke Check Results sama sekali). */
+  const [checkInfo, setCheckInfo] = useState<CheckRow | null>(null);
   /** Nilai "Appearance Check Results" (form.remark) PERSIS seperti saat
    * dimuat (dari CheckResult.appearanceNotes yg sudah gabungan/kombinasi,
    * atau dari Admin QC sendiri kalau Order ini blm py Check Results) --
@@ -342,6 +370,14 @@ export default function AdminQcPage({
       const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(data.order)}`);
       if (cr.data) {
         setCheckPassthrough({ checkId: cr.data.checkId });
+        setCheckInfo(cr.data);
+        setForm((f) => ({
+          ...f,
+          customer: cr.data!.customer ?? "",
+          custSegmen: cr.data!.custSegmen ?? "",
+          flc: cr.data!.flc || "Reguler",
+          tanggalMasukQc: toDateTimeLocalValue(cr.data!.tanggalMasukQc),
+        }));
         setParams(
           cr.data.parameters.map((p) => ({
             no: p.no,
@@ -367,10 +403,12 @@ export default function AdminQcPage({
         setSpecStatus("found");
       } else {
         setCheckPassthrough(emptyCheckPassthrough);
+        setCheckInfo(null);
         await loadSpecForMaterial(data.materialNumber ?? "");
       }
     } catch {
       setCheckPassthrough(emptyCheckPassthrough);
+      setCheckInfo(null);
       await loadSpecForMaterial(data.materialNumber ?? "");
     }
   }
@@ -379,6 +417,7 @@ export default function AdminQcPage({
     setForm(emptyForm);
     setParams([]);
     setCheckPassthrough(emptyCheckPassthrough);
+    setCheckInfo(null);
     setSpecStatus("idle");
     setEditingAdminQcId(null);
     setRemarkBaseline("");
@@ -447,6 +486,30 @@ export default function AdminQcPage({
           syncWarning = " (Peringatan: gagal menyinkronkan ke Input Check Results, coba Save ulang.)";
         }
       }
+      // Customer/Cust Segmen/FLC/QC Entry Date (2026-11-16, instruksi
+      // eksplisit user) -- SEKARANG bisa diedit dari sini, timpa langsung ke
+      // Check Results (BUKAN append spt remark, field diskrit) kalau ADA yg
+      // berubah dari baseline `checkInfo` yg dimuat saat Order ini ditemukan.
+      if (checkInfo && checkPassthrough.checkId) {
+        const baselineQcEntryDate = toDateTimeLocalValue(checkInfo.tanggalMasukQc);
+        const changed =
+          form.customer.trim() !== (checkInfo.customer ?? "") ||
+          form.custSegmen.trim() !== (checkInfo.custSegmen ?? "") ||
+          form.flc !== (checkInfo.flc || "Reguler") ||
+          form.tanggalMasukQc !== baselineQcEntryDate;
+        if (changed) {
+          try {
+            await api.put(`/check-results/${checkPassthrough.checkId}/admin-qc-fields`, {
+              customer: form.customer.trim(),
+              custSegmen: form.custSegmen.trim(),
+              flc: form.flc,
+              tanggalMasukQc: form.tanggalMasukQc,
+            });
+          } catch {
+            syncWarning += " (Peringatan: gagal menyinkronkan Customer/Cust Segmen/FLC/QC Entry Date ke Input Check Results, coba Save ulang.)";
+          }
+        }
+      }
       return { ...res, syncWarning };
     },
     onSuccess: (res) => {
@@ -507,6 +570,13 @@ export default function AdminQcPage({
       qcToApproval: row.qcToApproval ?? "",
       qcPassed: row.qcPassed ?? "",
       remark: row.remark ?? "",
+      // Diisi ulang di bawah kalau Order ini ternyata terhubung ke Check
+      // Results -- default kosong dulu spy TypeScript happy & konsisten dgn
+      // emptyForm.
+      customer: "",
+      custSegmen: "",
+      flc: "",
+      tanggalMasukQc: "",
     });
     setRemarkBaseline(row.remark ?? "");
     void (async () => {
@@ -514,6 +584,14 @@ export default function AdminQcPage({
         const cr = await api.get<{ success: boolean; data: CheckRow | null }>(`/check-results/by-order/${encodeURIComponent(row.order)}`);
         if (cr.data) {
           setCheckPassthrough({ checkId: cr.data.checkId });
+          setCheckInfo(cr.data);
+          setForm((f) => ({
+            ...f,
+            customer: cr.data!.customer ?? "",
+            custSegmen: cr.data!.custSegmen ?? "",
+            flc: cr.data!.flc || "Reguler",
+            tanggalMasukQc: toDateTimeLocalValue(cr.data!.tanggalMasukQc),
+          }));
           setParams(
             cr.data.parameters.map((p) => ({
               no: p.no,
@@ -534,10 +612,12 @@ export default function AdminQcPage({
           setSpecStatus("found");
         } else {
           setCheckPassthrough(emptyCheckPassthrough);
+          setCheckInfo(null);
           await loadSpecForMaterial(row.materialNumber ?? "");
         }
       } catch {
         setCheckPassthrough(emptyCheckPassthrough);
+        setCheckInfo(null);
       }
     })();
     setTab("input");
@@ -547,6 +627,11 @@ export default function AdminQcPage({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    // Jaga-jaga (2026-11-16, instruksi eksplisit user: View-only tidak boleh
+    // Save sama sekali) -- tombol Submit sendiri sudah `disabled` utk
+    // View-only, ini cuma defense-in-depth kalau somehow form ke-submit
+    // lewat jalur lain (mis. Enter di field tertentu).
+    if (isViewOnly) return;
     setMessage("");
     setError("");
     if (!isKnownTankCode(tanks, form.codeTanki)) {
@@ -591,11 +676,14 @@ export default function AdminQcPage({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {!embedded && (
         <div style={{ display: "flex", gap: 8 }}>
-          {!isViewOnly && (
-            <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
-              Input Admin QC
-            </button>
-          )}
+          {/* Tombol ini TETAP tampil utk View-only (2026-11-16, instruksi
+              eksplisit user: boleh akses menu ini sekadar cek hasil inputan,
+              cuma Save/Upload File yg dimatikan -- lihat `disabled` di
+              tombolnya masing2 di bawah). Sebelumnya disembunyikan total
+              utk View-only. */}
+          <button className={`btn ${tab === "input" ? "" : "btn-outline"}`} onClick={() => setTab("input")}>
+            Input Admin QC
+          </button>
           <button className={`btn ${tab === "history" ? "" : "btn-outline"}`} onClick={() => setTab("history")}>
             History
           </button>
@@ -723,6 +811,49 @@ export default function AdminQcPage({
                 {params.length} item check).
               </p>
             )}
+            {checkInfo && (
+              <>
+                {/* Field Check Results yg sekarang BISA diedit dari Admin QC
+                    jg (2026-11-16, instruksi eksplisit user, revisi dari
+                    read-only) -- perubahan di sini disinkronkan balik ke
+                    Check Results & History-nya saat Save (lihat saveMutation,
+                    PUT /check-results/:checkId/admin-qc-fields). Urutan
+                    SENGAJA QC Entry Date, FLC, Cust Segmen, Customer (instruksi
+                    eksplisit user). */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
+                  <div className="field" style={{ flex: "1 1 180px" }}>
+                    <label title="Ikut tersinkron ke Input Check Results saat Save">QC Entry Date *</label>
+                    <input
+                      type="datetime-local"
+                      value={form.tanggalMasukQc}
+                      onChange={(e) => setForm({ ...form, tanggalMasukQc: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="field" style={{ flex: "1 1 140px" }}>
+                    <label title="Ikut tersinkron ke Input Check Results saat Save">FLC</label>
+                    <select value={form.flc} onChange={(e) => setForm({ ...form, flc: e.target.value })}>
+                      <option value="Reguler">Reguler</option>
+                      <option value="FLC 1">FLC 1</option>
+                      <option value="FLC 2">FLC 2</option>
+                      <option value="FLC 3">FLC 3</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ flex: "1 1 180px" }}>
+                    <label title="Ikut tersinkron ke Input Check Results saat Save">Cust Segmen</label>
+                    <input value={form.custSegmen} onChange={(e) => setForm({ ...form, custSegmen: e.target.value })} />
+                  </div>
+                  <div className="field" style={{ flex: "1 1 180px" }}>
+                    <label title="Ikut tersinkron ke Input Check Results saat Save">Customer</label>
+                    <input value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
+                  </div>
+                </div>
+                <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: -4 }}>
+                  4 field di atas berasal dari <strong>Input Check Results</strong> -- bisa diubah di sini, perubahannya
+                  otomatis ikut tersimpan ke Input Check Results &amp; History-nya juga.
+                </p>
+              </>
+            )}
             <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
               Tabel di bawah ini hanya tampilan (view-only) -- untuk mengisi/mengubah Result, Start, Finish, atau PIC,
               gunakan menu <strong>Input Check Results</strong>.
@@ -769,7 +900,14 @@ export default function AdminQcPage({
             <div className="field" style={{ marginTop: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
                 <label style={{ margin: 0 }}>Appearance Check Results</label>
-                <button type="button" className="btn btn-info" style={{ padding: "3px 12px" }} onClick={() => fileInputRef.current?.click()}>
+                <button
+                  type="button"
+                  className="btn btn-info"
+                  style={{ padding: "3px 12px" }}
+                  disabled={isViewOnly}
+                  title={isViewOnly ? "Akses View-only -- tidak bisa upload file." : undefined}
+                  onClick={() => fileInputRef.current?.click()}
+                >
                   Upload File
                 </button>
                 {attachFile && <span style={{ fontSize: 12, color: "var(--muted)" }}>{attachFile.name}</span>}
@@ -788,7 +926,12 @@ export default function AdminQcPage({
             {message && <p className="status-text">{message}</p>}
 
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn btn-success" type="submit" disabled={saveMutation.isPending || uploadMutation.isPending}>
+              <button
+                className="btn btn-success"
+                type="submit"
+                disabled={isViewOnly || saveMutation.isPending || uploadMutation.isPending}
+                title={isViewOnly ? "Akses View-only -- tidak bisa menyimpan data." : undefined}
+              >
                 {saveMutation.isPending || uploadMutation.isPending ? "Menyimpan..." : editingAdminQcId ? "Simpan Perubahan" : "Save Data"}
               </button>
               {editingAdminQcId && (

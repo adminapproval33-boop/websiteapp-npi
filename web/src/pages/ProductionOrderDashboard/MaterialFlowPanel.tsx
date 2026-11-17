@@ -283,6 +283,12 @@ export default function MaterialFlowPanel({
       setBookingPlannedStart("");
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
       queryClient.invalidateQueries({ queryKey: ["tank-booking-list", order] });
+      // Bugfix (2026-11-17, laporan nyata user) -- "Filter Code Tanki" di
+      // Premix/Aftermix PWO Schedule & Queue (queryKey sama) memakai data
+      // booking BASI kalau query ini tidak ikut di-invalidate dari sini jg
+      // (booking lewat Info Proses ini salah satu dari 3 jalan booking).
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", "PREMIX"] });
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", "AFTERMIX"] });
     },
     onError: (err) => {
       // Respons 409 TANK_ALREADY_BOOKED (lihat komentar `bookingConflict` di
@@ -339,6 +345,9 @@ export default function MaterialFlowPanel({
       setBookingError("");
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
       queryClient.invalidateQueries({ queryKey: ["tank-booking-list", order] });
+      // Bugfix (2026-11-17) -- sama alasan dgn bookingMutation di atas.
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", "PREMIX"] });
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", "AFTERMIX"] });
     },
     onError: (err) => setBookingError(err instanceof ApiError ? err.message : "Gagal membatalkan booking tanki."),
   });

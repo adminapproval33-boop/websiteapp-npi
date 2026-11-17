@@ -507,8 +507,15 @@ export default function PremixAftermixPage({
     return null;
   }
 
+  /** Peringatan "tanki sudah dibooking Order lain" (2026-11-17, instruksi
+   * eksplisit user -- bug ditemukan: sebelumnya respons 409 ini cuma
+   * ditampilkan sbg teks error polos, TANPA tombol "Tetap Lanjutkan", jadi
+   * user mentok tidak bisa booking sama sekali walau memang sengaja mau
+   * numpuk booking di tanki yg sama). Sama pola dgn BookingEditModal.tsx. */
+  const [manualScheduleConflict, setManualScheduleConflict] = useState<{ order: string; plannedStart: string | null } | null>(null);
+
   const manualScheduleMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (force?: boolean) => {
       // Code Tanki sekarang WAJIB (lihat validateManualSchedule di atas), jadi
       // SELALU lewat POST /booking (yg otomatis bikin jadwal Kalender-nya jg
       // lewat syncPwoScheduleFromPlannedStart, lihat komentar di
@@ -528,10 +535,12 @@ export default function PremixAftermixPage({
         codeTanki: manualScheduleForm.codeTanki.trim(),
         plannedStart: manualScheduleForm.scheduledDate,
         note: manualScheduleForm.note.trim() || undefined,
+        force: force || undefined,
       });
     },
     onSuccess: () => {
       setManualScheduleError("");
+      setManualScheduleConflict(null);
       setManualScheduleOpen(false);
       setManualScheduleForm({
         order: "",
@@ -547,8 +556,25 @@ export default function PremixAftermixPage({
       setManualScheduleOrderNotFound(false);
       queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+      // Bugfix (2026-11-17, laporan nyata user) -- SEBELUMNYA query ini tidak
+      // ikut di-invalidate, jadi "Filter Code Tanki" di Kalender memakai data
+      // booking BASI (tidak termasuk booking yg baru saja dibuat) sampai
+      // halaman di-reload manual. `tankByOrder` (dipakai matchesQueueTankFilter)
+      // dibangun dari query ini.
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", section] });
     },
-    onError: (err) => setManualScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal manual."),
+    onError: (err) => {
+      // Respons 409 TANK_ALREADY_BOOKED -- peringatan, bukan error fatal
+      // (lihat komentar `manualScheduleConflict` di atas & POST /booking di
+      // server utk detail lengkapnya).
+      if (err instanceof ApiError && err.status === 409 && (err.body as { code?: string })?.code === "TANK_ALREADY_BOOKED") {
+        setManualScheduleConflict((err.body as { conflict: { order: string; plannedStart: string | null } }).conflict);
+        setManualScheduleError("");
+        return;
+      }
+      setManualScheduleConflict(null);
+      setManualScheduleError(err instanceof ApiError ? err.message : "Gagal menyimpan jadwal manual.");
+    },
   });
 
   function handleManualScheduleSave() {
@@ -562,7 +588,8 @@ export default function PremixAftermixPage({
       return;
     }
     setManualScheduleError("");
-    manualScheduleMutation.mutate();
+    setManualScheduleConflict(null);
+    manualScheduleMutation.mutate(false);
   }
 
   const deleteScheduleMutation = useMutation({
@@ -1491,13 +1518,6 @@ export default function PremixAftermixPage({
                     onChange={(e) => setQueueSearch(e.target.value)}
                     style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
                   />
-                  <input
-                    placeholder="Filter Code Tanki..."
-                    value={queueTankFilter}
-                    onChange={(e) => setQueueTankFilter(e.target.value)}
-                    title="Filter Order yg sudah dibooking ke Code Tanki tertentu -- cek dulu sebelum booking baru, supaya tidak numpuk di tanki yg sama"
-                    style={{ padding: 8, width: "100%", maxWidth: 220, border: "1px solid var(--border)", borderRadius: 4 }}
-                  />
                 </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).map((r) => (
@@ -1514,6 +1534,8 @@ export default function PremixAftermixPage({
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   onOpenBooking={handleOpenBooking}
+                  queueTankFilter={queueTankFilter}
+                  onQueueTankFilterChange={setQueueTankFilter}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1672,13 +1694,6 @@ export default function PremixAftermixPage({
                     onChange={(e) => setQueueSearch(e.target.value)}
                     style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid var(--border)", borderRadius: 4 }}
                   />
-                  <input
-                    placeholder="Filter Code Tanki..."
-                    value={queueTankFilter}
-                    onChange={(e) => setQueueTankFilter(e.target.value)}
-                    title="Filter Order yg sudah dibooking ke Code Tanki tertentu -- cek dulu sebelum booking baru, supaya tidak numpuk di tanki yg sama"
-                    style={{ padding: 8, width: "100%", maxWidth: 220, border: "1px solid var(--border)", borderRadius: 4 }}
-                  />
                 </div>
                 <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "2px 2px 10px", marginBottom: 4 }}>
                   {filteredPremixQueue.filter((r) => !scheduledOrders.has(r.order) && matchesQueueTankFilter(r.order)).map((r) => (
@@ -1695,6 +1710,8 @@ export default function PremixAftermixPage({
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
                   onOpenBooking={handleOpenBooking}
+                  queueTankFilter={queueTankFilter}
+                  onQueueTankFilterChange={setQueueTankFilter}
                 />
                 <DragOverlay>
                   {activeDrag && (
@@ -1883,10 +1900,14 @@ export default function PremixAftermixPage({
                 />
               </ExcelField>
               <ExcelField label="Plant *">
-                <input
+                <select
                   value={manualScheduleForm.plant}
                   onChange={(e) => setManualScheduleForm((f) => ({ ...f, plant: e.target.value }))}
-                />
+                >
+                  <option value="">-- Pilih Plant --</option>
+                  <option value="1101">1101</option>
+                  <option value="1201">1201</option>
+                </select>
               </ExcelField>
             </ExcelRow>
             <ExcelRow>
@@ -1945,6 +1966,33 @@ export default function PremixAftermixPage({
             muncul di Kalender PWO Schedule & Queue sesuai Rencana Mulai.
           </p>
           {manualScheduleError && <p className="error-text" style={{ margin: "8px 0 0" }}>{manualScheduleError}</p>}
+          {/* Peringatan tanki sudah dibooking Order lain (2026-11-17) -- lihat
+              komentar `manualScheduleConflict` di atas. */}
+          {manualScheduleConflict && (
+            <div style={{ margin: "8px 0 0", padding: "8px 10px", borderRadius: 6, background: "#fef3c7", color: "#92400e", fontSize: "0.82rem" }}>
+              ⚠ Tanki {manualScheduleForm.codeTanki.trim()} masih dibooking aktif oleh Order {manualScheduleConflict.order}
+              {manualScheduleConflict.plannedStart ? ` (rencana mulai ${formatDateTime(manualScheduleConflict.plannedStart)})` : ""}. Tetap
+              lanjutkan juga?
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ padding: "4px 10px" }}
+                  onClick={() => manualScheduleMutation.mutate(true)}
+                >
+                  Tetap Lanjutkan
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "4px 10px" }}
+                  onClick={() => setManualScheduleConflict(null)}
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
             <button className="btn" type="button" disabled={manualScheduleMutation.isPending} onClick={handleManualScheduleSave}>
               {manualScheduleMutation.isPending ? "Menyimpan..." : "Simpan Perubahan"}

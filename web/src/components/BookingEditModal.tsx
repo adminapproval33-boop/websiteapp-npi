@@ -210,6 +210,11 @@ export default function BookingEditModal({
       queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
       queryClient.invalidateQueries({ queryKey: ["tank-booking-list", ev.order] });
+      // Bugfix (2026-11-17, laporan nyata user) -- SEBELUMNYA query ini tidak
+      // ikut di-invalidate, jadi "Filter Code Tanki" di PremixAftermixPage.tsx
+      // (queryKey sama, dibangun jadi `tankByOrder`/matchesQueueTankFilter)
+      // memakai data booking BASI sampai halaman di-reload manual.
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", section] });
       onClose();
     },
     onError: (err) => {
@@ -279,7 +284,11 @@ export default function BookingEditModal({
             <input value={orderQty} onChange={(e) => setOrderQty(e.target.value)} disabled={readOnly} />
           </ExcelField>
           <ExcelField label="Plant *">
-            <input value={plant} onChange={(e) => setPlant(e.target.value)} disabled={readOnly} />
+            <select value={plant} onChange={(e) => setPlant(e.target.value)} disabled={readOnly}>
+              <option value="">-- Pilih Plant --</option>
+              <option value="1101">1101</option>
+              <option value="1201">1201</option>
+            </select>
           </ExcelField>
         </ExcelRow>
         <ExcelRow>

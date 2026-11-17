@@ -524,12 +524,20 @@ function OverdueBanner({
   selectedIds,
   onToggleSelect,
   onDelete,
+  queueTankFilter,
+  onQueueTankFilterChange,
 }: {
   events: ScheduleEvent[];
   onOpenBooking: (ev: ScheduleEvent) => void;
   selectedIds: Set<string>;
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
   onDelete?: (id: string) => void;
+  /** Filter "Code Tanki" (2026-11-17, instruksi eksplisit user: dipindah ke
+   * sini, sebaris dgn kotak cari Order, dari toolbar atas PremixAftermixPage.tsx)
+   * -- state-nya TETAP dipegang pemanggil, krn filter ini jg menyaring kartu
+   * di grid hari (BUKAN cuma strip Overdue ini), lihat matchesQueueTankFilter. */
+  queueTankFilter: string;
+  onQueueTankFilterChange: (v: string) => void;
 }) {
   const [overdueSearch, setOverdueSearch] = useState("");
   const overdue = useMemo(
@@ -540,30 +548,63 @@ function OverdueBanner({
     () => overdue.filter((ev) => ev.order.toLowerCase().includes(overdueSearch.trim().toLowerCase())),
     [overdue, overdueSearch]
   );
-  if (overdue.length === 0) return null;
+  // Bugfix (2026-11-17, laporan nyata user) -- SEBELUMNYA komponen ini
+  // `return null` SELURUHNYA (termasuk kotak Cari Order & Filter Code Tanki)
+  // begitu `overdue` kosong, PADAHAL `overdue` itu dihitung dari `events` yg
+  // SUDAH disaring Filter Code Tanki di pemanggil (matchesQueueTankFilter) --
+  // jadi begitu Code Tanki yg dicari TIDAK ketemu sama sekali, kedua kotak
+  // pencarian ikut hilang tanpa penjelasan apapun, user mentok. SEKARANG
+  // kotak pencarian SELALU tampil; yg kondisional cuma strip kartu + pesan
+  // "tidak ketemu" di bawahnya.
+  const tankFilterActive = queueTankFilter.trim().length > 0;
+  const noMatchAtAll = tankFilterActive && events.length === 0;
   return (
-    <div style={{ padding: "8px 14px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
-      <input
-        placeholder="Cari nomor Order..."
-        value={overdueSearch}
-        onChange={(e) => setOverdueSearch(e.target.value)}
-        style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid #fecaca", borderRadius: 4, marginBottom: 8, background: "#fff" }}
-      />
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-        {filteredOverdue.map((ev) => (
-          <OverdueCard
-            key={ev.id}
-            ev={ev}
-            selected={selectedIds.has(buildEventDragId(ev.id))}
-            onToggleSelect={onToggleSelect}
-            onOpenBooking={onOpenBooking}
-            onDelete={onDelete}
-          />
-        ))}
-        {filteredOverdue.length === 0 && (
-          <span style={{ fontSize: "0.8rem", color: "#991b1b" }}>Tidak ada Order overdue yang cocok dgn pencarian.</span>
-        )}
+    <div
+      style={{
+        padding: "8px 14px",
+        background: overdue.length > 0 ? "#fef2f2" : "#fff",
+        borderBottom: overdue.length > 0 ? "1px solid #fecaca" : "1px solid var(--border)",
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+        <input
+          placeholder="Cari nomor Order..."
+          value={overdueSearch}
+          onChange={(e) => setOverdueSearch(e.target.value)}
+          style={{ padding: 8, width: "100%", maxWidth: 320, border: "1px solid #fecaca", borderRadius: 4, background: "#fff" }}
+        />
+        <input
+          placeholder="Filter Code Tanki..."
+          value={queueTankFilter}
+          onChange={(e) => onQueueTankFilterChange(e.target.value)}
+          title="Filter Order yg sudah dibooking ke Code Tanki tertentu -- cek dulu sebelum booking baru, supaya tidak numpuk di tanki yg sama"
+          style={{ padding: 8, width: "100%", maxWidth: 220, border: "1px solid #fecaca", borderRadius: 4, background: "#fff" }}
+        />
       </div>
+      {noMatchAtAll ? (
+        <span style={{ fontSize: "0.8rem", color: "#991b1b" }}>
+          ⚠ Tidak ada Order dengan Code Tanki "{queueTankFilter.trim()}" yang sedang dijadwalkan (Overdue maupun yg
+          belum).
+        </span>
+      ) : (
+        overdue.length > 0 && (
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+            {filteredOverdue.map((ev) => (
+              <OverdueCard
+                key={ev.id}
+                ev={ev}
+                selected={selectedIds.has(buildEventDragId(ev.id))}
+                onToggleSelect={onToggleSelect}
+                onOpenBooking={onOpenBooking}
+                onDelete={onDelete}
+              />
+            ))}
+            {filteredOverdue.length === 0 && (
+              <span style={{ fontSize: "0.8rem", color: "#991b1b" }}>Tidak ada Order overdue yang cocok dgn pencarian.</span>
+            )}
+          </div>
+        )
+      )}
     </div>
   );
 }
@@ -593,6 +634,8 @@ export default function WeeklyScheduleCalendar({
   selectedIds,
   onToggleSelect,
   onOpenBooking,
+  queueTankFilter,
+  onQueueTankFilterChange,
 }: {
   events: ScheduleEvent[];
   onDelete?: (id: string) => void;
@@ -608,6 +651,13 @@ export default function WeeklyScheduleCalendar({
   /** Double-click kartu -> buka popup booking tanki (2026-10-20, instruksi
    * eksplisit user). */
   onOpenBooking: (ev: ScheduleEvent) => void;
+  /** Filter "Code Tanki" (2026-11-17, instruksi eksplisit user) -- kotaknya
+   * dirender DI DALAM OverdueBanner (sebaris dgn kotak cari Order situ),
+   * tapi `events` yg masuk ke komponen ini SUDAH disaring pemanggil lewat
+   * filter yg sama (lihat matchesQueueTankFilter di PremixAftermixPage.tsx)
+   * -- jadi grid hari & strip Overdue tetap konsisten tersaring bareng. */
+  queueTankFilter: string;
+  onQueueTankFilterChange: (v: string) => void;
 }) {
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const days = useMemo(() => Array.from({ length: 6 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -651,7 +701,15 @@ export default function WeeklyScheduleCalendar({
         </div>
       </div>
 
-      <OverdueBanner events={events} onOpenBooking={onOpenBooking} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onDelete={onDelete} />
+      <OverdueBanner
+        events={events}
+        onOpenBooking={onOpenBooking}
+        selectedIds={selectedIds}
+        onToggleSelect={onToggleSelect}
+        onDelete={onDelete}
+        queueTankFilter={queueTankFilter}
+        onQueueTankFilterChange={onQueueTankFilterChange}
+      />
 
       <div style={{ overflowX: "auto" }}>
         <div style={{ minWidth: 900, display: "grid", gridTemplateColumns: "repeat(6, minmax(150px, 1fr))" }}>

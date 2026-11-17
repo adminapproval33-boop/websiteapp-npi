@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
 import { api, ApiError } from "../../api/client";
 import OrderLookup, { OrderRefData } from "../../components/OrderLookup";
-import TankSelect, { isKnownTankCode, useTankOptions } from "../../components/TankSelect";
+import TankSelect, { isKnownTankCode, useTankLocationPlantMap, useTankOptions } from "../../components/TankSelect";
 import IuPlantSelect from "../../components/IuPlantSelect";
 import EmployeeNameSelect, {
   formatInputBy,
@@ -258,6 +258,11 @@ export default function PremixAftermixPage({
   const { data: leaderSuggestions } = useNameSuggestions("premixAftermix", "leader", section);
   const { data: memberSuggestions } = useNameSuggestions("premixAftermix", "member", section);
   const { data: tanks } = useTankOptions();
+  // IU Plant popup "Booking Tanki" (2026-11-17, instruksi eksplisit user) --
+  // LOOKUP dari kolom "Location / Plant" di Master Data » Daftar Code Tanki
+  // begitu Code Tanki dipilih, GANTIKAN dropdown bebas IU Plant 1-6 yg
+  // sebelumnya lepas dari tanki mana yg dipilih.
+  const { data: tankLocationPlantMap } = useTankLocationPlantMap();
   const queryClient = useQueryClient();
   // "?tab=queue" di URL (mis. "/planning/premix?tab=queue") langsung buka tab
   // "PWO Schedule & Queue" begitu halaman dimuat (2026-11-03, instruksi
@@ -454,11 +459,6 @@ export default function PremixAftermixPage({
     // tampilan, tidak pernah diedit manual).
     orderQty: "",
     plant: "",
-    // IU Plant (2026-11-17, instruksi eksplisit user) -- dropdown IU Plant
-    // 1-6, sama persis pola IuPlantSelect.tsx yg sudah ada di form Input
-    // Aftermix/Premix. TIDAK otomatis terisi dari lookup (Referensi Order/PO
-    // tidak punya data ini) -- user pilih sendiri, TIDAK ikut validasi wajib.
-    iuPlant: "",
     scheduledDate: toDateTimeLocalValue(new Date()),
     // SEMUA field termasuk Code Tanki WAJIB diisi (2026-11-16, instruksi
     // eksplisit user: tolak Save + tampilkan warning kalau ada yg kosong --
@@ -483,6 +483,10 @@ export default function PremixAftermixPage({
         return formatted === user.nik ? `${user.name} (${user.nik})` : formatted;
       })()
     : "-";
+  /** IU Plant popup "Booking Tanki" (2026-11-17, instruksi eksplisit user) --
+   * LOOKUP dari kolom "Location / Plant" Master Data Tanki berdasarkan Code
+   * Tanki yg sedang diisi, BUKAN pilihan manual lagi. */
+  const manualScheduleIuPlant = tankLocationPlantMap?.get(manualScheduleForm.codeTanki.trim()) ?? "";
 
   /** Validasi semua field WAJIB diisi sblm Save (2026-11-16, instruksi
    * eksplisit user) -- dicek saat klik tombol, BUKAN cuma disable tombolnya
@@ -493,6 +497,10 @@ export default function PremixAftermixPage({
     if (!f.materialNumber.trim()) return "Material Number wajib diisi.";
     if (!f.batch.trim()) return "Batch wajib diisi.";
     if (!f.materialDescription.trim()) return "Material Description wajib diisi.";
+    // Order Qty & Plant (2026-11-17, instruksi eksplisit user) -- SEKARANG
+    // ikut WAJIB diisi, samakan dgn popup edit booking (BookingEditModal.tsx).
+    if (!f.orderQty.trim()) return "Order Qty (KG) wajib diisi.";
+    if (!f.plant.trim()) return "Plant wajib diisi.";
     if (!f.scheduledDate) return "Rencana Mulai wajib diisi.";
     if (!f.codeTanki.trim()) return "Code Tanki wajib diisi.";
     if (!isKnownTankCode(tanks, f.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
@@ -514,8 +522,9 @@ export default function PremixAftermixPage({
         materialNumber: manualScheduleForm.materialNumber.trim(),
         materialDescription: manualScheduleForm.materialDescription.trim(),
         batch: manualScheduleForm.batch.trim(),
-        orderQty: manualScheduleForm.orderQty.trim() || undefined,
-        iuPlant: manualScheduleForm.iuPlant.trim() || undefined,
+        orderQty: manualScheduleForm.orderQty.trim(),
+        plant: manualScheduleForm.plant.trim(),
+        iuPlant: manualScheduleIuPlant || undefined,
         codeTanki: manualScheduleForm.codeTanki.trim(),
         plannedStart: manualScheduleForm.scheduledDate,
         note: manualScheduleForm.note.trim() || undefined,
@@ -531,7 +540,6 @@ export default function PremixAftermixPage({
         batch: "",
         orderQty: "",
         plant: "",
-        iuPlant: "",
         scheduledDate: toDateTimeLocalValue(new Date()),
         codeTanki: "",
         note: "",
@@ -1848,13 +1856,13 @@ export default function PremixAftermixPage({
                   }}
                 />
               </ExcelField>
-              <ExcelField label="Material Number">
+              <ExcelField label="Material Number *">
                 <input
                   value={manualScheduleForm.materialNumber}
                   onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialNumber: e.target.value }))}
                 />
               </ExcelField>
-              <ExcelField label="Material Description">
+              <ExcelField label="Material Description *">
                 <input
                   value={manualScheduleForm.materialDescription}
                   onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialDescription: e.target.value }))}
@@ -1862,29 +1870,26 @@ export default function PremixAftermixPage({
               </ExcelField>
             </ExcelRow>
             <ExcelRow>
-              <ExcelField label="Batch">
+              <ExcelField label="Batch *">
                 <input
                   value={manualScheduleForm.batch}
                   onChange={(e) => setManualScheduleForm((f) => ({ ...f, batch: e.target.value }))}
                 />
               </ExcelField>
-              <ExcelField label="Order Qty (KG)">
-                <input value={manualScheduleForm.orderQty} readOnly />
+              <ExcelField label="Order Qty (KG) *">
+                <input
+                  value={manualScheduleForm.orderQty}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, orderQty: e.target.value }))}
+                />
               </ExcelField>
-              <ExcelField label="Plant">
-                <input value={manualScheduleForm.plant} readOnly />
+              <ExcelField label="Plant *">
+                <input
+                  value={manualScheduleForm.plant}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, plant: e.target.value }))}
+                />
               </ExcelField>
             </ExcelRow>
             <ExcelRow>
-              <ExcelField label="IU Plant">
-                <IuPlantSelect
-                  bare
-                  id="manual-schedule-iu-plant"
-                  value={manualScheduleForm.iuPlant}
-                  plant={manualScheduleForm.plant}
-                  onChange={(v) => setManualScheduleForm((f) => ({ ...f, iuPlant: v }))}
-                />
-              </ExcelField>
               <ExcelField label="Code Tanki *">
                 <TankSelect
                   bare
@@ -1892,6 +1897,9 @@ export default function PremixAftermixPage({
                   value={manualScheduleForm.codeTanki}
                   onChange={(v) => setManualScheduleForm((f) => ({ ...f, codeTanki: v }))}
                 />
+              </ExcelField>
+              <ExcelField label="IU Plant">
+                <input value={manualScheduleIuPlant} readOnly />
               </ExcelField>
               <ExcelField label="Rencana Mulai">
                 <input
@@ -1924,16 +1932,17 @@ export default function PremixAftermixPage({
                 borderRadius: 6,
               }}
             >
-              ⚠ Order ini belum ada di Referensi Order / PO (SAP-COOISPI). Isi manual Material Number, Batch, dan
-              Material Description di atas.
+              ⚠ Order ini belum ada di Referensi Order / PO (SAP-COOISPI). Isi manual Material Number, Material
+              Description, Batch, Order Qty (KG), dan Plant di atas.
             </div>
           )}
           <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-            * Wajib diisi: Order, Material Number, Material Description, Batch, Code Tanki, Rencana Mulai. Order
-            Qty (KG)/Plant otomatis terisi dari Referensi Order/PO kalau Order-nya ketemu (kosong kalau belum); IU
-            Plant pilih sendiri (opsional); Booked By otomatis nama Anda; Catatan opsional. Tanki langsung tampil
-            "Terisi" (sumber Booking) di Tank Monitoring, dan kartu ini langsung muncul di Kalender PWO Schedule &
-            Queue sesuai Rencana Mulai.
+            * Wajib diisi: Order, Material Number, Material Description, Batch, Order Qty (KG), Plant, Code Tanki,
+            Rencana Mulai. Material Number/Material Description/Batch/Order Qty (KG)/Plant otomatis terisi dari
+            Referensi Order/PO kalau Order-nya ketemu -- kalau belum, isi manual. IU Plant otomatis terisi dari
+            Master Data » Daftar Code Tanki begitu Code Tanki dipilih; Booked By otomatis nama Anda; Catatan
+            opsional. Tanki langsung tampil "Terisi" (sumber Booking) di Tank Monitoring, dan kartu ini langsung
+            muncul di Kalender PWO Schedule & Queue sesuai Rencana Mulai.
           </p>
           {manualScheduleError && <p className="error-text" style={{ margin: "8px 0 0" }}>{manualScheduleError}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>

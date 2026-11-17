@@ -9,6 +9,24 @@ export function useTankOptions() {
   });
 }
 
+/** Peta Code Tanki -> "Location / Plant" (kolom "Location / Plant" di Master
+ * Data » Daftar Code Tanki, mis. "IU PLANT 2") -- dipakai popup Booking Tanki
+ * (2026-11-17, instruksi eksplisit user) utk otomatis isi field "IU Plant"
+ * begitu Code Tanki dipilih, GANTIKAN dropdown bebas IU Plant 1-6 yg
+ * sebelumnya tidak terkait tanki mana yg dipilih. Endpoint sama dgn tabel
+ * Master Data Tanki (`/tanks/full`), akses GET-nya cuma requireAuth (semua
+ * user login boleh baca). */
+export function useTankLocationPlantMap() {
+  return useQuery({
+    queryKey: ["master-tanks-full"],
+    queryFn: () =>
+      api
+        .get<{ success: boolean; data: { code: string; locationPlant: string | null }[] }>("/master-data/tanks/full")
+        .then((r) => new Map(r.data.map((t) => [t.code, t.locationPlant ?? ""]))),
+    staleTime: 60_000,
+  });
+}
+
 /** True kalau `value` cocok PERSIS (case-sensitive, format Master Data Tanki
  * selalu huruf besar) dengan salah satu Code Tanki di Master Data -- dipakai
  * validasi sebelum Save (2026-08-08, instruksi eksplisit user: format Code

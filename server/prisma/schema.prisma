@@ -220,6 +220,13 @@ model TankManualInput {
   materialDescription String?
   batch               String?
   orderQty            String?
+  /// Plant (kode SAP, mis. "1101") -- SEBELUMNYA cuma tampilan live dari
+  /// Referensi Order/PO, tidak pernah tersimpan. Sekarang WAJIB diisi (manual
+  /// kalau Order-nya tidak ketemu di Referensi) & ikut tersimpan (2026-11-17,
+  /// instruksi eksplisit user: samakan popup "+Booking Tanki" & popup edit
+  /// booking -- Material Number/Material Description/Batch/Order Qty/Plant
+  /// semua jadi bisa diedit manual + wajib diisi).
+  plant               String?
   /// IU Plant (2026-11-17, instruksi eksplisit user) -- HANYA diisi dari popup
   /// "+Booking Tanki" (Premix/Aftermix PWO Schedule & Queue), sama pola dropdown
   /// IU Plant 1-6 yg sudah ada di form Input Aftermix/Premix (lihat IuPlantSelect.tsx).

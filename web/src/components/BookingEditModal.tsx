@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Modal from "./Modal";
-import TankSelect from "./TankSelect";
-import IuPlantSelect from "./IuPlantSelect";
+import TankSelect, { useTankLocationPlantMap } from "./TankSelect";
 import { ExcelBlock, ExcelRow, ExcelField } from "./ExcelGrid";
 import { formatInputBy, useEmployeeOptions } from "./EmployeeNameSelect";
 import type { OrderRefData } from "./OrderLookup";
@@ -15,7 +14,11 @@ import type { ScheduleEvent } from "./WeeklyScheduleCalendar";
 interface BookingRow {
   id: string;
   codeTanki: string;
-  iuPlant: string | null;
+  materialNumber: string | null;
+  materialDescription: string | null;
+  batch: string | null;
+  orderQty: string | null;
+  plant: string | null;
   remark: string | null;
   plannedStart: string | null;
   inputBy: string;
@@ -87,10 +90,17 @@ export default function BookingEditModal({
   const existing = bookings?.find((b) => b.remark?.startsWith(prefix)) ?? null;
 
   const [codeTanki, setCodeTanki] = useState("");
-  // IU Plant (2026-11-17, instruksi eksplisit user: samakan format popup ini
-  // dgn popup "+Booking Tanki") -- dropdown IU Plant 1-6, sama pola dgn
-  // IuPlantSelect.tsx yg sudah ada di form Input Aftermix/Premix.
-  const [iuPlant, setIuPlant] = useState("");
+  // Material Number/Material Description/Batch/Order Qty/Plant (2026-11-17,
+  // instruksi eksplisit user) -- SEKARANG bisa diedit manual & WAJIB diisi,
+  // BUKAN lagi read-only murni dari lookup Referensi Order/PO -- Order lama
+  // yg belum/tidak kedapatan di Referensi (mis. Order demo) harus bisa
+  // dikoreksi manual lewat popup ini, sama kemampuan dgn popup "+Booking
+  // Tanki" (lihat validateBooking di bawah).
+  const [materialNumber, setMaterialNumber] = useState("");
+  const [materialDescription, setMaterialDescription] = useState("");
+  const [batch, setBatch] = useState("");
+  const [orderQty, setOrderQty] = useState("");
+  const [plant, setPlant] = useState("");
   const [note, setNote] = useState("");
   const [plannedStart, setPlannedStart] = useState("");
   const [error, setError] = useState("");
@@ -109,14 +119,50 @@ export default function BookingEditModal({
   useEffect(() => {
     if (existing) {
       setCodeTanki(existing.codeTanki);
-      setIuPlant(existing.iuPlant ?? "");
+      setMaterialNumber(existing.materialNumber ?? "");
+      setMaterialDescription(existing.materialDescription ?? "");
+      setBatch(existing.batch ?? "");
+      setOrderQty(existing.orderQty ?? "");
+      setPlant(existing.plant ?? "");
       setNote(noteFromRemark(existing.remark, prefix));
       setPlannedStart(toDateTimeLocalValue(existing.plannedStart));
     } else {
       setPlannedStart(toDateTimeLocalValue(ev.scheduledDate));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing?.id, existing?.plannedStart, existing?.codeTanki, existing?.remark, existing?.iuPlant]);
+  }, [
+    existing?.id,
+    existing?.plannedStart,
+    existing?.codeTanki,
+    existing?.remark,
+    existing?.materialNumber,
+    existing?.materialDescription,
+    existing?.batch,
+    existing?.orderQty,
+    existing?.plant,
+  ]);
+
+  // Booking BARU (belum ada `existing`) -- isi awal dari Referensi Order/PO
+  // (`ref`) kalau ketemu, fallback ke `ev` (PwoSchedule) utk Material Number/
+  // Description/Batch -- SEKALI saja, TANPA menimpa kalau user sudah mulai
+  // ngetik manual (Order-nya tidak ketemu di Referensi), beda dgn tampilan
+  // read-only versi lama yg terus-menerus ikut `ref`.
+  useEffect(() => {
+    if (existing || !ref) return;
+    setMaterialNumber((v) => v || ref.materialNumber || ev.materialNumber || "");
+    setMaterialDescription((v) => v || ref.materialDescription || ev.materialDescription || "");
+    setBatch((v) => v || ref.batch || ev.batch || "");
+    setOrderQty((v) => v || ref.orderQty || "");
+    setPlant((v) => v || ref.plant || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existing, ref]);
+
+  // IU Plant (2026-11-17, instruksi eksplisit user) -- LOOKUP dari kolom
+  // "Location / Plant" Master Data » Daftar Code Tanki berdasarkan Code
+  // Tanki yg sedang diisi, GANTIKAN dropdown bebas IU Plant 1-6 yg
+  // sebelumnya lepas dari tanki mana yg dipilih.
+  const { data: tankLocationPlantMap } = useTankLocationPlantMap();
+  const iuPlant = tankLocationPlantMap?.get(codeTanki.trim()) ?? "";
 
   const bookedByLabel = existing
     ? existing.inputByName
@@ -134,6 +180,11 @@ export default function BookingEditModal({
       if (existing) {
         return api.put(`/tank-manual-input/booking/${existing.id}`, {
           codeTanki: codeTanki.trim(),
+          materialNumber: materialNumber.trim(),
+          materialDescription: materialDescription.trim(),
+          batch: batch.trim(),
+          orderQty: orderQty.trim(),
+          plant: plant.trim(),
           iuPlant: iuPlant.trim() || undefined,
           note: note.trim() || undefined,
           plannedStart: plannedStart || undefined,
@@ -144,10 +195,11 @@ export default function BookingEditModal({
         section,
         codeTanki: codeTanki.trim(),
         order: ev.order,
-        materialNumber: ref?.materialNumber ?? ev.materialNumber ?? undefined,
-        materialDescription: ref?.materialDescription ?? ev.materialDescription ?? undefined,
-        batch: ref?.batch ?? ev.batch ?? undefined,
-        orderQty: ref?.orderQty ?? undefined,
+        materialNumber: materialNumber.trim(),
+        materialDescription: materialDescription.trim(),
+        batch: batch.trim(),
+        orderQty: orderQty.trim(),
+        plant: plant.trim(),
         iuPlant: iuPlant.trim() || undefined,
         note: note.trim() || undefined,
         plannedStart: plannedStart || undefined,
@@ -174,12 +226,27 @@ export default function BookingEditModal({
     },
   });
 
+  /** Semua field WAJIB diisi (2026-11-17, instruksi eksplisit user: samakan
+   * dgn popup "+Booking Tanki") -- dicek saat klik Simpan, bukan cuma disable
+   * tombolnya diam2, supaya user benar2 lihat pesan kenapa ditolak. */
+  function validateBooking(): string | null {
+    if (!materialNumber.trim()) return "Material Number wajib diisi.";
+    if (!materialDescription.trim()) return "Material Description wajib diisi.";
+    if (!batch.trim()) return "Batch wajib diisi.";
+    if (!orderQty.trim()) return "Order Qty (KG) wajib diisi.";
+    if (!plant.trim()) return "Plant wajib diisi.";
+    if (!codeTanki.trim()) return "Code Tanki wajib diisi.";
+    if (!plannedStart) return "Rencana Mulai wajib diisi.";
+    return null;
+  }
+
   function submit() {
     if (readOnly) return;
     setError("");
     setConflict(null);
-    if (!codeTanki.trim()) {
-      setError("Code Tanki wajib diisi.");
+    const err = validateBooking();
+    if (err) {
+      setError(err);
       return;
     }
     saveMutation.mutate(false);
@@ -197,30 +264,30 @@ export default function BookingEditModal({
           <ExcelField label="Order">
             <input value={ev.order} readOnly />
           </ExcelField>
-          <ExcelField label="Material Number">
-            <input value={ref?.materialNumber ?? ev.materialNumber ?? ""} readOnly />
+          <ExcelField label="Material Number *">
+            <input value={materialNumber} onChange={(e) => setMaterialNumber(e.target.value)} disabled={readOnly} />
           </ExcelField>
-          <ExcelField label="Material Description">
-            <input value={ref?.materialDescription ?? ev.materialDescription ?? ""} readOnly />
-          </ExcelField>
-        </ExcelRow>
-        <ExcelRow>
-          <ExcelField label="Batch">
-            <input value={ref?.batch ?? ev.batch ?? ""} readOnly />
-          </ExcelField>
-          <ExcelField label="Order Qty (KG)">
-            <input value={ref?.orderQty ?? ""} readOnly />
-          </ExcelField>
-          <ExcelField label="Plant">
-            <input value={ref?.plant ?? ""} readOnly />
+          <ExcelField label="Material Description *">
+            <input value={materialDescription} onChange={(e) => setMaterialDescription(e.target.value)} disabled={readOnly} />
           </ExcelField>
         </ExcelRow>
         <ExcelRow>
-          <ExcelField label="IU Plant">
-            <IuPlantSelect bare id="pwo-booking-iu-plant" value={iuPlant} plant={ref?.plant ?? ""} onChange={setIuPlant} disabled={readOnly} />
+          <ExcelField label="Batch *">
+            <input value={batch} onChange={(e) => setBatch(e.target.value)} disabled={readOnly} />
           </ExcelField>
+          <ExcelField label="Order Qty (KG) *">
+            <input value={orderQty} onChange={(e) => setOrderQty(e.target.value)} disabled={readOnly} />
+          </ExcelField>
+          <ExcelField label="Plant *">
+            <input value={plant} onChange={(e) => setPlant(e.target.value)} disabled={readOnly} />
+          </ExcelField>
+        </ExcelRow>
+        <ExcelRow>
           <ExcelField label="Code Tanki *">
             <TankSelect bare id="pwo-booking-tank" value={codeTanki} onChange={setCodeTanki} disabled={readOnly} />
+          </ExcelField>
+          <ExcelField label="IU Plant">
+            <input value={iuPlant} readOnly />
           </ExcelField>
           <ExcelField label="Rencana Mulai">
             <input
@@ -246,9 +313,13 @@ export default function BookingEditModal({
         </p>
       )}
       <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-        * Wajib diisi. Tanki langsung tampil "Terisi" (sumber Booking) di Tank Monitoring dengan Order ini, dan gugur
-        otomatis begitu Order ini di-input di tahap {label} atau tanki dipakai Order lain. Mengubah Rencana Mulai ikut
-        memindahkan kartu ini ke tanggal tersebut di Kalender (sama seperti menarik kartu ke hari lain).
+        * Wajib diisi: Material Number, Material Description, Batch, Order Qty (KG), Plant, Code Tanki, Rencana
+        Mulai. Material Number/Material Description/Batch/Order Qty (KG)/Plant otomatis terisi dari Referensi
+        Order/PO kalau Order-nya ketemu -- kalau belum, isi manual. IU Plant otomatis terisi dari Master Data »
+        Daftar Code Tanki begitu Code Tanki dipilih. Tanki langsung tampil "Terisi" (sumber Booking) di Tank
+        Monitoring dengan Order ini, dan gugur otomatis begitu Order ini di-input di tahap {label} atau tanki
+        dipakai Order lain. Mengubah Rencana Mulai ikut memindahkan kartu ini ke tanggal tersebut di Kalender (sama
+        seperti menarik kartu ke hari lain).
       </p>
       {bookingsLoading && <p style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Memuat booking...</p>}
       {error && (

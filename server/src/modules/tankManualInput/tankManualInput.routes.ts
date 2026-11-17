@@ -106,6 +106,12 @@ const bookingSchema = z.object({
   materialDescription: z.string().optional(),
   batch: z.string().optional(),
   orderQty: z.string().optional(),
+  // Plant (2026-11-17, instruksi eksplisit user) -- kode SAP (mis. "1101"),
+  // bisa diedit manual & WAJIB diisi (dicek di frontend, sama pola dgn
+  // materialNumber/materialDescription/batch/orderQty) -- backend tetap
+  // optional spy konsisten dgn field lain di sini (wajib-nya murni validasi
+  // frontend sblm submit).
+  plant: z.string().optional(),
   // IU Plant (2026-11-17, instruksi eksplisit user) -- HANYA diisi dari popup
   // "+Booking Tanki" (dropdown IU Plant 1-6, sama pola dgn IuPlantSelect.tsx
   // yg sudah ada di form Input Aftermix/Premix). Optional, sama pola dgn
@@ -159,7 +165,21 @@ tankManualInputRouter.get(
         OR: remarkOr,
       },
       orderBy: { timestamp: "desc" },
-      select: { id: true, order: true, codeTanki: true, iuPlant: true, remark: true, plannedStart: true, inputBy: true, timestamp: true },
+      select: {
+        id: true,
+        order: true,
+        codeTanki: true,
+        materialNumber: true,
+        materialDescription: true,
+        batch: true,
+        orderQty: true,
+        plant: true,
+        iuPlant: true,
+        remark: true,
+        plannedStart: true,
+        inputBy: true,
+        timestamp: true,
+      },
     });
     // Nama pemesan: akun aplikasi (User) dulu, lalu Data Karyawan; kalau tidak
     // ketemu di keduanya, frontend tampilkan NIK apa adanya.
@@ -280,6 +300,18 @@ tankManualInputRouter.post(
 
 const editBookingSchema = z.object({
   codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+  // Material Number/Material Description/Batch/Order Qty/Plant (2026-11-17,
+  // instruksi eksplisit user: Order lama yg Material-nya belum kedapatan di
+  // Referensi Order/PO -- mis. Order demo -- harus bisa dikoreksi manual lewat
+  // popup edit ini, BUKAN cuma read-only dari lookup spt sebelumnya). Wajib
+  // diisi dicek di FRONTEND (sama pola dgn popup "+Booking Tanki"); backend
+  // tetap optional spy konsisten dgn field lain di sini. SELALU ditimpa dgn
+  // nilai yg dikirim, sama pola dgn `note`.
+  materialNumber: z.string().optional(),
+  materialDescription: z.string().optional(),
+  batch: z.string().optional(),
+  orderQty: z.string().optional(),
+  plant: z.string().optional(),
   // IU Plant (2026-11-17, instruksi eksplisit user: samakan format popup edit
   // ini dgn popup "+Booking Tanki") -- sama pola dgn `note`: field bebas
   // diedit, SELALU ditimpa dgn nilai yg dikirim (termasuk kalau dikosongkan),
@@ -352,6 +384,11 @@ tankManualInputRouter.put(
       where: { id: req.params.id },
       data: {
         codeTanki: parsed.data.codeTanki,
+        materialNumber: parsed.data.materialNumber?.trim() || null,
+        materialDescription: parsed.data.materialDescription?.trim() || null,
+        batch: parsed.data.batch?.trim() || null,
+        orderQty: parsed.data.orderQty?.trim() || null,
+        plant: parsed.data.plant?.trim() || null,
         iuPlant: parsed.data.iuPlant?.trim() || null,
         remark: bookingRemark(section, parsed.data.note),
         ...(parsed.data.plannedStart ? { plannedStart: parsed.data.plannedStart } : {}),
@@ -361,9 +398,9 @@ tankManualInputRouter.put(
       await syncPwoScheduleFromPlannedStart({
         section,
         order: existing.order,
-        materialNumber: existing.materialNumber,
-        materialDescription: existing.materialDescription,
-        batch: existing.batch,
+        materialNumber: parsed.data.materialNumber?.trim() || existing.materialNumber,
+        materialDescription: parsed.data.materialDescription?.trim() || existing.materialDescription,
+        batch: parsed.data.batch?.trim() || existing.batch,
         plannedStart: parsed.data.plannedStart,
         createdBy: req.auth!.nik,
       });

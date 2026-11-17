@@ -1401,7 +1401,7 @@ export default function PremixAftermixPage({
                   title={bookingAccessLevel === "VIEW" ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa booking." : undefined}
                   onClick={() => setManualScheduleOpen(true)}
                 >
-                  📝 +Input Manual Schedule
+                  📝 +Booking Tanki
                 </button>
               )}
             </div>
@@ -1590,7 +1590,7 @@ export default function PremixAftermixPage({
                   title={bookingAccessLevel === "VIEW" ? "Akses View-only utk Booking & Schedule Tanki -- tidak bisa booking." : undefined}
                   onClick={() => setManualScheduleOpen(true)}
                 >
-                  📝 +Input Manual Schedule
+                  📝 +Booking Tanki
                 </button>
               )}
             </div>
@@ -1760,7 +1760,7 @@ export default function PremixAftermixPage({
 
       {manualScheduleOpen && (
         <Modal
-          title={`Input Manual Schedule — ${title}`}
+          title={section === "PREMIX" ? `Booking Tanki - ${title}` : `Booking Tanki — ${title}`}
           onClose={() => {
             setManualScheduleOpen(false);
             setManualScheduleError("");

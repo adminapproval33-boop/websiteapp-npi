@@ -8,6 +8,7 @@ export default function IuPlantSelect({
   required = false,
   bare = false,
   label = "IU Plant",
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -18,13 +19,21 @@ export default function IuPlantSelect({
   /** Jika true, render input polos saja (tanpa wrapper .field + label) supaya bisa dibungkus komponen layout lain, mis. ExcelField. */
   bare?: boolean;
   label?: string;
+  disabled?: boolean;
 }) {
   const showOptions = plant.trim() === "1101";
   const listId = `${id}-options`;
 
   const input = (
     <>
-      <input id={id} list={showOptions ? listId : undefined} value={value} onChange={(e) => onChange(e.target.value)} required={required} />
+      <input
+        id={id}
+        list={showOptions ? listId : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={required}
+        disabled={disabled}
+      />
       {showOptions && (
         <datalist id={listId}>
           {IU_PLANT_OPTIONS.map((opt) => (

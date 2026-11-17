@@ -220,6 +220,10 @@ model TankManualInput {
   materialDescription String?
   batch               String?
   orderQty            String?
+  /// IU Plant (2026-11-17, instruksi eksplisit user) -- HANYA diisi dari popup
+  /// "+Booking Tanki" (Premix/Aftermix PWO Schedule & Queue), sama pola dropdown
+  /// IU Plant 1-6 yg sudah ada di form Input Aftermix/Premix (lihat IuPlantSelect.tsx).
+  iuPlant             String?
   remark              String?
   /// Rencana mulai pemakaian tanki (2026-09-20, instruksi eksplisit user) --
   /// HANYA diisi utk entri "Booking Tanki" (lihat lib/tankBooking.ts); Input

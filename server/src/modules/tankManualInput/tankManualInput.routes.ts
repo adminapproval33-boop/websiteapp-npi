@@ -106,6 +106,11 @@ const bookingSchema = z.object({
   materialDescription: z.string().optional(),
   batch: z.string().optional(),
   orderQty: z.string().optional(),
+  // IU Plant (2026-11-17, instruksi eksplisit user) -- HANYA diisi dari popup
+  // "+Booking Tanki" (dropdown IU Plant 1-6, sama pola dgn IuPlantSelect.tsx
+  // yg sudah ada di form Input Aftermix/Premix). Optional, sama pola dgn
+  // field lain di sini.
+  iuPlant: z.string().optional(),
   note: z.string().optional(),
   // Kosong ("" / null) = tidak diisi; string datetime-local dari form di-coerce
   // spt field tanggal lain di app ini. SENGAJA tanpa cek "tidak boleh masa depan"
@@ -154,7 +159,7 @@ tankManualInputRouter.get(
         OR: remarkOr,
       },
       orderBy: { timestamp: "desc" },
-      select: { id: true, order: true, codeTanki: true, remark: true, plannedStart: true, inputBy: true, timestamp: true },
+      select: { id: true, order: true, codeTanki: true, iuPlant: true, remark: true, plannedStart: true, inputBy: true, timestamp: true },
     });
     // Nama pemesan: akun aplikasi (User) dulu, lalu Data Karyawan; kalau tidak
     // ketemu di keduanya, frontend tampilkan NIK apa adanya.
@@ -275,6 +280,11 @@ tankManualInputRouter.post(
 
 const editBookingSchema = z.object({
   codeTanki: z.string().trim().min(1, "Code Tanki wajib diisi."),
+  // IU Plant (2026-11-17, instruksi eksplisit user: samakan format popup edit
+  // ini dgn popup "+Booking Tanki") -- sama pola dgn `note`: field bebas
+  // diedit, SELALU ditimpa dgn nilai yg dikirim (termasuk kalau dikosongkan),
+  // BUKAN "kosong = jangan ubah" spt plannedStart.
+  iuPlant: z.string().optional(),
   note: z.string().optional(),
   // Sama pola spt `bookingSchema` POST -- kosong = tidak diisi/tidak diubah.
   plannedStart: z
@@ -342,6 +352,7 @@ tankManualInputRouter.put(
       where: { id: req.params.id },
       data: {
         codeTanki: parsed.data.codeTanki,
+        iuPlant: parsed.data.iuPlant?.trim() || null,
         remark: bookingRemark(section, parsed.data.note),
         ...(parsed.data.plannedStart ? { plannedStart: parsed.data.plannedStart } : {}),
       },

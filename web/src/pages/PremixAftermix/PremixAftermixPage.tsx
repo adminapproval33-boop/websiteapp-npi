@@ -29,7 +29,7 @@ import Modal from "../../components/Modal";
 import TankChangeConfirmDialog from "../../components/TankChangeConfirmDialog";
 import { useTankChangeGuard } from "../../lib/useTankChangeGuard";
 import { ExcelBlock, ExcelRow, ExcelField } from "../../components/ExcelGrid";
-import { formatDateTime, toDateTimeLocalValue, todayDateValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
+import { formatDateTime, toDateTimeLocalValue, toExcelDateTimeString, validateNotFutureDate } from "../../lib/datetime";
 import { computeQtyPerMan } from "../../lib/qty";
 import { useResizableColWidths } from "../../lib/useResizableColWidths";
 import { handleExcelGridKeyNav } from "../../lib/excelGridNav";
@@ -447,13 +447,42 @@ export default function PremixAftermixPage({
     materialNumber: "",
     materialDescription: "",
     batch: "",
-    scheduledDate: todayDateValue(),
+    // Order Qty & Plant (2026-11-17, instruksi eksplisit user: format popup
+    // disamakan dgn BookingEditModal.tsx) -- READ-ONLY, otomatis terisi dari
+    // lookup Referensi Order/PO kalau Order-nya ketemu, kosong kalau tidak
+    // (TIDAK ikut validasi wajib, sama pola dgn BookingEditModal yg jg cuma
+    // tampilan, tidak pernah diedit manual).
+    orderQty: "",
+    plant: "",
+    // IU Plant (2026-11-17, instruksi eksplisit user) -- dropdown IU Plant
+    // 1-6, sama persis pola IuPlantSelect.tsx yg sudah ada di form Input
+    // Aftermix/Premix. TIDAK otomatis terisi dari lookup (Referensi Order/PO
+    // tidak punya data ini) -- user pilih sendiri, TIDAK ikut validasi wajib.
+    iuPlant: "",
+    scheduledDate: toDateTimeLocalValue(new Date()),
     // SEMUA field termasuk Code Tanki WAJIB diisi (2026-11-16, instruksi
     // eksplisit user: tolak Save + tampilkan warning kalau ada yg kosong --
     // revisi dari versi awal 2026-11-03 yg Code Tanki-nya opsional).
     codeTanki: "",
+    // Catatan (2026-11-17) -- OPSIONAL, sama pola dgn field "Catatan" di
+    // BookingEditModal.tsx, TIDAK ikut validasi wajib.
+    note: "",
   });
   const [manualScheduleError, setManualScheduleError] = useState("");
+  /** True kalau Order yg diketik di popup Booking Tanki TIDAK ketemu di
+   * Referensi Order/PO (SAP-COOISPI) -- 2026-11-17, instruksi eksplisit user:
+   * tampilkan pemberitahuan supaya user isi manual Material Number/Batch/
+   * Material Description, bukan cuma diam2 membiarkan field itu kosong. */
+  const [manualScheduleOrderNotFound, setManualScheduleOrderNotFound] = useState(false);
+  /** "Booked By" popup Booking Tanki -- sama persis logic bookedByLabel di
+   * BookingEditModal.tsx (nama user yg login SEKARANG, krn booking ini pasti
+   * baru dibuat, bukan diedit). */
+  const manualScheduleBookedByLabel = user
+    ? (() => {
+        const formatted = formatInputBy(employees, user.nik);
+        return formatted === user.nik ? `${user.name} (${user.nik})` : formatted;
+      })()
+    : "-";
 
   /** Validasi semua field WAJIB diisi sblm Save (2026-11-16, instruksi
    * eksplisit user) -- dicek saat klik tombol, BUKAN cuma disable tombolnya
@@ -464,7 +493,7 @@ export default function PremixAftermixPage({
     if (!f.materialNumber.trim()) return "Material Number wajib diisi.";
     if (!f.batch.trim()) return "Batch wajib diisi.";
     if (!f.materialDescription.trim()) return "Material Description wajib diisi.";
-    if (!f.scheduledDate) return "Tanggal wajib diisi.";
+    if (!f.scheduledDate) return "Rencana Mulai wajib diisi.";
     if (!f.codeTanki.trim()) return "Code Tanki wajib diisi.";
     if (!isKnownTankCode(tanks, f.codeTanki)) return "Code Tanki tidak ditemukan di Master Data Tanki. Pilih dari daftar saran.";
     return null;
@@ -485,8 +514,11 @@ export default function PremixAftermixPage({
         materialNumber: manualScheduleForm.materialNumber.trim(),
         materialDescription: manualScheduleForm.materialDescription.trim(),
         batch: manualScheduleForm.batch.trim(),
+        orderQty: manualScheduleForm.orderQty.trim() || undefined,
+        iuPlant: manualScheduleForm.iuPlant.trim() || undefined,
         codeTanki: manualScheduleForm.codeTanki.trim(),
         plannedStart: manualScheduleForm.scheduledDate,
+        note: manualScheduleForm.note.trim() || undefined,
       });
     },
     onSuccess: () => {
@@ -497,9 +529,14 @@ export default function PremixAftermixPage({
         materialNumber: "",
         materialDescription: "",
         batch: "",
-        scheduledDate: todayDateValue(),
+        orderQty: "",
+        plant: "",
+        iuPlant: "",
+        scheduledDate: toDateTimeLocalValue(new Date()),
         codeTanki: "",
+        note: "",
       });
+      setManualScheduleOrderNotFound(false);
       queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
       queryClient.invalidateQueries({ queryKey: ["tank-status"] });
     },
@@ -1765,72 +1802,145 @@ export default function PremixAftermixPage({
             setManualScheduleOpen(false);
             setManualScheduleError("");
           }}
-          width={420}
+          width={720}
         >
-          <p style={{ marginTop: 0, marginBottom: 12, fontSize: "0.78rem", color: "var(--text-muted)" }}>
-            Khusus Order yang sudah diputuskan MRP hari ini tapi belum kedapatan di Master Data COOISPI (sync cuma
-            2x/hari) -- isi manual di sini supaya tetap bisa langsung dijadwalkan ke Kalender. Begitu COOISPI sync
-            berikutnya jalan, Today-ATP Order ini otomatis ikut muncul tanpa langkah tambahan. Semua kolom di bawah
-            wajib diisi, termasuk Code Tanki -- sekalian booking tankinya, langsung kelihatan di Tank Monitoring juga.
+          {/* Format Excel-grid disamakan PERSIS dgn BookingEditModal.tsx (popup
+              Booking Tanki dari klik kartu Kalender) -- 2026-11-17, instruksi
+              eksplisit user. Beda dari situ: Order/Material Number/Material
+              Description/Batch di sini TETAP BISA DIEDIT manual (bukan
+              read-only), krn tujuan popup ini justru utk Order yg BELUM
+              kedapatan di Master Data COOISPI -- Order Qty/Plant TETAP
+              read-only (pure tampilan dari lookup), sama persis referensinya. */}
+          <ExcelBlock title={`Production & MRP Schedule » ${title}, Booking Tanki`}>
+            <ExcelRow>
+              <ExcelField label="Order">
+                <OrderLookup
+                  bare
+                  value={manualScheduleForm.order}
+                  onChange={(order) => {
+                    setManualScheduleForm((f) => ({ ...f, order }));
+                    setManualScheduleOrderNotFound(false);
+                  }}
+                  onFound={(data) => {
+                    setManualScheduleOrderNotFound(false);
+                    setManualScheduleForm((f) => ({
+                      ...f,
+                      materialNumber: data.materialNumber ?? "",
+                      batch: data.batch ?? "",
+                      materialDescription: data.materialDescription ?? "",
+                      orderQty: data.orderQty ?? "",
+                      plant: data.plant ?? "",
+                    }));
+                  }}
+                  onNotFound={() => {
+                    // Bersihkan field turunan dari lookup SEBELUMNYA supaya
+                    // tidak ada data BASI yg nempel begitu Order diganti jadi
+                    // tidak ketemu (lihat komentar onNotFound di OrderLookup.tsx).
+                    setManualScheduleOrderNotFound(true);
+                    setManualScheduleForm((f) => ({
+                      ...f,
+                      materialNumber: "",
+                      batch: "",
+                      materialDescription: "",
+                      orderQty: "",
+                      plant: "",
+                    }));
+                  }}
+                />
+              </ExcelField>
+              <ExcelField label="Material Number">
+                <input
+                  value={manualScheduleForm.materialNumber}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialNumber: e.target.value }))}
+                />
+              </ExcelField>
+              <ExcelField label="Material Description">
+                <input
+                  value={manualScheduleForm.materialDescription}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialDescription: e.target.value }))}
+                />
+              </ExcelField>
+            </ExcelRow>
+            <ExcelRow>
+              <ExcelField label="Batch">
+                <input
+                  value={manualScheduleForm.batch}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, batch: e.target.value }))}
+                />
+              </ExcelField>
+              <ExcelField label="Order Qty (KG)">
+                <input value={manualScheduleForm.orderQty} readOnly />
+              </ExcelField>
+              <ExcelField label="Plant">
+                <input value={manualScheduleForm.plant} readOnly />
+              </ExcelField>
+            </ExcelRow>
+            <ExcelRow>
+              <ExcelField label="IU Plant">
+                <IuPlantSelect
+                  bare
+                  id="manual-schedule-iu-plant"
+                  value={manualScheduleForm.iuPlant}
+                  plant={manualScheduleForm.plant}
+                  onChange={(v) => setManualScheduleForm((f) => ({ ...f, iuPlant: v }))}
+                />
+              </ExcelField>
+              <ExcelField label="Code Tanki *">
+                <TankSelect
+                  bare
+                  id="manual-schedule-tank"
+                  value={manualScheduleForm.codeTanki}
+                  onChange={(v) => setManualScheduleForm((f) => ({ ...f, codeTanki: v }))}
+                />
+              </ExcelField>
+              <ExcelField label="Rencana Mulai">
+                <input
+                  type="datetime-local"
+                  value={manualScheduleForm.scheduledDate}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, scheduledDate: e.target.value }))}
+                />
+              </ExcelField>
+            </ExcelRow>
+            <ExcelRow>
+              <ExcelField label="Booked By">
+                <input value={manualScheduleBookedByLabel} readOnly />
+              </ExcelField>
+              <ExcelField label="Catatan">
+                <input
+                  value={manualScheduleForm.note}
+                  onChange={(e) => setManualScheduleForm((f) => ({ ...f, note: e.target.value }))}
+                />
+              </ExcelField>
+            </ExcelRow>
+          </ExcelBlock>
+          {manualScheduleOrderNotFound && (
+            <div
+              style={{
+                margin: "10px 0 0",
+                fontSize: "0.78rem",
+                color: "#92400e",
+                background: "#fef3c7",
+                padding: "6px 10px",
+                borderRadius: 6,
+              }}
+            >
+              ⚠ Order ini belum ada di Referensi Order / PO (SAP-COOISPI). Isi manual Material Number, Batch, dan
+              Material Description di atas.
+            </div>
+          )}
+          <p style={{ margin: "10px 0 0", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            * Wajib diisi: Order, Material Number, Material Description, Batch, Code Tanki, Rencana Mulai. Order
+            Qty (KG)/Plant otomatis terisi dari Referensi Order/PO kalau Order-nya ketemu (kosong kalau belum); IU
+            Plant pilih sendiri (opsional); Booked By otomatis nama Anda; Catatan opsional. Tanki langsung tampil
+            "Terisi" (sumber Booking) di Tank Monitoring, dan kartu ini langsung muncul di Kalender PWO Schedule &
+            Queue sesuai Rencana Mulai.
           </p>
-          <div className="field-grid">
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label>Order</label>
-              <input
-                value={manualScheduleForm.order}
-                onChange={(e) => setManualScheduleForm((f) => ({ ...f, order: e.target.value }))}
-                placeholder="Nomor Order"
-              />
-            </div>
-            <div className="field">
-              <label>Material Number</label>
-              <input
-                value={manualScheduleForm.materialNumber}
-                onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialNumber: e.target.value }))}
-              />
-            </div>
-            <div className="field">
-              <label>Batch</label>
-              <input
-                value={manualScheduleForm.batch}
-                onChange={(e) => setManualScheduleForm((f) => ({ ...f, batch: e.target.value }))}
-              />
-            </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label>Material Description</label>
-              <input
-                value={manualScheduleForm.materialDescription}
-                onChange={(e) => setManualScheduleForm((f) => ({ ...f, materialDescription: e.target.value }))}
-              />
-            </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label>Tanggal</label>
-              <input
-                type="date"
-                value={manualScheduleForm.scheduledDate}
-                onChange={(e) => setManualScheduleForm((f) => ({ ...f, scheduledDate: e.target.value }))}
-              />
-            </div>
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <TankSelect
-                id="manual-schedule-tank"
-                label="Code Tanki"
-                required
-                value={manualScheduleForm.codeTanki}
-                onChange={(v) => setManualScheduleForm((f) => ({ ...f, codeTanki: v }))}
-              />
-            </div>
+          {manualScheduleError && <p className="error-text" style={{ margin: "8px 0 0" }}>{manualScheduleError}</p>}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <button className="btn" type="button" disabled={manualScheduleMutation.isPending} onClick={handleManualScheduleSave}>
+              {manualScheduleMutation.isPending ? "Menyimpan..." : "Simpan Perubahan"}
+            </button>
           </div>
-          {manualScheduleError && <p className="error-text">{manualScheduleError}</p>}
-          <button
-            className="btn"
-            type="button"
-            style={{ marginTop: 12 }}
-            disabled={manualScheduleMutation.isPending}
-            onClick={handleManualScheduleSave}
-          >
-            {manualScheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal + Booking Tanki"}
-          </button>
         </Modal>
       )}
 

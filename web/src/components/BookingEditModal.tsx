@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Modal from "./Modal";
 import TankSelect from "./TankSelect";
+import IuPlantSelect from "./IuPlantSelect";
 import { ExcelBlock, ExcelRow, ExcelField } from "./ExcelGrid";
 import { formatInputBy, useEmployeeOptions } from "./EmployeeNameSelect";
 import type { OrderRefData } from "./OrderLookup";
@@ -14,6 +15,7 @@ import type { ScheduleEvent } from "./WeeklyScheduleCalendar";
 interface BookingRow {
   id: string;
   codeTanki: string;
+  iuPlant: string | null;
   remark: string | null;
   plannedStart: string | null;
   inputBy: string;
@@ -85,6 +87,10 @@ export default function BookingEditModal({
   const existing = bookings?.find((b) => b.remark?.startsWith(prefix)) ?? null;
 
   const [codeTanki, setCodeTanki] = useState("");
+  // IU Plant (2026-11-17, instruksi eksplisit user: samakan format popup ini
+  // dgn popup "+Booking Tanki") -- dropdown IU Plant 1-6, sama pola dgn
+  // IuPlantSelect.tsx yg sudah ada di form Input Aftermix/Premix.
+  const [iuPlant, setIuPlant] = useState("");
   const [note, setNote] = useState("");
   const [plannedStart, setPlannedStart] = useState("");
   const [error, setError] = useState("");
@@ -103,16 +109,19 @@ export default function BookingEditModal({
   useEffect(() => {
     if (existing) {
       setCodeTanki(existing.codeTanki);
+      setIuPlant(existing.iuPlant ?? "");
       setNote(noteFromRemark(existing.remark, prefix));
       setPlannedStart(toDateTimeLocalValue(existing.plannedStart));
     } else {
       setPlannedStart(toDateTimeLocalValue(ev.scheduledDate));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [existing?.id, existing?.plannedStart, existing?.codeTanki, existing?.remark]);
+  }, [existing?.id, existing?.plannedStart, existing?.codeTanki, existing?.remark, existing?.iuPlant]);
 
   const bookedByLabel = existing
-    ? existing.inputByName ?? existing.inputBy
+    ? existing.inputByName
+      ? `${existing.inputByName} (${existing.inputBy})`
+      : existing.inputBy
     : user
       ? (() => {
           const formatted = formatInputBy(employees, user.nik);
@@ -125,6 +134,7 @@ export default function BookingEditModal({
       if (existing) {
         return api.put(`/tank-manual-input/booking/${existing.id}`, {
           codeTanki: codeTanki.trim(),
+          iuPlant: iuPlant.trim() || undefined,
           note: note.trim() || undefined,
           plannedStart: plannedStart || undefined,
           force: force || undefined,
@@ -138,6 +148,7 @@ export default function BookingEditModal({
         materialDescription: ref?.materialDescription ?? ev.materialDescription ?? undefined,
         batch: ref?.batch ?? ev.batch ?? undefined,
         orderQty: ref?.orderQty ?? undefined,
+        iuPlant: iuPlant.trim() || undefined,
         note: note.trim() || undefined,
         plannedStart: plannedStart || undefined,
         force: force || undefined,
@@ -175,7 +186,12 @@ export default function BookingEditModal({
   }
 
   return createPortal(
-    <Modal title={`Booking Tanki ${label} — Order ${ev.order}`} onClose={onClose} width={720} closeOnBackdropClick={false}>
+    <Modal
+      title={section === "PREMIX" ? `Booking Tanki - ${label}` : `Booking Tanki — ${label}`}
+      onClose={onClose}
+      width={720}
+      closeOnBackdropClick={false}
+    >
       <ExcelBlock title={`Production & MRP Schedule » ${label}, Booking Tanki`}>
         <ExcelRow>
           <ExcelField label="Order">
@@ -192,7 +208,7 @@ export default function BookingEditModal({
           <ExcelField label="Batch">
             <input value={ref?.batch ?? ev.batch ?? ""} readOnly />
           </ExcelField>
-          <ExcelField label="Order Qty">
+          <ExcelField label="Order Qty (KG)">
             <input value={ref?.orderQty ?? ""} readOnly />
           </ExcelField>
           <ExcelField label="Plant">
@@ -200,6 +216,9 @@ export default function BookingEditModal({
           </ExcelField>
         </ExcelRow>
         <ExcelRow>
+          <ExcelField label="IU Plant">
+            <IuPlantSelect bare id="pwo-booking-iu-plant" value={iuPlant} plant={ref?.plant ?? ""} onChange={setIuPlant} disabled={readOnly} />
+          </ExcelField>
           <ExcelField label="Code Tanki *">
             <TankSelect bare id="pwo-booking-tank" value={codeTanki} onChange={setCodeTanki} disabled={readOnly} />
           </ExcelField>
@@ -211,11 +230,11 @@ export default function BookingEditModal({
               disabled={readOnly}
             />
           </ExcelField>
+        </ExcelRow>
+        <ExcelRow>
           <ExcelField label="Booked By">
             <input value={bookedByLabel} readOnly />
           </ExcelField>
-        </ExcelRow>
-        <ExcelRow>
           <ExcelField label="Catatan">
             <input value={note} onChange={(e) => setNote(e.target.value)} disabled={readOnly} />
           </ExcelField>

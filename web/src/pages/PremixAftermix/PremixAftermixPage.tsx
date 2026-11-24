@@ -594,7 +594,16 @@ export default function PremixAftermixPage({
 
   const deleteScheduleMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/premix-aftermix/pwo-schedule/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pwo-schedule", section] });
+      // Tombol ✕ sekarang ikut menghapus booking tanki Order ini di backend
+      // (2026-11-24, instruksi eksplisit user, lihat komentar DELETE
+      // /pwo-schedule/:id) -- query ini jg harus ikut diinvalidate spy Tank
+      // Monitoring/Code Tanki filter langsung update tanpa reload manual,
+      // sama pola dgn bugfix tank-booking-list-all lain di file ini.
+      queryClient.invalidateQueries({ queryKey: ["tank-booking-list-all", section] });
+      queryClient.invalidateQueries({ queryKey: ["tank-status"] });
+    },
   });
 
   // Reorder dalam 1 hari (tombol ▲▼ di WeeklyScheduleCalendar, 2026-08-05) --

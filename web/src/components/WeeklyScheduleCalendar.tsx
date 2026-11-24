@@ -332,7 +332,7 @@ function EventCard({
         {onDelete && (
           <button
             type="button"
-            title="Hapus jadwal"
+            title="Batalkan jadwal & booking tanki Order ini"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => onDelete(ev.id)}
             style={{ border: "none", background: "none", cursor: "pointer", color: color.text, fontSize: "0.7rem", lineHeight: 1, padding: 0, flex: "0 0 auto" }}
@@ -440,11 +440,17 @@ function OverdueCard({
   onToggleSelect: (dragId: string, e: ReactMouseEvent) => void;
   onOpenBooking: (ev: ScheduleEvent) => void;
   /** Tombol "✕" (2026-11-03, instruksi eksplisit user) -- hapus jadwalnya
-   * (baris PwoSchedule) sama spt tombol ✕ EventCard biasa. Order-nya BUKAN
-   * hilang dari sistem, cuma kembali "belum dijadwalkan" -- otomatis muncul
-   * lagi di strip "List Antrian" (lihat `scheduledOrders`, dibangun dari
-   * data PwoSchedule yg sama, jadi otomatis sinkron begitu baris ini
-   * terhapus). */
+   * (baris PwoSchedule). Order-nya BUKAN hilang dari sistem, cuma kembali
+   * "belum dijadwalkan" -- otomatis muncul lagi di strip "List Antrian"
+   * (lihat `scheduledOrders`, dibangun dari data PwoSchedule yg sama, jadi
+   * otomatis sinkron begitu baris ini terhapus).
+   *
+   * UPDATE 2026-11-24 (instruksi eksplisit user, laporan nyata Order
+   * 1030063234): tombol ini SEKARANG jg menghapus booking tanki aktif Order
+   * ini sekaligus (lihat backend DELETE /pwo-schedule/:id) -- sebelumnya
+   * booking tanki (TankManualInput) tetap nyangkut walau jadwalnya sudah
+   * dihapus, bikin Tank Monitoring tetap tampil "Terisi"/"Booking" & Tim MRP
+   * tidak bisa booking ulang tanki itu utk Order lain. */
   onDelete?: (id: string) => void;
 }) {
   const dragId = buildEventDragId(ev.id);
@@ -487,7 +493,7 @@ function OverdueCard({
         {onDelete && (
           <button
             type="button"
-            title="Hapus jadwal (kembali ke List Antrian)"
+            title="Batalkan jadwal & booking tanki Order ini (kembali ke List Antrian)"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();

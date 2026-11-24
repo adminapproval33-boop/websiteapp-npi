@@ -877,6 +877,17 @@ premixAftermixRouter.delete(
     if (!existing) throw new HttpError(404, "Jadwal tidak ditemukan.");
     if (!checkSectionMenuInput(req, res, existing.section)) return;
     await prisma.pwoSchedule.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: "Jadwal berhasil dihapus." });
+    // Ikut hapus booking tanki aktif Order ini di section yg sama (2026-11-24,
+    // instruksi eksplisit user -- laporan nyata Order 1030063234: tombol ✕
+    // SEBELUMNYA cuma menghapus jadwal Kalender, booking tanki aslinya
+    // (TankManualInput) tetap nyangkut -- Tank Monitoring tetap tampil
+    // "Terisi"/"Booking" & Tim MRP jadi tidak bisa booking ulang tanki itu
+    // utk Order lain. Sekarang tombol ✕ = batalkan total (jadwal + booking
+    // sekaligus), sama efeknya dgn tombol "Batalkan" di Material Flow Panel.
+    const prefix = existing.section === "PREMIX" ? "Booking Premix" : "Booking Aftermix";
+    await prisma.tankManualInput.deleteMany({
+      where: { order: existing.order, remark: { startsWith: prefix } },
+    });
+    res.json({ success: true, message: "Jadwal & booking tanki berhasil dihapus." });
   })
 );
